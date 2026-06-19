@@ -1,10 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches:
-      - main
-      - "spike/**"
   pull_request:
 
 permissions:
@@ -14,8 +10,10 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Check out pull request head branch
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
 
       - name: Install Rust toolchain
         run: rustup show
@@ -51,6 +49,11 @@ jobs:
               1,
           )
           text = text.replace(
+              "                    timestamp: timestamp.clone(),",
+              "                    timestamp,",
+              1,
+          )
+          text = text.replace(
               "            state.results_returned = state.results_returned.saturating_add(results.len());\n",
               "            state.results_returned = state\n                .results_returned\n                .saturating_add(results.len().saturating_sub(accepted_before));\n",
               1,
@@ -67,8 +70,7 @@ jobs:
           PY
           cargo fmt --all
 
-      - name: Restore strict workflow and commit repairs
-        if: github.event_name == 'push'
+      - name: Restore strict CI and commit repairs
         shell: bash
         run: |
           cat > .github/workflows/ci.yml <<'YAML'
@@ -103,43 +105,14 @@ jobs:
                 - name: Run tests
                   run: cargo test --all-targets --all-features
           YAML
-          if ! git diff --quiet -- src .github/workflows/ci.yml; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src .github/workflows/ci.yml
-            git commit -m "fix: compile integrated query engine and restore strict CI"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src .github/workflows/ci.yml
+          git commit -m "fix: compile integrated query engine and restore strict CI"
+          git push origin "HEAD:${GITHUB_HEAD_REF}"
 
-      - name: Run Clippy and capture diagnostics
-        id: clippy
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          cargo clippy --all-targets --all-features -- -D warnings 2>&1 | tee clippy.log
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Run tests and capture diagnostics
-        id: tests
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          cargo test --all-targets --all-features 2>&1 | tee tests.log
-
-      - name: Upload integrated query diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: integrated-query-diagnostics
-          path: |
-            clippy.log
-            tests.log
-          if-no-files-found: warn
-
-      - name: Enforce validation result
-        if: always()
-        shell: bash
-        run: |
-          test "${{ steps.clippy.outcome }}" = "success"
-          test "${{ steps.tests.outcome }}" = "success"
+      - name: Run tests
+        run: cargo test --all-targets --all-features
