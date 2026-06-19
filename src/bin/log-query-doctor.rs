@@ -221,7 +221,8 @@ fn run_checks(arguments: &Arguments) -> DoctorReport {
         }),
     }
 
-    let bind_text = env::var("LOG_QUERY_MCP_BIND").unwrap_or_else(|_| DEFAULT_BIND_ADDRESS.to_owned());
+    let bind_text =
+        env::var("LOG_QUERY_MCP_BIND").unwrap_or_else(|_| DEFAULT_BIND_ADDRESS.to_owned());
     let bind_address = match bind_text.parse::<SocketAddr>() {
         Ok(address) if address.ip().is_loopback() => {
             checks.push(CheckResult {
@@ -336,7 +337,8 @@ fn run_checks(arguments: &Arguments) -> DoctorReport {
             Ok(_) => checks.push(CheckResult {
                 name: "query_service_initialization",
                 status: CheckStatus::Pass,
-                detail: "query executor, match reference store, and cursor store initialized".to_owned(),
+                detail: "query executor, match reference store, and cursor store initialized"
+                    .to_owned(),
             }),
             Err(error) => checks.push(CheckResult {
                 name: "query_service_initialization",
@@ -348,13 +350,12 @@ fn run_checks(arguments: &Arguments) -> DoctorReport {
         checks.push(CheckResult {
             name: "query_service_initialization",
             status: CheckStatus::Fail,
-            detail: "query service was not initialized because an earlier required check failed".to_owned(),
+            detail: "query service was not initialized because an earlier required check failed"
+                .to_owned(),
         });
     }
 
-    let ok = checks
-        .iter()
-        .all(|check| check.status != CheckStatus::Fail);
+    let ok = checks.iter().all(|check| check.status != CheckStatus::Fail);
     DoctorReport {
         ok,
         version: env!("CARGO_PKG_VERSION"),
@@ -385,8 +386,7 @@ fn parse_kernel_release(release: &str) -> Option<(u32, u32)> {
 }
 
 const fn kernel_is_supported(major: u32, minor: u32) -> bool {
-    major > MINIMUM_KERNEL_MAJOR
-        || (major == MINIMUM_KERNEL_MAJOR && minor >= MINIMUM_KERNEL_MINOR)
+    major > MINIMUM_KERNEL_MAJOR || (major == MINIMUM_KERNEL_MAJOR && minor >= MINIMUM_KERNEL_MINOR)
 }
 
 fn read_effective_uid() -> Result<u32, String> {
@@ -396,7 +396,9 @@ fn read_effective_uid() -> Result<u32, String> {
         .find_map(|line| line.strip_prefix("Uid:"))
         .ok_or_else(|| "Uid field is absent".to_owned())?;
     let mut values = uid_line.split_whitespace();
-    let _real = values.next().ok_or_else(|| "real UID is absent".to_owned())?;
+    let _real = values
+        .next()
+        .ok_or_else(|| "real UID is absent".to_owned())?;
     values
         .next()
         .ok_or_else(|| "effective UID is absent".to_owned())?
@@ -432,11 +434,11 @@ mod tests {
     fn limit_report_preserves_runtime_values() {
         let limits = QueryServiceLimits::default();
         let report = LimitsReport::from(limits);
-        assert_eq!(report.max_scan_bytes_per_page, limits.max_scan_bytes_per_page);
-        assert_eq!(report.max_concurrent_scans, limits.max_concurrent_scans);
         assert_eq!(
-            report.context_max_line_bytes,
-            limits.context.max_line_bytes
+            report.max_scan_bytes_per_page,
+            limits.max_scan_bytes_per_page
         );
+        assert_eq!(report.max_concurrent_scans, limits.max_concurrent_scans);
+        assert_eq!(report.context_max_line_bytes, limits.context.max_line_bytes);
     }
 }
