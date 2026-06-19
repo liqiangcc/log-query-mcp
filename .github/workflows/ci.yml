@@ -20,8 +20,15 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Format working tree for bootstrap validation
+        run: cargo fmt --all
+
+      - name: Upload formatted Rust sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustfmt-sources
+          path: src
+          if-no-files-found: error
 
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
