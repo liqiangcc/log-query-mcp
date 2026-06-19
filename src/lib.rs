@@ -13,6 +13,10 @@ mod cursor_reader;
 #[cfg(target_os = "linux")]
 mod match_reference;
 #[cfg(target_os = "linux")]
+mod query_engine;
+#[cfg(target_os = "linux")]
+mod runtime_config;
+#[cfg(target_os = "linux")]
 mod safe_fs;
 #[cfg(target_os = "linux")]
 mod search_cursor;
@@ -44,6 +48,13 @@ pub use cursor_reader::{
 pub use match_reference::{
     MatchReferenceData, MatchReferenceError, MatchReferenceFileError, MatchReferenceStore,
     open_referenced_file,
+};
+#[cfg(target_os = "linux")]
+pub use query_engine::{QueryError, QueryService, QueryServiceLimits};
+#[cfg(target_os = "linux")]
+pub use runtime_config::{
+    ConfiguredLogSource, LogSourceConfig, MAX_CONFIGURED_SOURCES, RuntimeConfigError, ServiceConfig,
+    SourceRegistry, TimestampRuleConfig,
 };
 #[cfg(target_os = "linux")]
 pub use safe_fs::{FileIdentity, SafeFile, SafeOpenError, SafeRoot};
