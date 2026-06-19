@@ -1,6 +1,6 @@
-# R-01 至 R-08 技术预研 POC
+# R-01 至 R-09 技术预研 POC
 
-本 POC 用于验证 Rust 工程基线、官方 `rmcp` tools-only Server、MCP 工具 Schema、Linux 安全文件访问、有界日志扫描、阻塞任务控制、短期不透明匹配引用，以及服务端有状态分页游标。
+本 POC 用于验证 Rust 工程基线、官方 `rmcp` tools-only Server、MCP 工具 Schema、Linux 安全文件访问、有界日志扫描、阻塞任务控制、短期不透明匹配引用、服务端有状态分页游标，以及时间范围与轮转日志排序。
 
 ## 已实现
 
@@ -34,9 +34,18 @@
 - 不可预测的服务端有状态搜索游标。
 - 游标绑定来源、关键字、大小写、时间范围、排序和分页大小。
 - 游标保存候选文件快照、设备号、inode、当前文件索引和继续字节偏移。
-- 游标 TTL、容量上限、最旧项淘汰和服务重启失效。
+- 游标 TTL、容量上限、单次消费租约、最旧项淘汰和服务重启失效。
 - 游标原子推进，旧 token 在成功产生下一页后失效。
-- 文件被替换或截断到继续偏移之前时拒绝续查。
+- 文件被替换或截断到快照大小以下时拒绝续查。
+- 分页续查偏移必须位于日志行边界。
+- 快照 Reader 强制在 `file_size_at_snapshot` 处结束，不读取新增日志。
+- RFC 3339 和自定义固定前缀日志时间戳规则。
+- 多行异常堆栈继承所属事件时间。
+- 畸形事件时间清空继承状态。
+- 开始包含、结束排除的时间区间。
+- 轮转文件名时间提示。
+- 当前日志和轮转日志统一时间线排序。
+- 多服务结果稳定时间排序，无时间结果位于最后。
 
 ## 运行 Streamable HTTP
 
@@ -80,7 +89,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 ```
 
-R-01 至 R-08 当前代码已通过上述严格 CI。
+R-01 至 R-09 当前代码已通过上述严格 CI。
 
 ## 当前边界
 
@@ -89,12 +98,12 @@ R-01 至 R-08 当前代码已通过上述严格 CI。
 - MCP 三个工具仍使用内存模拟记录，尚未接入真实 `SafeRoot + ScanExecutor + MatchReferenceStore + SearchCursorStore` 查询链路。
 - `SafeRoot` 只验证已知相对路径的安全打开，尚未实现目录发现和管理员文件名规则。
 - 扫描器只负责单个 `Read`，尚未实现多文件和多日志来源编排。
-- 扫描器尚未实现从游标指定字节偏移和行号继续。
+- 时间解析原语尚未集成到流式搜索结果。
+- 客户端时间参数尚未在 MCP 运行时执行 RFC 3339 校验。
 - 返回内容合计限制不等于完整 MCP JSON 响应大小限制。
 - 尚未验证客户端断开能否从 `rmcp` / Axum 传递到扫描 `CancellationToken`。
 - 上下文读取尚未接入取消和 deadline。
 - 尚未执行 1 GiB、10 GiB 和大量小文件性能基准。
-- 时间字段已进入 Schema，但尚未执行时间过滤。
 - `match_ref` 和游标 Store 尚未成为 MCP Server 的共享状态。
 - 首期引用和游标均为单实例内存状态，服务重启后失效。
 - `openat2()` 方案要求 Linux kernel 5.6 及以上。
@@ -109,5 +118,6 @@ R-01 至 R-08 当前代码已通过上述严格 CI。
 - [阻塞扫描执行器预研](../docs/EXECUTOR_RESEARCH.md)
 - [安全 match_ref 与上下文读取预研](../docs/MATCH_REFERENCE_RESEARCH.md)
 - [分页游标预研](../docs/SEARCH_CURSOR_RESEARCH.md)
+- [时间范围与轮转排序预研](../docs/TIME_FILTER_RESEARCH.md)
 
-下一阶段进入 R-09：验证日志时间戳配置、时间范围过滤、跨服务排序，以及日志轮转文件的候选顺序语义。
+下一阶段进入真实工具链路集成：配置受控日志来源，发现候选文件，将 `search_logs` 接入安全打开、有界扫描、时间过滤、`match_ref` 和分页游标，并将 `get_log_context` 接入引用存储与受控上下文读取。
