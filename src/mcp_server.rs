@@ -7,14 +7,11 @@ use rmcp::{
 };
 
 use crate::{
-    ContextLine, GetLogContextRequest, GetLogContextResponse, ListLogSourcesResponse, LogMatch,
-    LogSource, ResultOrder, SearchLogsRequest, SearchLogsResponse,
+    ContextLine, DEFAULT_MAX_RESULTS, GetLogContextRequest, GetLogContextResponse,
+    ListLogSourcesResponse, LogMatch, LogSource, MAX_CONTEXT_LINES_PER_SIDE, MAX_KEYWORD_CHARS,
+    MAX_REFERENCE_CHARS, MAX_RESULTS, MAX_SOURCE_ID_CHARS, MAX_SOURCES, ResultOrder,
+    SearchLogsRequest, SearchLogsResponse,
 };
-
-const MAX_SOURCES: usize = 10;
-const MAX_KEYWORD_CHARS: usize = 256;
-const MAX_RESULTS: usize = 200;
-const MAX_CONTEXT_LINES_PER_SIDE: usize = 50;
 
 #[derive(Debug, Clone, Copy)]
 struct MockRecord {
@@ -82,7 +79,7 @@ impl LogQueryServer {
 
     #[tool(
         name = "list_log_sources",
-        description = "List configured log sources. Server file-system paths are never returned."
+        description = "List configured log sources. Use source_id values from this result in search_logs. Server file-system paths are never returned."
     )]
     pub async fn list_log_sources(&self) -> Json<ListLogSourcesResponse> {
         Json(Self::list_sources_response())
@@ -90,7 +87,7 @@ impl LogQueryServer {
 
     #[tool(
         name = "search_logs",
-        description = "Search one or more configured log sources using a literal UTF-8 substring. Paths, regexes and shell expressions are not accepted."
+        description = "Search one to ten configured log sources using a literal UTF-8 substring. Use source_id values from list_log_sources. Paths, regexes, globs and shell expressions are not accepted."
     )]
     pub async fn search_logs(
         &self,
@@ -101,7 +98,7 @@ impl LogQueryServer {
 
     #[tool(
         name = "get_log_context",
-        description = "Read a limited number of lines around a prior search result using its opaque match_ref. Arbitrary file paths and line numbers are not accepted."
+        description = "Read up to fifty lines on each side of a prior search result using its opaque match_ref. Arbitrary file paths and line numbers are not accepted."
     )]
     pub async fn get_log_context(
         &self,
@@ -142,9 +139,7 @@ impl LogQueryServer {
 
         let selected_sources: HashSet<&str> =
             request.source_ids.iter().map(String::as_str).collect();
-        let case_sensitive = request.case_sensitive.unwrap_or(false);
-        let max_results = request.max_results.unwrap_or(50);
-        let keyword = if case_sensitive {
+        let keyword = if request.case_sensitive {
             request.keyword.clone()
         } else {
             request.keyword.to_lowercase()
@@ -154,7 +149,7 @@ impl LogQueryServer {
             .iter()
             .filter(|record| selected_sources.contains(record.source_id))
             .filter(|record| {
-                if case_sensitive {
+                if request.case_sensitive {
                     record.content.contains(&keyword)
                 } else {
                     record.content.to_lowercase().contains(&keyword)
@@ -173,12 +168,12 @@ impl LogQueryServer {
             .collect();
 
         matches.sort_by(|left, right| left.timestamp.cmp(&right.timestamp));
-        if matches!(request.order, Some(ResultOrder::NewestFirst)) {
+        if matches!(request.order, ResultOrder::NewestFirst) {
             matches.reverse();
         }
 
-        let truncated = matches.len() > max_results;
-        matches.truncate(max_results);
+        let truncated = matches.len() > request.max_results;
+        matches.truncate(request.max_results);
 
         Ok(SearchLogsResponse {
             results: matches,
@@ -196,6 +191,16 @@ impl LogQueryServer {
                 "source_ids cannot contain more than {MAX_SOURCES} entries"
             ));
         }
+        if let Some(source_id) = request
+            .source_ids
+            .iter()
+            .find(|source_id| source_id.is_empty() || source_id.chars().count() > MAX_SOURCE_ID_CHARS)
+        {
+            return Err(format!(
+                "invalid source_id length: {} characters",
+                source_id.chars().count()
+            ));
+        }
         if request.keyword.is_empty() {
             return Err("keyword must not be empty".to_owned());
         }
@@ -204,9 +209,17 @@ impl LogQueryServer {
                 "keyword cannot contain more than {MAX_KEYWORD_CHARS} characters"
             ));
         }
-        let max_results = request.max_results.unwrap_or(50);
-        if max_results == 0 || max_results > MAX_RESULTS {
+        if request.max_results == 0 || request.max_results > MAX_RESULTS {
             return Err(format!("max_results must be between 1 and {MAX_RESULTS}"));
+        }
+        if request
+            .cursor
+            .as_ref()
+            .is_some_and(|cursor| cursor.is_empty() || cursor.chars().count() > MAX_REFERENCE_CHARS)
+        {
+            return Err(format!(
+                "cursor must contain between 1 and {MAX_REFERENCE_CHARS} characters"
+            ));
         }
 
         let known_sources: HashSet<String> = Self::list_sources_response()
@@ -226,6 +239,11 @@ impl LogQueryServer {
     }
 
     fn context_response(request: GetLogContextRequest) -> Result<GetLogContextResponse, String> {
+        if request.match_ref.is_empty() || request.match_ref.chars().count() > MAX_REFERENCE_CHARS {
+            return Err(format!(
+                "match_ref must contain between 1 and {MAX_REFERENCE_CHARS} characters"
+            ));
+        }
         if request.before_lines > MAX_CONTEXT_LINES_PER_SIDE
             || request.after_lines > MAX_CONTEXT_LINES_PER_SIDE
         {
@@ -294,11 +312,11 @@ mod tests {
         SearchLogsRequest {
             source_ids: vec!["payment-test".to_owned(), "order-test".to_owned()],
             keyword: keyword.to_owned(),
-            case_sensitive: None,
+            case_sensitive: false,
             start_time: None,
             end_time: None,
-            order: None,
-            max_results: None,
+            order: ResultOrder::OldestFirst,
+            max_results: DEFAULT_MAX_RESULTS,
             cursor: None,
         }
     }
@@ -325,6 +343,17 @@ mod tests {
         let error = LogQueryServer::search_response(search_request)
             .expect_err("unknown source should fail");
         assert!(error.contains("unknown log source"));
+    }
+
+    #[test]
+    fn enforces_result_limit() {
+        let mut search_request = request("traceId=");
+        search_request.max_results = 1;
+        let response = LogQueryServer::search_response(search_request)
+            .expect("limited search should succeed");
+
+        assert_eq!(response.results.len(), 1);
+        assert!(response.truncated);
     }
 
     #[test]
