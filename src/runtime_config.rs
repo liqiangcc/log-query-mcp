@@ -16,6 +16,9 @@ use crate::{
 
 pub const MAX_CONFIGURED_SOURCES: usize = 100;
 
+/// Programmatic configuration used by tests and embedders. Directory rules
+/// are accepted by the JSON file format and converted before registry loading,
+/// which keeps existing Rust struct literals backwards compatible.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServiceConfig {
@@ -36,11 +39,7 @@ pub struct LogSourceConfig {
     /// Trusted administrator configuration. This path is never exposed through MCP.
     pub root: PathBuf,
     /// Explicit normalized paths relative to `root`.
-    #[serde(default)]
     pub files: Vec<PathBuf>,
-    /// Bounded directory discovery rules relative to `root`.
-    #[serde(default)]
-    pub directories: Vec<DirectorySourceConfig>,
     pub timestamp_rule: Option<TimestampRuleConfig>,
 }
 
@@ -62,6 +61,51 @@ impl DirectorySourceConfig {
             self.recursive,
             self.include_suffixes.clone(),
         )?)
+    }
+}
+
+/// JSON configuration accepts directory rules in addition to explicit files.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonServiceConfig {
+    sources: Vec<JsonLogSourceConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JsonLogSourceConfig {
+    source_id: String,
+    name: String,
+    #[serde(default)]
+    description: String,
+    service: String,
+    environment: String,
+    #[serde(default)]
+    tags: Vec<String>,
+    root: PathBuf,
+    #[serde(default)]
+    files: Vec<PathBuf>,
+    #[serde(default)]
+    directories: Vec<DirectorySourceConfig>,
+    timestamp_rule: Option<TimestampRuleConfig>,
+}
+
+impl JsonLogSourceConfig {
+    fn split(self) -> (LogSourceConfig, Vec<DirectorySourceConfig>) {
+        (
+            LogSourceConfig {
+                source_id: self.source_id,
+                name: self.name,
+                description: self.description,
+                service: self.service,
+                environment: self.environment,
+                tags: self.tags,
+                root: self.root,
+                files: self.files,
+                timestamp_rule: self.timestamp_rule,
+            },
+            self.directories,
+        )
     }
 }
 
@@ -144,28 +188,49 @@ impl SourceRegistry {
     pub fn from_config_path(path: impl AsRef<Path>) -> Result<Self, RuntimeConfigError> {
         let path = path.as_ref();
         let content = fs::read_to_string(path).map_err(RuntimeConfigError::ReadConfig)?;
-        let config: ServiceConfig =
+        let config: JsonServiceConfig =
             serde_json::from_str(&content).map_err(RuntimeConfigError::ParseConfig)?;
         let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
-        Self::from_config(config, base_dir)
+        Self::from_entries(
+            config
+                .sources
+                .into_iter()
+                .map(JsonLogSourceConfig::split)
+                .collect(),
+            base_dir,
+        )
     }
 
     pub fn from_config(
         config: ServiceConfig,
         base_dir: impl AsRef<Path>,
     ) -> Result<Self, RuntimeConfigError> {
-        if config.sources.is_empty() || config.sources.len() > MAX_CONFIGURED_SOURCES {
+        Self::from_entries(
+            config
+                .sources
+                .into_iter()
+                .map(|source| (source, Vec::new()))
+                .collect(),
+            base_dir,
+        )
+    }
+
+    fn from_entries(
+        entries: Vec<(LogSourceConfig, Vec<DirectorySourceConfig>)>,
+        base_dir: impl AsRef<Path>,
+    ) -> Result<Self, RuntimeConfigError> {
+        if entries.is_empty() || entries.len() > MAX_CONFIGURED_SOURCES {
             return Err(RuntimeConfigError::InvalidConfig(
                 "configured source count is outside the service limit",
             ));
         }
 
         let base_dir = base_dir.as_ref();
-        let mut source_ids = HashSet::with_capacity(config.sources.len());
-        let mut sources = Vec::with_capacity(config.sources.len());
-        let mut by_id = HashMap::with_capacity(config.sources.len());
+        let mut source_ids = HashSet::with_capacity(entries.len());
+        let mut sources = Vec::with_capacity(entries.len());
+        let mut by_id = HashMap::with_capacity(entries.len());
 
-        for source in config.sources {
+        for (source, directories) in entries {
             validate_source_id(&source.source_id)?;
             if !source_ids.insert(source.source_id.clone()) {
                 return Err(RuntimeConfigError::DuplicateSourceId(source.source_id));
@@ -176,13 +241,13 @@ impl SourceRegistry {
                     "source name, service and environment must not be empty",
                 ));
             }
-            if source.files.is_empty() && source.directories.is_empty() {
+            if source.files.is_empty() && directories.is_empty() {
                 return Err(RuntimeConfigError::InvalidConfig(
                     "source must configure at least one file or directory",
                 ));
             }
             if source.files.len() > MAX_CURSOR_CANDIDATE_FILES
-                || source.directories.len() > MAX_DIRECTORY_RULES_PER_SOURCE
+                || directories.len() > MAX_DIRECTORY_RULES_PER_SOURCE
             {
                 return Err(RuntimeConfigError::InvalidConfig(
                     "source file or directory rule count is outside the service limit",
@@ -209,9 +274,8 @@ impl SourceRegistry {
                 files.push(relative_path.clone());
             }
 
-            if !source.directories.is_empty() {
-                let rules = source
-                    .directories
+            if !directories.is_empty() {
+                let rules = directories
                     .iter()
                     .map(DirectorySourceConfig::build)
                     .collect::<Result<Vec<_>, RuntimeConfigError>>()?;
@@ -364,7 +428,6 @@ mod tests {
             tags: vec!["java".to_owned()],
             root,
             files: vec![PathBuf::from("application.log")],
-            directories: Vec::new(),
             timestamp_rule: Some(TimestampRuleConfig::Rfc3339 { prefix_bytes: 64 }),
         }
     }
@@ -410,17 +473,18 @@ mod tests {
         )
         .expect("symlink should be created");
 
-        let mut config = source(directory.path().to_path_buf());
-        config.files.clear();
-        config.directories = vec![DirectorySourceConfig {
-            path: PathBuf::from("logs"),
-            recursive: true,
-            include_suffixes: vec![".log".to_owned(), ".log.1".to_owned()],
-        }];
-        let registry = SourceRegistry::from_config(
-            ServiceConfig {
-                sources: vec![config],
-            },
+        let registry = SourceRegistry::from_entries(
+            vec![(
+                LogSourceConfig {
+                    files: Vec::new(),
+                    ..source(directory.path().to_path_buf())
+                },
+                vec![DirectorySourceConfig {
+                    path: PathBuf::from("logs"),
+                    recursive: true,
+                    include_suffixes: vec![".log".to_owned(), ".log.1".to_owned()],
+                }],
+            )],
             ".",
         )
         .expect("directory source should load");
