@@ -1,6 +1,6 @@
 # R-07 安全 match_ref 与受控上下文读取预研
 
-> 状态：自动化验证中  
+> 状态：核心 POC 已通过严格 CI  
 > 实现：`src/match_reference.rs`、`src/context_reader.rs`
 
 ## 1. 目标
@@ -148,6 +148,14 @@ expires_at
 - 超长上下文行被截断，不发生无界内存增长。
 - 不合法上下文限制被拒绝。
 
+严格 CI 已通过：
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-targets --all-features
+```
+
 ## 8. 安全结论
 
 当前方案不会向客户端开放：
@@ -163,7 +171,7 @@ expires_at
 
 R-07 当前结论为 **CONDITIONAL GO**。
 
-核心方案已经具备：
+核心方案已经具备并通过自动化验证：
 
 - 不可预测 token。
 - TTL 和容量限制。
@@ -174,7 +182,6 @@ R-07 当前结论为 **CONDITIONAL GO**。
 
 仍需完成：
 
-- 通过严格 rustfmt、Clippy 和单元测试 CI。
 - 将 Store 作为 MCP Server 的共享状态。
 - 将真实 `search_logs` 结果转换为 `match_ref`。
 - 将真实 `get_log_context` 接入引用解析和有界读取。
