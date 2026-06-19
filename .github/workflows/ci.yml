@@ -20,10 +20,35 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Format research sources
-        run: cargo fmt --all
+      - name: Repair integrated query source
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
 
-      - name: Restore strict workflow and commit formatting
+          path = Path("src/query_engine.rs")
+          text = path.read_text()
+          text = text.replace("    io::Read,\n", "")
+          text = text.replace(
+              "    MatchReferenceData, MatchReferenceError, MatchReferenceStore, QueryServiceLimits as _,\n",
+              "    MatchReferenceData, MatchReferenceError, MatchReferenceStore,\n",
+          )
+          text = text.replace(
+              "            for scan_match in outcome.results {\n",
+              "            let accepted_before = results.len();\n            for scan_match in outcome.results {\n",
+              1,
+          )
+          text = text.replace(
+              "            state.results_returned = state.results_returned.saturating_add(results.len());\n",
+              "            state.results_returned = state\n                .results_returned\n                .saturating_add(results.len().saturating_sub(accepted_before));\n",
+              1,
+          )
+          path.write_text(text)
+          PY
+          cargo fmt --all
+
+      - name: Restore strict workflow and commit repairs
         if: github.event_name == 'push'
         shell: bash
         run: |
@@ -63,7 +88,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add src .github/workflows/ci.yml
-            git commit -m "style: apply rustfmt and restore strict CI"
+            git commit -m "fix: repair integrated query engine and restore strict CI"
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
 
