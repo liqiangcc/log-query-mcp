@@ -221,8 +221,7 @@ mod tests {
             let executor = executor.clone();
             let first_started = first_started.clone();
             let first_cancellation_for_reader = first_cancellation.clone();
-            let request = ScanRequest::new("never")
-                .with_cancellation(first_cancellation.clone());
+            let request = ScanRequest::new("never").with_cancellation(first_cancellation.clone());
             tokio::spawn(async move {
                 executor
                     .scan(
@@ -242,8 +241,7 @@ mod tests {
         let second_task = {
             let executor = executor.clone();
             let second_reads = second_reads.clone();
-            let request = ScanRequest::new("MATCH")
-                .with_cancellation(second_cancellation.clone());
+            let request = ScanRequest::new("MATCH").with_cancellation(second_cancellation.clone());
             tokio::spawn(async move {
                 executor
                     .scan(
@@ -283,8 +281,7 @@ mod tests {
             let executor = executor.clone();
             let first_started = first_started.clone();
             let first_cancellation_for_reader = first_cancellation.clone();
-            let request = ScanRequest::new("never")
-                .with_cancellation(first_cancellation.clone());
+            let request = ScanRequest::new("never").with_cancellation(first_cancellation.clone());
             tokio::spawn(async move {
                 executor
                     .scan(
@@ -300,8 +297,8 @@ mod tests {
         wait_until_true(&first_started).await;
 
         let second_reads = Arc::new(AtomicUsize::new(0));
-        let request = ScanRequest::new("MATCH")
-            .with_deadline(Instant::now() + Duration::from_millis(30));
+        let request =
+            ScanRequest::new("MATCH").with_deadline(Instant::now() + Duration::from_millis(30));
         let outcome = timeout(
             Duration::from_millis(500),
             executor.scan(
@@ -356,10 +353,7 @@ mod tests {
 
         let outcome = timeout(
             Duration::from_secs(1),
-            executor.scan(
-                Cursor::new(b"MATCH\n".to_vec()),
-                ScanRequest::new("MATCH"),
-            ),
+            executor.scan(Cursor::new(b"MATCH\n".to_vec()), ScanRequest::new("MATCH")),
         )
         .await
         .expect("permit should be released after cooperative cancellation")
