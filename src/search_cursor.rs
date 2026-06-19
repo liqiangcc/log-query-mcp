@@ -1,7 +1,8 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    os::unix::ffi::OsStrExt,
     path::{Component, Path, PathBuf},
-    sync::{Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
     time::{Duration, Instant},
 };
 
@@ -15,13 +16,14 @@ use crate::{
 
 const SEARCH_CURSOR_PREFIX: &str = "cur_";
 const SEARCH_CURSOR_LENGTH: usize = SEARCH_CURSOR_PREFIX.len() + 32;
-pub const MAX_CURSOR_CANDIDATE_FILES: usize = 10_000;
+pub const MAX_CURSOR_CANDIDATE_FILES: usize = 500;
+const MAX_RELATIVE_PATH_BYTES: usize = 4096;
+const MAX_TIME_BOUND_CHARS: usize = 64;
 
 /// Query parameters bound to a pagination cursor.
 ///
-/// The cursor store compares this value before returning continuation state, so
-/// a token cannot be reused with a different source list, keyword, time range,
-/// result order or page size.
+/// The client-visible `cursor` field is deliberately excluded. A continuation
+/// request must otherwise reproduce the original search conditions exactly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchCursorQuery {
     pub source_ids: Vec<String>,
@@ -80,16 +82,13 @@ impl SearchCursorQuery {
                 "keyword is not a valid literal log search term",
             ));
         }
-
         if self.max_results == 0 || self.max_results > MAX_RESULTS {
             return Err(SearchCursorError::InvalidData(
                 "max_results is outside the server limit",
             ));
         }
-
         validate_time_bound(self.start_time.as_deref())?;
         validate_time_bound(self.end_time.as_deref())?;
-
         Ok(())
     }
 }
@@ -109,12 +108,19 @@ impl CursorCandidateFile {
                 "candidate file source is not part of the query",
             ));
         }
-        validate_relative_path(&self.relative_path)
+        if !is_normal_relative_path(&self.relative_path)
+            || self.relative_path.as_os_str().as_bytes().len() > MAX_RELATIVE_PATH_BYTES
+        {
+            return Err(SearchCursorError::InvalidData(
+                "candidate path must be a bounded normalized relative path",
+            ));
+        }
+        Ok(())
     }
 }
 
 /// Server-internal continuation state. This type intentionally does not
-/// implement Serialize so file paths, inode values and offsets cannot be
+/// implement `Serialize` so file paths, inode values and offsets cannot be
 /// emitted as MCP structured content by accident.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchCursorData {
@@ -146,31 +152,83 @@ impl SearchCursorData {
                 "next line number must start at one",
             ));
         }
+        if self.files_scanned != self.next_candidate_index {
+            return Err(SearchCursorError::InvalidData(
+                "files_scanned must equal the next candidate index",
+            ));
+        }
 
         let query_sources: HashSet<&str> =
             self.query.source_ids.iter().map(String::as_str).collect();
+        let mut unique_candidates = HashSet::with_capacity(self.candidates.len());
         for candidate in &self.candidates {
             candidate.validate(&query_sources)?;
+            if !unique_candidates.insert((
+                candidate.source_id.clone(),
+                candidate.relative_path.clone(),
+            )) {
+                return Err(SearchCursorError::InvalidData(
+                    "candidate snapshot must not contain duplicate files",
+                ));
+            }
         }
 
-        let current = &self.candidates[self.next_candidate_index];
+        let current = self.current_candidate();
         if self.next_byte_offset > current.file_size_at_snapshot {
             return Err(SearchCursorError::InvalidData(
                 "next byte offset exceeds the candidate snapshot",
             ));
         }
-        if self.files_scanned > self.candidates.len() {
+        if self.bytes_scanned < self.next_byte_offset {
             return Err(SearchCursorError::InvalidData(
-                "files_scanned exceeds the candidate snapshot",
+                "cumulative scan bytes cannot precede the current byte offset",
             ));
         }
-
         Ok(())
     }
 
     #[must_use]
     pub fn current_candidate(&self) -> &CursorCandidateFile {
         &self.candidates[self.next_candidate_index]
+    }
+
+    fn validate_continuation(&self, next: &Self) -> Result<(), SearchCursorError> {
+        next.validate()?;
+        if next.query != self.query {
+            return Err(SearchCursorError::InvalidContinuation(
+                "continuation query differs from the original query",
+            ));
+        }
+        if next.candidates != self.candidates {
+            return Err(SearchCursorError::InvalidContinuation(
+                "continuation candidate snapshot differs from the original snapshot",
+            ));
+        }
+        if next.files_scanned < self.files_scanned
+            || next.bytes_scanned < self.bytes_scanned
+            || next.results_returned < self.results_returned
+        {
+            return Err(SearchCursorError::InvalidContinuation(
+                "continuation counters cannot move backwards",
+            ));
+        }
+
+        let progressed = next.next_candidate_index > self.next_candidate_index
+            || (next.next_candidate_index == self.next_candidate_index
+                && next.next_byte_offset > self.next_byte_offset);
+        if !progressed {
+            return Err(SearchCursorError::InvalidContinuation(
+                "continuation position must move forward",
+            ));
+        }
+        if next.next_candidate_index == self.next_candidate_index
+            && next.next_line_number < self.next_line_number
+        {
+            return Err(SearchCursorError::InvalidContinuation(
+                "continuation line number cannot move backwards within a file",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -189,7 +247,6 @@ impl SearchCursorStore {
         if ttl == Duration::ZERO {
             return Err(SearchCursorError::InvalidTtl);
         }
-
         Ok(Self {
             capacity,
             ttl,
@@ -206,107 +263,63 @@ impl SearchCursorStore {
         let mut state = self.lock_state();
         state.purge_expired(now);
         while state.entries.len() >= self.capacity {
-            state.evict_oldest();
+            if !state.evict_oldest_unleased() {
+                return Err(SearchCursorError::CapacityBusy);
+            }
         }
-
-        let token = new_unique_token(&state.entries);
-        state.order.push_back(token.clone());
-        state
-            .entries
-            .insert(token.clone(), StoredCursor { data, expires_at });
-        Ok(token)
+        Ok(state.insert_new(data, expires_at))
     }
 
-    pub fn resolve(
-        &self,
+    /// Leases a cursor for one page request.
+    ///
+    /// A leased cursor cannot be consumed concurrently. Dropping the lease
+    /// without committing releases it for retry. Committing atomically removes
+    /// the old token and optionally creates a fresh token for the next page.
+    pub fn begin(
+        self: &Arc<Self>,
         token: &str,
         expected_query: &SearchCursorQuery,
-    ) -> Result<SearchCursorData, SearchCursorError> {
+    ) -> Result<SearchCursorLease, SearchCursorError> {
         expected_query.validate()?;
         if !is_well_formed_token(token) {
             return Err(SearchCursorError::UnknownOrExpired);
         }
 
         let now = Instant::now();
-        let mut state = self.lock_state();
-        state.purge_expired(now);
-        let stored = state
-            .entries
-            .get(token)
-            .ok_or(SearchCursorError::UnknownOrExpired)?;
-        if &stored.data.query != expected_query {
-            return Err(SearchCursorError::QueryMismatch);
-        }
+        let lease_id = Uuid::new_v4();
+        let data = {
+            let mut state = self.lock_state();
+            state.purge_expired(now);
+            let stored = state
+                .entries
+                .get_mut(token)
+                .ok_or(SearchCursorError::UnknownOrExpired)?;
+            if &stored.data.query != expected_query {
+                return Err(SearchCursorError::QueryMismatch);
+            }
+            if stored.lease_id.is_some() {
+                return Err(SearchCursorError::Busy);
+            }
+            stored.lease_id = Some(lease_id);
+            stored.data.clone()
+        };
 
-        Ok(stored.data.clone())
+        Ok(SearchCursorLease {
+            store: Arc::clone(self),
+            token: token.to_owned(),
+            lease_id,
+            data,
+            completed: false,
+        })
     }
 
-    /// Atomically invalidates the previous token and creates a token for the
-    /// next continuation position after a page has been produced successfully.
-    pub fn replace(
-        &self,
+    pub fn begin_request(
+        self: &Arc<Self>,
         token: &str,
-        expected_query: &SearchCursorQuery,
-        next_data: SearchCursorData,
-    ) -> Result<String, SearchCursorError> {
-        expected_query.validate()?;
-        next_data.validate()?;
-        if next_data.query != *expected_query {
-            return Err(SearchCursorError::QueryMismatch);
-        }
-        if !is_well_formed_token(token) {
-            return Err(SearchCursorError::UnknownOrExpired);
-        }
-
-        let now = Instant::now();
-        let expires_at = now
-            .checked_add(self.ttl)
-            .ok_or(SearchCursorError::ExpirationOverflow)?;
-        let mut state = self.lock_state();
-        state.purge_expired(now);
-        let stored = state
-            .entries
-            .get(token)
-            .ok_or(SearchCursorError::UnknownOrExpired)?;
-        if &stored.data.query != expected_query {
-            return Err(SearchCursorError::QueryMismatch);
-        }
-
-        state.entries.remove(token);
-        let next_token = new_unique_token(&state.entries);
-        state.order.push_back(next_token.clone());
-        state.entries.insert(
-            next_token.clone(),
-            StoredCursor {
-                data: next_data,
-                expires_at,
-            },
-        );
-        Ok(next_token)
-    }
-
-    pub fn complete(
-        &self,
-        token: &str,
-        expected_query: &SearchCursorQuery,
-    ) -> Result<(), SearchCursorError> {
-        expected_query.validate()?;
-        if !is_well_formed_token(token) {
-            return Err(SearchCursorError::UnknownOrExpired);
-        }
-
-        let now = Instant::now();
-        let mut state = self.lock_state();
-        state.purge_expired(now);
-        let stored = state
-            .entries
-            .get(token)
-            .ok_or(SearchCursorError::UnknownOrExpired)?;
-        if &stored.data.query != expected_query {
-            return Err(SearchCursorError::QueryMismatch);
-        }
-        state.entries.remove(token);
-        Ok(())
+        request: &SearchLogsRequest,
+    ) -> Result<SearchCursorLease, SearchCursorError> {
+        let query = SearchCursorQuery::from_request(request)?;
+        self.begin(token, &query)
     }
 
     pub fn len(&self) -> usize {
@@ -319,10 +332,109 @@ impl SearchCursorStore {
         self.len() == 0
     }
 
+    fn finish_lease(
+        &self,
+        token: &str,
+        lease_id: Uuid,
+        current: &SearchCursorData,
+        next: Option<SearchCursorData>,
+    ) -> Result<Option<String>, SearchCursorError> {
+        if let Some(next_data) = &next {
+            current.validate_continuation(next_data)?;
+        }
+
+        let now = Instant::now();
+        let next_expiration = if next.is_some() {
+            Some(
+                now.checked_add(self.ttl)
+                    .ok_or(SearchCursorError::ExpirationOverflow)?,
+            )
+        } else {
+            None
+        };
+        let mut state = self.lock_state();
+        state.purge_expired(now);
+        let stored = state
+            .entries
+            .get(token)
+            .ok_or(SearchCursorError::LeaseLost)?;
+        if stored.lease_id != Some(lease_id) || &stored.data != current {
+            return Err(SearchCursorError::LeaseLost);
+        }
+        state.remove(token);
+
+        let next_token = match (next, next_expiration) {
+            (Some(data), Some(expires_at)) => Some(state.insert_new(data, expires_at)),
+            (None, None) => None,
+            _ => return Err(SearchCursorError::LeaseLost),
+        };
+        Ok(next_token)
+    }
+
+    fn release_lease(&self, token: &str, lease_id: Uuid) {
+        let now = Instant::now();
+        let mut state = self.lock_state();
+        let remove_expired = if let Some(stored) = state.entries.get_mut(token) {
+            if stored.lease_id != Some(lease_id) {
+                false
+            } else {
+                stored.lease_id = None;
+                stored.expires_at <= now
+            }
+        } else {
+            false
+        };
+        if remove_expired {
+            state.remove(token);
+        }
+    }
+
     fn lock_state(&self) -> MutexGuard<'_, CursorStoreState> {
         self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+#[derive(Debug)]
+pub struct SearchCursorLease {
+    store: Arc<SearchCursorStore>,
+    token: String,
+    lease_id: Uuid,
+    data: SearchCursorData,
+    completed: bool,
+}
+
+impl SearchCursorLease {
+    #[must_use]
+    pub fn data(&self) -> &SearchCursorData {
+        &self.data
+    }
+
+    #[must_use]
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
+    pub fn commit(
+        mut self,
+        next: Option<SearchCursorData>,
+    ) -> Result<Option<String>, SearchCursorError> {
+        let result = self
+            .store
+            .finish_lease(&self.token, self.lease_id, &self.data, next);
+        if result.is_ok() {
+            self.completed = true;
+        }
+        result
+    }
+}
+
+impl Drop for SearchCursorLease {
+    fn drop(&mut self) {
+        if !self.completed {
+            self.store.release_lease(&self.token, self.lease_id);
+        }
     }
 }
 
@@ -333,27 +445,57 @@ struct CursorStoreState {
 }
 
 impl CursorStoreState {
-    fn purge_expired(&mut self, now: Instant) {
-        while let Some(token) = self.order.front().cloned() {
-            match self.entries.get(&token) {
-                Some(entry) if entry.expires_at <= now => {
-                    self.order.pop_front();
-                    self.entries.remove(&token);
-                }
-                None => {
-                    self.order.pop_front();
-                }
-                Some(_) => break,
-            }
-        }
+    fn insert_new(&mut self, data: SearchCursorData, expires_at: Instant) -> String {
+        let token = new_unique_token(&self.entries);
+        self.order.push_back(token.clone());
+        self.entries.insert(
+            token.clone(),
+            StoredCursor {
+                data,
+                expires_at,
+                lease_id: None,
+            },
+        );
+        token
     }
 
-    fn evict_oldest(&mut self) {
+    fn purge_expired(&mut self, now: Instant) -> usize {
+        let before = self.entries.len();
+        let mut retained = VecDeque::with_capacity(self.order.len());
         while let Some(token) = self.order.pop_front() {
-            if self.entries.remove(&token).is_some() {
-                return;
+            match self.entries.get(&token) {
+                Some(stored) if stored.expires_at <= now && stored.lease_id.is_none() => {
+                    self.entries.remove(&token);
+                }
+                Some(_) => retained.push_back(token),
+                None => {}
             }
         }
+        self.order = retained;
+        before - self.entries.len()
+    }
+
+    fn evict_oldest_unleased(&mut self) -> bool {
+        let candidates = self.order.len();
+        for _ in 0..candidates {
+            let Some(token) = self.order.pop_front() else {
+                break;
+            };
+            match self.entries.get(&token) {
+                Some(stored) if stored.lease_id.is_some() => self.order.push_back(token),
+                Some(_) => {
+                    self.entries.remove(&token);
+                    return true;
+                }
+                None => {}
+            }
+        }
+        false
+    }
+
+    fn remove(&mut self, token: &str) {
+        self.entries.remove(token);
+        self.order.retain(|candidate| candidate != token);
     }
 }
 
@@ -361,6 +503,7 @@ impl CursorStoreState {
 struct StoredCursor {
     data: SearchCursorData,
     expires_at: Instant,
+    lease_id: Option<Uuid>,
 }
 
 fn new_unique_token(entries: &HashMap<String, StoredCursor>) -> String {
@@ -380,7 +523,7 @@ fn is_well_formed_token(token: &str) -> bool {
             .all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn validate_relative_path(path: &Path) -> Result<(), SearchCursorError> {
+fn is_normal_relative_path(path: &Path) -> bool {
     let mut has_component = false;
     for component in path.components() {
         match component {
@@ -388,23 +531,14 @@ fn validate_relative_path(path: &Path) -> Result<(), SearchCursorError> {
             Component::Prefix(_)
             | Component::RootDir
             | Component::CurDir
-            | Component::ParentDir => {
-                return Err(SearchCursorError::InvalidData(
-                    "candidate path must be a normalized relative path",
-                ));
-            }
+            | Component::ParentDir => return false,
         }
     }
-    if !has_component {
-        return Err(SearchCursorError::InvalidData(
-            "candidate path must not be empty",
-        ));
-    }
-    Ok(())
+    has_component
 }
 
 fn validate_time_bound(value: Option<&str>) -> Result<(), SearchCursorError> {
-    if value.is_some_and(|value| value.is_empty() || value.len() > 64) {
+    if value.is_some_and(|bound| bound.is_empty() || bound.chars().count() > MAX_TIME_BOUND_CHARS) {
         return Err(SearchCursorError::InvalidData(
             "time bound length is outside the server limit",
         ));
@@ -412,16 +546,22 @@ fn validate_time_bound(value: Option<&str>) -> Result<(), SearchCursorError> {
     Ok(())
 }
 
+/// Reopens the current snapshot file and verifies its identity and captured size.
+///
+/// Appends are allowed, but callers must never read beyond
+/// `file_size_at_snapshot`; files created or bytes appended after the first page
+/// are outside this cursor's stable snapshot.
 pub fn open_cursor_file(
     root: &SafeRoot,
     cursor: &SearchCursorData,
 ) -> Result<SafeFile, SearchCursorFileError> {
+    cursor.validate()?;
     let candidate = cursor.current_candidate();
     let safe_file = root.open_regular_file(&candidate.relative_path)?;
     if safe_file.identity() != candidate.file_identity {
         return Err(SearchCursorFileError::FileChanged);
     }
-    if safe_file.size() < cursor.next_byte_offset {
+    if safe_file.size() < candidate.file_size_at_snapshot {
         return Err(SearchCursorFileError::FileTruncated);
     }
     Ok(safe_file)
@@ -441,28 +581,43 @@ pub enum SearchCursorError {
     #[error("invalid search cursor data: {0}")]
     InvalidData(&'static str),
 
+    #[error("invalid search cursor continuation: {0}")]
+    InvalidContinuation(&'static str),
+
     #[error("unknown or expired search cursor")]
     UnknownOrExpired,
 
     #[error("search cursor does not belong to these query parameters")]
     QueryMismatch,
+
+    #[error("search cursor is already being consumed")]
+    Busy,
+
+    #[error("search cursor store is full of active page requests")]
+    CapacityBusy,
+
+    #[error("search cursor lease was lost or expired")]
+    LeaseLost,
 }
 
 #[derive(Debug, Error)]
 pub enum SearchCursorFileError {
+    #[error("search cursor data is invalid")]
+    InvalidCursor(#[from] SearchCursorError),
+
     #[error("cursor log file cannot be opened safely")]
     Open(#[from] SafeOpenError),
 
     #[error("cursor log file has been rotated or replaced")]
     FileChanged,
 
-    #[error("cursor log file was truncated before the continuation offset")]
+    #[error("cursor log file was truncated below its captured snapshot size")]
     FileTruncated,
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, thread};
+    use std::{fs, io::Write, sync::Arc, thread};
 
     use tempfile::tempdir;
 
@@ -470,7 +625,7 @@ mod tests {
 
     fn query() -> SearchCursorQuery {
         SearchCursorQuery {
-            source_ids: vec!["payment-test".to_owned()],
+            source_ids: vec!["payment-test".to_owned(), "order-test".to_owned()],
             keyword: "traceId=abc123".to_owned(),
             case_sensitive: false,
             start_time: None,
@@ -480,143 +635,220 @@ mod tests {
         }
     }
 
-    fn candidate(identity: FileIdentity, size: u64) -> CursorCandidateFile {
-        CursorCandidateFile {
-            source_id: "payment-test".to_owned(),
-            relative_path: PathBuf::from("application.log"),
-            file_identity: identity,
-            file_size_at_snapshot: size,
-        }
+    fn candidates() -> Vec<CursorCandidateFile> {
+        vec![
+            CursorCandidateFile {
+                source_id: "payment-test".to_owned(),
+                relative_path: PathBuf::from("application.log"),
+                file_identity: FileIdentity {
+                    device: 10,
+                    inode: 20,
+                },
+                file_size_at_snapshot: 100,
+            },
+            CursorCandidateFile {
+                source_id: "order-test".to_owned(),
+                relative_path: PathBuf::from("application.log"),
+                file_identity: FileIdentity {
+                    device: 11,
+                    inode: 21,
+                },
+                file_size_at_snapshot: 200,
+            },
+        ]
     }
 
     fn data() -> SearchCursorData {
         SearchCursorData {
             query: query(),
-            candidates: vec![candidate(
-                FileIdentity {
-                    device: 10,
-                    inode: 20,
-                },
-                4096,
-            )],
+            candidates: candidates(),
             next_candidate_index: 0,
-            next_byte_offset: 1024,
-            next_line_number: 42,
+            next_byte_offset: 20,
+            next_line_number: 2,
             files_scanned: 0,
-            bytes_scanned: 1024,
-            results_returned: 50,
+            bytes_scanned: 20,
+            results_returned: 5,
+        }
+    }
+
+    fn advanced_data() -> SearchCursorData {
+        SearchCursorData {
+            next_byte_offset: 60,
+            next_line_number: 4,
+            bytes_scanned: 60,
+            results_returned: 10,
+            ..data()
         }
     }
 
     #[test]
-    fn creates_opaque_cursor_and_resolves_state() {
-        let store =
-            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created");
+    fn creates_opaque_cursor_and_binds_query() {
+        let store = Arc::new(
+            SearchCursorStore::new(10, Duration::from_secs(60))
+                .expect("store should be created"),
+        );
         let token = store.insert(data()).expect("cursor should be inserted");
+        let lease = store.begin(&token, &query()).expect("cursor should begin");
 
         assert!(token.starts_with(SEARCH_CURSOR_PREFIX));
         assert_eq!(token.len(), SEARCH_CURSOR_LENGTH);
-        assert!(!token.contains("payment"));
+        assert!(!token.contains("traceId"));
         assert!(!token.contains("application"));
-        assert_eq!(
-            store
-                .resolve(&token, &query())
-                .expect("cursor should resolve"),
-            data()
-        );
+        assert_eq!(lease.data(), &data());
     }
 
     #[test]
     fn rejects_cursor_with_changed_query_conditions() {
-        let store =
-            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created");
+        let store = Arc::new(
+            SearchCursorStore::new(10, Duration::from_secs(60))
+                .expect("store should be created"),
+        );
         let token = store.insert(data()).expect("cursor should be inserted");
         let mut changed_query = query();
         changed_query.keyword = "orderId=10001".to_owned();
 
         assert!(matches!(
-            store.resolve(&token, &changed_query),
+            store.begin(&token, &changed_query),
             Err(SearchCursorError::QueryMismatch)
         ));
     }
 
     #[test]
-    fn replace_invalidates_previous_cursor_atomically() {
-        let store =
-            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created");
-        let token = store.insert(data()).expect("cursor should be inserted");
-        let mut next_data = data();
-        next_data.next_byte_offset = 2048;
-        next_data.next_line_number = 80;
-        let next_token = store
-            .replace(&token, &query(), next_data.clone())
-            .expect("cursor should be replaced");
-
-        assert_ne!(next_token, token);
-        assert!(matches!(
-            store.resolve(&token, &query()),
-            Err(SearchCursorError::UnknownOrExpired)
-        ));
-        assert_eq!(
-            store
-                .resolve(&next_token, &query())
-                .expect("next cursor should resolve"),
-            next_data
+    fn prevents_concurrent_consumption_and_drop_releases_lease() {
+        let store = Arc::new(
+            SearchCursorStore::new(10, Duration::from_secs(60))
+                .expect("store should be created"),
         );
+        let token = store.insert(data()).expect("cursor should be inserted");
+        let lease = store.begin(&token, &query()).expect("first lease should begin");
+
+        assert!(matches!(
+            store.begin(&token, &query()),
+            Err(SearchCursorError::Busy)
+        ));
+        drop(lease);
+        assert!(store.begin(&token, &query()).is_ok());
     }
 
     #[test]
-    fn complete_removes_cursor() {
-        let store =
-            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created");
+    fn commit_invalidates_previous_cursor_atomically() {
+        let store = Arc::new(
+            SearchCursorStore::new(10, Duration::from_secs(60))
+                .expect("store should be created"),
+        );
         let token = store.insert(data()).expect("cursor should be inserted");
-        store
-            .complete(&token, &query())
-            .expect("cursor should complete");
+        let lease = store.begin(&token, &query()).expect("cursor should begin");
+        let next_token = lease
+            .commit(Some(advanced_data()))
+            .expect("continuation should commit")
+            .expect("next cursor should be returned");
 
-        assert!(store.is_empty());
+        assert_ne!(next_token, token);
         assert!(matches!(
-            store.resolve(&token, &query()),
+            store.begin(&token, &query()),
             Err(SearchCursorError::UnknownOrExpired)
         ));
+        let next_lease = store
+            .begin(&next_token, &query())
+            .expect("next cursor should begin");
+        assert_eq!(next_lease.data().next_byte_offset, 60);
+    }
+
+    #[test]
+    fn completing_last_page_consumes_cursor_without_replacement() {
+        let store = Arc::new(
+            SearchCursorStore::new(10, Duration::from_secs(60))
+                .expect("store should be created"),
+        );
+        let token = store.insert(data()).expect("cursor should be inserted");
+        let lease = store.begin(&token, &query()).expect("cursor should begin");
+
+        assert_eq!(lease.commit(None).expect("cursor should complete"), None);
+        assert!(store.is_empty());
+    }
+
+    #[test]
+    fn invalid_continuation_releases_original_cursor_for_retry() {
+        let store = Arc::new(
+            SearchCursorStore::new(10, Duration::from_secs(60))
+                .expect("store should be created"),
+        );
+        let token = store.insert(data()).expect("cursor should be inserted");
+        let lease = store.begin(&token, &query()).expect("cursor should begin");
+        let mut invalid = advanced_data();
+        invalid.next_byte_offset = 10;
+
+        assert!(matches!(
+            lease.commit(Some(invalid)),
+            Err(SearchCursorError::InvalidContinuation(_))
+        ));
+        assert!(store.begin(&token, &query()).is_ok());
+    }
+
+    #[test]
+    fn capacity_does_not_evict_an_active_cursor() {
+        let store = Arc::new(
+            SearchCursorStore::new(1, Duration::from_secs(60))
+                .expect("store should be created"),
+        );
+        let first = store.insert(data()).expect("cursor should be inserted");
+        let lease = store.begin(&first, &query()).expect("cursor should begin");
+
+        assert!(matches!(
+            store.insert(data()),
+            Err(SearchCursorError::CapacityBusy)
+        ));
+        drop(lease);
+        let second = store
+            .insert(data())
+            .expect("unleased cursor can be evicted");
+        assert_ne!(first, second);
     }
 
     #[test]
     fn expires_and_evicts_cursor_state() {
-        let expiring =
-            SearchCursorStore::new(10, Duration::from_millis(5)).expect("store should be created");
-        let expiring_token = expiring.insert(data()).expect("cursor should be inserted");
+        let expiring = Arc::new(
+            SearchCursorStore::new(10, Duration::from_millis(5))
+                .expect("store should be created"),
+        );
+        let token = expiring.insert(data()).expect("cursor should be inserted");
         thread::sleep(Duration::from_millis(20));
         assert!(matches!(
-            expiring.resolve(&expiring_token, &query()),
+            expiring.begin(&token, &query()),
             Err(SearchCursorError::UnknownOrExpired)
         ));
 
-        let bounded =
-            SearchCursorStore::new(1, Duration::from_secs(60)).expect("store should be created");
+        let bounded = Arc::new(
+            SearchCursorStore::new(1, Duration::from_secs(60))
+                .expect("store should be created"),
+        );
         let first = bounded.insert(data()).expect("cursor should be inserted");
         let second = bounded
             .insert(data())
             .expect("second cursor should be inserted");
         assert!(matches!(
-            bounded.resolve(&first, &query()),
+            bounded.begin(&first, &query()),
             Err(SearchCursorError::UnknownOrExpired)
         ));
-        assert!(bounded.resolve(&second, &query()).is_ok());
+        assert!(bounded.begin(&second, &query()).is_ok());
     }
 
     #[test]
     fn new_store_invalidates_existing_cursor() {
-        let first_store =
-            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created");
+        let first_store = Arc::new(
+            SearchCursorStore::new(10, Duration::from_secs(60))
+                .expect("store should be created"),
+        );
         let token = first_store
             .insert(data())
             .expect("cursor should be inserted");
-        let new_store = SearchCursorStore::new(10, Duration::from_secs(60))
-            .expect("new store should be created");
+        let new_store = Arc::new(
+            SearchCursorStore::new(10, Duration::from_secs(60))
+                .expect("new store should be created"),
+        );
 
         assert!(matches!(
-            new_store.resolve(&token, &query()),
+            new_store.begin(&token, &query()),
             Err(SearchCursorError::UnknownOrExpired)
         ));
     }
@@ -631,7 +863,7 @@ mod tests {
         ));
 
         let mut invalid = data();
-        invalid.candidates[0].source_id = "order-test".to_owned();
+        invalid.candidates[0].source_id = "unknown-test".to_owned();
         assert!(matches!(
             invalid.validate(),
             Err(SearchCursorError::InvalidData(_))
@@ -643,62 +875,112 @@ mod tests {
             invalid.validate(),
             Err(SearchCursorError::InvalidData(_))
         ));
-    }
 
-    #[test]
-    fn safely_reopens_unchanged_cursor_file() {
-        let root_dir = tempdir().expect("temporary root should be created");
-        let path = root_dir.path().join("application.log");
-        fs::write(&path, vec![b'x'; 2048]).expect("fixture should be written");
-        let root = SafeRoot::open(root_dir.path()).expect("root should open");
-        let safe_file = root
-            .open_regular_file("application.log")
-            .expect("file should open");
-        let cursor = SearchCursorData {
-            candidates: vec![candidate(safe_file.identity(), safe_file.size())],
-            next_byte_offset: 1024,
-            ..data()
-        };
-
-        let reopened = open_cursor_file(&root, &cursor).expect("file should reopen");
-        assert_eq!(reopened.identity(), safe_file.identity());
-    }
-
-    #[test]
-    fn rejects_replaced_or_truncated_cursor_file() {
-        let root_dir = tempdir().expect("temporary root should be created");
-        let path = root_dir.path().join("application.log");
-        let rotated = root_dir.path().join("application.log.1");
-        fs::write(&path, vec![b'x'; 2048]).expect("fixture should be written");
-        let root = SafeRoot::open(root_dir.path()).expect("root should open");
-        let safe_file = root
-            .open_regular_file("application.log")
-            .expect("file should open");
-        let cursor = SearchCursorData {
-            candidates: vec![candidate(safe_file.identity(), safe_file.size())],
-            next_byte_offset: 1024,
-            ..data()
-        };
-
-        fs::rename(&path, &rotated).expect("file should rotate");
-        fs::write(&path, vec![b'y'; 2048]).expect("replacement should be written");
+        let mut invalid = data();
+        invalid.files_scanned = 1;
         assert!(matches!(
-            open_cursor_file(&root, &cursor),
-            Err(SearchCursorFileError::FileChanged)
+            invalid.validate(),
+            Err(SearchCursorError::InvalidData(_))
         ));
 
-        fs::remove_file(&path).expect("replacement should be removed");
-        fs::rename(&rotated, &path).expect("original inode should be restored");
+        let mut invalid = data();
+        invalid.candidates.push(invalid.candidates[0].clone());
+        assert!(matches!(
+            invalid.validate(),
+            Err(SearchCursorError::InvalidData(_))
+        ));
+    }
+
+    #[test]
+    fn continuation_cannot_change_snapshot_or_move_backwards() {
+        let current = data();
+        let mut changed_snapshot = advanced_data();
+        changed_snapshot.candidates[0].file_size_at_snapshot += 1;
+        assert!(matches!(
+            current.validate_continuation(&changed_snapshot),
+            Err(SearchCursorError::InvalidContinuation(_))
+        ));
+
+        let mut backwards = advanced_data();
+        backwards.bytes_scanned = 10;
+        assert!(matches!(
+            current.validate_continuation(&backwards),
+            Err(SearchCursorError::InvalidContinuation(_))
+        ));
+    }
+
+    #[test]
+    fn file_snapshot_allows_append_but_rejects_replace_and_truncate() {
+        let root_dir = tempdir().expect("temporary root should be created");
+        let path = root_dir.path().join("application.log");
+        fs::write(&path, b"first page\n").expect("fixture should be written");
+        let root = SafeRoot::open(root_dir.path()).expect("root should open");
+        let safe_file = root
+            .open_regular_file("application.log")
+            .expect("file should open");
+        let cursor = SearchCursorData {
+            query: SearchCursorQuery {
+                source_ids: vec!["payment-test".to_owned()],
+                ..query()
+            },
+            candidates: vec![CursorCandidateFile {
+                source_id: "payment-test".to_owned(),
+                relative_path: PathBuf::from("application.log"),
+                file_identity: safe_file.identity(),
+                file_size_at_snapshot: safe_file.size(),
+            }],
+            next_candidate_index: 0,
+            next_byte_offset: 0,
+            next_line_number: 1,
+            files_scanned: 0,
+            bytes_scanned: 0,
+            results_returned: 0,
+        };
+
+        let mut append = fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("fixture should open for append");
+        append
+            .write_all(b"appended\n")
+            .expect("fixture should append");
+        assert!(open_cursor_file(&root, &cursor).is_ok());
+
         fs::OpenOptions::new()
             .write(true)
             .open(&path)
-            .expect("file should open for truncation")
-            .set_len(512)
-            .expect("file should truncate");
+            .expect("fixture should open for truncation")
+            .set_len(4)
+            .expect("fixture should truncate");
         assert!(matches!(
             open_cursor_file(&root, &cursor),
             Err(SearchCursorFileError::FileTruncated)
         ));
+
+        let rotated = root_dir.path().join("application.log.1");
+        fs::rename(&path, rotated).expect("fixture should rotate");
+        fs::write(&path, b"replacement content\n").expect("replacement should be written");
+        assert!(matches!(
+            open_cursor_file(&root, &cursor),
+            Err(SearchCursorFileError::FileChanged)
+        ));
+    }
+
+    #[test]
+    fn query_is_derived_from_request_without_embedding_cursor_token() {
+        let request = SearchLogsRequest {
+            source_ids: vec!["payment-test".to_owned(), "order-test".to_owned()],
+            keyword: "traceId=abc123".to_owned(),
+            case_sensitive: false,
+            start_time: None,
+            end_time: None,
+            order: ResultOrder::OldestFirst,
+            max_results: 50,
+            cursor: Some("cur_placeholder".to_owned()),
+        };
+        let derived = SearchCursorQuery::from_request(&request).expect("query should be derived");
+
+        assert_eq!(derived, query());
     }
 
     #[test]
