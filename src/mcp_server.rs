@@ -7,10 +7,9 @@ use rmcp::{
 };
 
 use crate::{
-    ContextLine, DEFAULT_MAX_RESULTS, GetLogContextRequest, GetLogContextResponse,
-    ListLogSourcesResponse, LogMatch, LogSource, MAX_CONTEXT_LINES_PER_SIDE, MAX_KEYWORD_CHARS,
-    MAX_REFERENCE_CHARS, MAX_RESULTS, MAX_SOURCE_ID_CHARS, MAX_SOURCES, ResultOrder,
-    SearchLogsRequest, SearchLogsResponse,
+    ContextLine, GetLogContextRequest, GetLogContextResponse, ListLogSourcesResponse, LogMatch,
+    LogSource, MAX_CONTEXT_LINES_PER_SIDE, MAX_KEYWORD_CHARS, MAX_REFERENCE_CHARS, MAX_RESULTS,
+    MAX_SOURCE_ID_CHARS, MAX_SOURCES, ResultOrder, SearchLogsRequest, SearchLogsResponse,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -191,11 +190,9 @@ impl LogQueryServer {
                 "source_ids cannot contain more than {MAX_SOURCES} entries"
             ));
         }
-        if let Some(source_id) = request
-            .source_ids
-            .iter()
-            .find(|source_id| source_id.is_empty() || source_id.chars().count() > MAX_SOURCE_ID_CHARS)
-        {
+        if let Some(source_id) = request.source_ids.iter().find(|source_id| {
+            source_id.is_empty() || source_id.chars().count() > MAX_SOURCE_ID_CHARS
+        }) {
             return Err(format!(
                 "invalid source_id length: {} characters",
                 source_id.chars().count()
@@ -316,7 +313,7 @@ mod tests {
             start_time: None,
             end_time: None,
             order: ResultOrder::OldestFirst,
-            max_results: DEFAULT_MAX_RESULTS,
+            max_results: crate::DEFAULT_MAX_RESULTS,
             cursor: None,
         }
     }
@@ -349,8 +346,8 @@ mod tests {
     fn enforces_result_limit() {
         let mut search_request = request("traceId=");
         search_request.max_results = 1;
-        let response = LogQueryServer::search_response(search_request)
-            .expect("limited search should succeed");
+        let response =
+            LogQueryServer::search_response(search_request).expect("limited search should succeed");
 
         assert_eq!(response.results.len(), 1);
         assert!(response.truncated);
