@@ -28,24 +28,10 @@ jobs:
 
           path = Path("src/match_reference.rs")
           text = path.read_text()
-          old = '''        loop {
-              let Some(token) = self.order.front() else {
-                  break;
-              };
-
-              match self.entries.get(token) {
-                  Some(entry) if entry.expires_at <= now => {
-                      let token = self.order.pop_front().expect("front token exists");
-                      self.entries.remove(&token);
-                  }
-                  None => {
-                      self.order.pop_front();
-                  }
-                  Some(_) => break,
-              }
-          }
-          '''
-          new = '''        while let Some(token) = self.order.front().cloned() {
+          function_start = text.index("    fn purge_expired(&mut self, now: Instant) -> usize {")
+          loop_start = text.index("        loop {", function_start)
+          loop_end = text.index("\n\n        before - self.entries.len()", loop_start)
+          replacement = '''        while let Some(token) = self.order.front().cloned() {
               match self.entries.get(&token) {
                   Some(entry) if entry.expires_at <= now => {
                       self.order.pop_front();
@@ -56,11 +42,9 @@ jobs:
                   }
                   Some(_) => break,
               }
-          }
-          '''
-          if old not in text:
-              raise SystemExit("expected purge_expired loop was not found")
-          path.write_text(text.replace(old, new, 1))
+          }'''
+          text = text[:loop_start] + replacement + text[loop_end:]
+          path.write_text(text)
           PY
           cargo fmt --all
 
