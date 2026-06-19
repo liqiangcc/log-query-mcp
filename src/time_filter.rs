@@ -1,6 +1,8 @@
 use std::{cmp::Ordering, path::PathBuf, time::SystemTime};
 
-use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, format::ParseErrorKind};
+use chrono::{
+    DateTime, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc, format::ParseErrorKind,
+};
 use thiserror::Error;
 
 use crate::ResultOrder;
@@ -11,9 +13,10 @@ pub const MAX_ROTATION_COMPONENT_CHARS: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TimestampRule {
-    Rfc3339 {
-        prefix_bytes: usize,
-    },
+    /// Parse the first whitespace-delimited RFC 3339 token within this maximum
+    /// prefix size. This supports timestamps with or without fractional seconds.
+    Rfc3339 { prefix_bytes: usize },
+    /// Parse an exact fixed-width prefix with a configured chrono format.
     Custom {
         prefix_bytes: usize,
         format: String,
@@ -51,18 +54,26 @@ impl TimestampRule {
 
     pub fn parse_line(&self, line: &str) -> Option<DateTime<FixedOffset>> {
         self.validate().ok()?;
-        let prefix_bytes = match self {
-            Self::Rfc3339 { prefix_bytes } | Self::Custom { prefix_bytes, .. } => *prefix_bytes,
-        };
-        let prefix = line.get(..prefix_bytes)?;
 
         match self {
-            Self::Rfc3339 { .. } => DateTime::parse_from_rfc3339(prefix).ok(),
+            Self::Rfc3339 { prefix_bytes } => {
+                let bytes = line.as_bytes();
+                let search_len = bytes.len().min(*prefix_bytes);
+                let end = bytes[..search_len]
+                    .iter()
+                    .position(u8::is_ascii_whitespace)
+                    .unwrap_or(search_len);
+                let prefix = line.get(..end)?;
+                DateTime::parse_from_rfc3339(prefix).ok()
+            }
             Self::Custom {
+                prefix_bytes,
                 format,
                 default_offset_seconds,
-                ..
-            } => parse_custom_timestamp(prefix, format, *default_offset_seconds),
+            } => {
+                let prefix = line.get(..*prefix_bytes)?;
+                parse_custom_timestamp(prefix, format, *default_offset_seconds)
+            }
         }
     }
 }
@@ -102,6 +113,7 @@ impl RotationTimestampRule {
     }
 }
 
+/// A start-inclusive, end-exclusive query time range.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimeRange {
     pub start: Option<DateTime<FixedOffset>>,
@@ -128,10 +140,10 @@ impl TimeRange {
             .start
             .as_ref()
             .zip(self.end.as_ref())
-            .is_some_and(|(start, end)| start > end)
+            .is_some_and(|(start, end)| start >= end)
         {
             return Err(TimeFilterError::InvalidRange(
-                "start_time must not be later than end_time",
+                "start_time must be earlier than end_time",
             ));
         }
         Ok(())
@@ -140,7 +152,7 @@ impl TimeRange {
     #[must_use]
     pub fn contains(&self, timestamp: &DateTime<FixedOffset>) -> bool {
         let after_start = self.start.as_ref().is_none_or(|start| timestamp >= start);
-        let before_end = self.end.as_ref().is_none_or(|end| timestamp <= end);
+        let before_end = self.end.as_ref().is_none_or(|end| timestamp < end);
         after_start && before_end
     }
 
@@ -152,6 +164,15 @@ impl TimeRange {
             None => TimeFilterDecision::UnknownTimestamp,
         }
     }
+
+    #[must_use]
+    pub fn classify_line(&self, observed: &LineTimestamp) -> TimeFilterDecision {
+        if observed.malformed {
+            TimeFilterDecision::MalformedTimestamp
+        } else {
+            self.classify(observed.timestamp.as_ref())
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,12 +180,14 @@ pub enum TimeFilterDecision {
     InRange,
     OutOfRange,
     UnknownTimestamp,
+    MalformedTimestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LineTimestamp {
     pub timestamp: Option<DateTime<FixedOffset>>,
     pub inherited: bool,
+    pub malformed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -188,18 +211,35 @@ impl TimestampTracker {
             return LineTimestamp {
                 timestamp: self.last_timestamp,
                 inherited: false,
+                malformed: false,
+            };
+        }
+
+        if looks_like_timestamp_prefix(line.as_bytes()) {
+            self.last_timestamp = None;
+            return LineTimestamp {
+                timestamp: None,
+                inherited: false,
+                malformed: true,
             };
         }
 
         LineTimestamp {
             timestamp: self.last_timestamp,
             inherited: self.last_timestamp.is_some(),
+            malformed: false,
         }
     }
 
     pub fn reset(&mut self) {
         self.last_timestamp = None;
     }
+}
+
+fn looks_like_timestamp_prefix(line: &[u8]) -> bool {
+    line.len() >= 5
+        && line[..4].iter().all(u8::is_ascii_digit)
+        && matches!(line[4], b'-' | b'/')
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,23 +280,25 @@ pub struct OrderedFileCandidate {
 
 pub fn sort_file_candidates(candidates: &mut [OrderedFileCandidate], order: ResultOrder) {
     candidates.sort_by(|left, right| {
-        let time_order = match (&left.timestamp_hint, &right.timestamp_hint) {
-            (Some(left), Some(right)) => match order {
-                ResultOrder::OldestFirst => left.cmp(right),
-                ResultOrder::NewestFirst => right.cmp(left),
-            },
-            (Some(_), None) => Ordering::Less,
-            (None, Some(_)) => Ordering::Greater,
-            (None, None) => match order {
-                ResultOrder::OldestFirst => left.modified_at.cmp(&right.modified_at),
-                ResultOrder::NewestFirst => right.modified_at.cmp(&left.modified_at),
-            },
+        let left_time = candidate_time(left);
+        let right_time = candidate_time(right);
+        let time_order = match order {
+            ResultOrder::OldestFirst => left_time.cmp(&right_time),
+            ResultOrder::NewestFirst => right_time.cmp(&left_time),
         };
 
         time_order
             .then_with(|| left.source_index.cmp(&right.source_index))
             .then_with(|| left.relative_path.cmp(&right.relative_path))
     });
+}
+
+fn candidate_time(candidate: &OrderedFileCandidate) -> DateTime<Utc> {
+    candidate
+        .timestamp_hint
+        .as_ref()
+        .map(|timestamp| timestamp.with_timezone(&Utc))
+        .unwrap_or_else(|| DateTime::<Utc>::from(candidate.modified_at))
 }
 
 fn parse_custom_timestamp(
@@ -310,14 +352,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_rfc3339_prefix() {
-        let rule = TimestampRule::Rfc3339 { prefix_bytes: 29 };
-        let timestamp = rule
+    fn parses_rfc3339_prefix_with_variable_precision() {
+        let rule = TimestampRule::Rfc3339 { prefix_bytes: 64 };
+        let milliseconds = rule
             .parse_line("2026-06-19T14:20:03.125+09:00 ERROR payment failed")
-            .expect("timestamp should parse");
+            .expect("timestamp with milliseconds should parse");
+        let seconds = rule
+            .parse_line("2026-06-19T05:20:03Z INFO payment succeeded")
+            .expect("timestamp without fractional seconds should parse");
 
-        assert_eq!(timestamp.offset().local_minus_utc(), 9 * 3600);
-        assert_eq!(timestamp.hour(), 14);
+        assert_eq!(milliseconds.offset().local_minus_utc(), 9 * 3600);
+        assert_eq!(milliseconds.hour(), 14);
+        assert_eq!(milliseconds.timestamp(), seconds.timestamp());
     }
 
     #[test]
@@ -337,52 +383,94 @@ mod tests {
 
     #[test]
     fn stack_trace_lines_inherit_previous_event_timestamp() {
-        let rule = TimestampRule::Rfc3339 { prefix_bytes: 29 };
+        let rule = TimestampRule::Rfc3339 { prefix_bytes: 64 };
         let mut tracker = TimestampTracker::new(rule).expect("tracker should be created");
         let event = tracker.observe("2026-06-19T14:20:03.125+09:00 ERROR failure");
         let stack = tracker.observe("    at payment::authorize(payment.rs:42)");
 
         assert!(!event.inherited);
+        assert!(!event.malformed);
         assert!(stack.inherited);
+        assert!(!stack.malformed);
         assert_eq!(event.timestamp, stack.timestamp);
     }
 
     #[test]
+    fn malformed_event_timestamp_clears_inheritance() {
+        let rule = TimestampRule::Rfc3339 { prefix_bytes: 64 };
+        let mut tracker = TimestampTracker::new(rule).expect("tracker should be created");
+        tracker.observe("2026-06-19T14:20:03+09:00 ERROR first event");
+        let malformed = tracker.observe("2026-99-99T99:99:99+09:00 ERROR malformed");
+        let following = tracker.observe("    at payment::authorize(payment.rs:42)");
+
+        assert!(malformed.malformed);
+        assert_eq!(malformed.timestamp, None);
+        assert!(!following.inherited);
+        assert_eq!(following.timestamp, None);
+    }
+
+    #[test]
     fn line_before_first_timestamp_remains_unknown() {
-        let rule = TimestampRule::Rfc3339 { prefix_bytes: 29 };
+        let rule = TimestampRule::Rfc3339 { prefix_bytes: 64 };
         let mut tracker = TimestampTracker::new(rule).expect("tracker should be created");
         let timestamp = tracker.observe("startup banner without timestamp");
 
         assert_eq!(timestamp.timestamp, None);
         assert!(!timestamp.inherited);
+        assert!(!timestamp.malformed);
     }
 
     #[test]
-    fn validates_inclusive_time_range() {
+    fn time_range_is_start_inclusive_and_end_exclusive() {
         let range = TimeRange::from_rfc3339(
             Some("2026-06-19T14:00:00+09:00"),
             Some("2026-06-19T15:00:00+09:00"),
         )
         .expect("range should parse");
-        let boundary = DateTime::parse_from_rfc3339("2026-06-19T15:00:00+09:00")
+        let start = DateTime::parse_from_rfc3339("2026-06-19T14:00:00+09:00")
             .expect("timestamp should parse");
-        let outside = DateTime::parse_from_rfc3339("2026-06-19T15:00:01+09:00")
+        let before_end = DateTime::parse_from_rfc3339("2026-06-19T14:59:59+09:00")
+            .expect("timestamp should parse");
+        let end = DateTime::parse_from_rfc3339("2026-06-19T15:00:00+09:00")
             .expect("timestamp should parse");
 
-        assert_eq!(range.classify(Some(&boundary)), TimeFilterDecision::InRange);
+        assert_eq!(range.classify(Some(&start)), TimeFilterDecision::InRange);
         assert_eq!(
-            range.classify(Some(&outside)),
-            TimeFilterDecision::OutOfRange
+            range.classify(Some(&before_end)),
+            TimeFilterDecision::InRange
         );
+        assert_eq!(range.classify(Some(&end)), TimeFilterDecision::OutOfRange);
         assert_eq!(range.classify(None), TimeFilterDecision::UnknownTimestamp);
     }
 
     #[test]
-    fn rejects_reversed_and_invalid_ranges() {
+    fn classifies_malformed_line_separately() {
+        let range = TimeRange::from_rfc3339(None, None).expect("range should be valid");
+        let observed = LineTimestamp {
+            timestamp: None,
+            inherited: false,
+            malformed: true,
+        };
+
+        assert_eq!(
+            range.classify_line(&observed),
+            TimeFilterDecision::MalformedTimestamp
+        );
+    }
+
+    #[test]
+    fn rejects_reversed_equal_and_invalid_ranges() {
         assert!(matches!(
             TimeRange::from_rfc3339(
                 Some("2026-06-19T15:00:00+09:00"),
                 Some("2026-06-19T14:00:00+09:00")
+            ),
+            Err(TimeFilterError::InvalidRange(_))
+        ));
+        assert!(matches!(
+            TimeRange::from_rfc3339(
+                Some("2026-06-19T15:00:00+09:00"),
+                Some("2026-06-19T15:00:00+09:00")
             ),
             Err(TimeFilterError::InvalidRange(_))
         ));
@@ -458,7 +546,7 @@ mod tests {
     }
 
     #[test]
-    fn orders_rotation_candidates_by_hint_then_mtime() {
+    fn orders_rotation_and_current_files_on_one_timeline() {
         let rotation_rule = RotationTimestampRule {
             prefix: "application-".to_owned(),
             suffix: ".log".to_owned(),
@@ -468,12 +556,19 @@ mod tests {
         let old_path = PathBuf::from("application-2026-06-18.log");
         let new_path = PathBuf::from("application-2026-06-19.log");
         let current_path = PathBuf::from("application.log");
+        let current_time = DateTime::parse_from_rfc3339("2026-06-20T10:00:00+09:00")
+            .expect("timestamp should parse")
+            .with_timezone(&Utc);
+        let current_mtime = UNIX_EPOCH
+            + Duration::from_secs(
+                u64::try_from(current_time.timestamp()).expect("timestamp should be positive"),
+            );
         let mut candidates = vec![
             OrderedFileCandidate {
                 source_index: 0,
                 relative_path: current_path,
                 timestamp_hint: None,
-                modified_at: UNIX_EPOCH + Duration::from_secs(1_750_320_000),
+                modified_at: current_mtime,
             },
             OrderedFileCandidate {
                 source_index: 0,
@@ -499,6 +594,19 @@ mod tests {
                 "application-2026-06-18.log",
                 "application-2026-06-19.log",
                 "application.log"
+            ]
+        );
+
+        sort_file_candidates(&mut candidates, ResultOrder::NewestFirst);
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.relative_path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            vec![
+                "application.log",
+                "application-2026-06-19.log",
+                "application-2026-06-18.log"
             ]
         );
     }
