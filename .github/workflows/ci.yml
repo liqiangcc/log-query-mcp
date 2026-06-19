@@ -8,7 +8,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   rust:
@@ -20,80 +20,8 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Normalize rotation candidate ordering
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("src/time_filter.rs")
-          text = path.read_text()
-          text = text.replace(
-              "    DateTime, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc, format::ParseErrorKind,\n",
-              "    DateTime, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, format::ParseErrorKind,\n",
-          )
-          old = '''pub fn sort_file_candidates(candidates: &mut [OrderedFileCandidate], order: ResultOrder) {
-              candidates.sort_by(|left, right| {
-                  let left_millis = candidate_time_millis(left);
-                  let right_millis = candidate_time_millis(right);
-                  let time_order = match order {
-                      ResultOrder::OldestFirst => left_millis.cmp(&right_millis),
-                      ResultOrder::NewestFirst => right_millis.cmp(&left_millis),
-                  };
-
-                  time_order
-                      .then_with(|| left.source_index.cmp(&right.source_index))
-                      .then_with(|| left.relative_path.cmp(&right.relative_path))
-              });
-          }
-
-          fn candidate_time_millis(candidate: &OrderedFileCandidate) -> i64 {
-              candidate
-                  .timestamp_hint
-                  .as_ref()
-                  .map(DateTime::timestamp_millis)
-                  .unwrap_or_else(|| DateTime::<Utc>::from(candidate.modified_at).timestamp_millis())
-          }
-          '''
-          new = '''pub fn sort_file_candidates(candidates: &mut [OrderedFileCandidate], order: ResultOrder) {
-              candidates.sort_by(|left, right| {
-                  let time_order = match (&left.timestamp_hint, &right.timestamp_hint) {
-                      (Some(left), Some(right)) => match order {
-                          ResultOrder::OldestFirst => left.cmp(right),
-                          ResultOrder::NewestFirst => right.cmp(left),
-                      },
-                      (Some(_), None) => Ordering::Less,
-                      (None, Some(_)) => Ordering::Greater,
-                      (None, None) => match order {
-                          ResultOrder::OldestFirst => left.modified_at.cmp(&right.modified_at),
-                          ResultOrder::NewestFirst => right.modified_at.cmp(&left.modified_at),
-                      },
-                  };
-
-                  time_order
-                      .then_with(|| left.source_index.cmp(&right.source_index))
-                      .then_with(|| left.relative_path.cmp(&right.relative_path))
-              });
-          }
-          '''
-          if old in text:
-              text = text.replace(old, new, 1)
-          path.write_text(text)
-          PY
-
-      - name: Format research sources
-        run: cargo fmt --all
-
-      - name: Commit normalized sources on branch pushes
-        if: github.event_name == 'push'
-        shell: bash
-        run: |
-          if ! git diff --quiet -- src; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src
-            git commit -m "fix: order rotation candidates by timestamp availability"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
