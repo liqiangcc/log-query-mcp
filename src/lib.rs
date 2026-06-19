@@ -11,6 +11,8 @@ mod context_reader;
 mod match_reference;
 #[cfg(target_os = "linux")]
 mod safe_fs;
+#[cfg(target_os = "linux")]
+mod search_cursor;
 
 pub use mcp_server::LogQueryServer;
 pub use model::*;
@@ -32,3 +34,8 @@ pub use match_reference::{
 };
 #[cfg(target_os = "linux")]
 pub use safe_fs::{FileIdentity, SafeFile, SafeOpenError, SafeRoot};
+#[cfg(target_os = "linux")]
+pub use search_cursor::{
+    CursorCandidateFile, MAX_CURSOR_CANDIDATE_FILES, SearchCursorData, SearchCursorError,
+    SearchCursorFileError, SearchCursorQuery, SearchCursorStore, open_cursor_file,
+};
