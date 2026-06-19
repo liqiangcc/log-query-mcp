@@ -7,7 +7,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   rust:
@@ -19,21 +19,8 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Format research sources
-        run: cargo fmt --all
-
-      - name: Commit formatted sources on research branch
-        if: github.event_name == 'push' && github.ref == 'refs/heads/spike/technical-research'
-        shell: bash
-        run: |
-          if git diff --quiet -- src; then
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src
-          git commit -m "style: apply rustfmt to directory source support"
-          git push origin HEAD:spike/technical-research
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
       - name: Run Clippy and capture diagnostics
         id: clippy
