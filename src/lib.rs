@@ -11,6 +11,8 @@ mod context_reader;
 #[cfg(target_os = "linux")]
 mod cursor_reader;
 #[cfg(target_os = "linux")]
+mod limits_config;
+#[cfg(target_os = "linux")]
 mod match_reference;
 #[cfg(target_os = "linux")]
 mod query_engine;
@@ -44,6 +46,13 @@ pub use context_reader::{
 };
 #[cfg(target_os = "linux")]
 pub use cursor_reader::{CursorSnapshotError, CursorSnapshotReader, open_cursor_snapshot_reader};
+#[cfg(target_os = "linux")]
+pub use limits_config::{
+    LimitConfigError, MAX_CONFIGURED_CONCURRENT_SCANS, MAX_CONFIGURED_QUERY_TIMEOUT_MILLIS,
+    MAX_CONFIGURED_RESPONSE_BYTES, MAX_CONFIGURED_SCAN_BYTES_PER_PAGE,
+    MAX_CONFIGURED_STATE_CAPACITY, MAX_CONFIGURED_STATE_TTL_SECONDS,
+    query_service_limits_from_env,
+};
 #[cfg(target_os = "linux")]
 pub use match_reference::{
     MatchReferenceData, MatchReferenceError, MatchReferenceFileError, MatchReferenceStore,
