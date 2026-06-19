@@ -6,6 +6,8 @@ mod scan_executor;
 mod scanner;
 
 #[cfg(target_os = "linux")]
+mod context_reader;
+#[cfg(target_os = "linux")]
 mod match_reference;
 #[cfg(target_os = "linux")]
 mod safe_fs;
@@ -18,6 +20,11 @@ pub use scanner::{
     ScanError, ScanLimits, ScanMatch, ScanOutcome, ScanRequest, ScanStopReason, scan_reader,
 };
 
+#[cfg(target_os = "linux")]
+pub use context_reader::{
+    ContextReadError, ContextReadLimits, ContextReadLine, ContextReadOutcome,
+    MAX_CONTEXT_BACKTRACK_BYTES, MAX_CONTEXT_FORWARD_BYTES, read_referenced_context,
+};
 #[cfg(target_os = "linux")]
 pub use match_reference::{
     MatchReferenceData, MatchReferenceError, MatchReferenceFileError, MatchReferenceStore,
