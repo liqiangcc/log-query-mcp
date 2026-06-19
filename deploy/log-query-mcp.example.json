@@ -1,0 +1,41 @@
+{
+  "sources": [
+    {
+      "source_id": "payment-test",
+      "name": "支付服务测试环境",
+      "description": "payment-service application logs",
+      "service": "payment-service",
+      "environment": "test",
+      "tags": ["payment", "java"],
+      "root": "/var/log/payment-service",
+      "files": [
+        "application.log",
+        "application.log.1"
+      ],
+      "timestamp_rule": {
+        "type": "rfc3339",
+        "prefix_bytes": 64
+      }
+    },
+    {
+      "source_id": "order-test",
+      "name": "订单服务测试环境",
+      "description": "order-service application logs",
+      "service": "order-service",
+      "environment": "test",
+      "tags": ["order", "java"],
+      "root": "/var/log/order-service",
+      "files": [
+        "application.log",
+        "application-2026-06-18.log",
+        "application-2026-06-19.log"
+      ],
+      "timestamp_rule": {
+        "type": "custom",
+        "prefix_bytes": 23,
+        "format": "%Y-%m-%d %H:%M:%S%.3f",
+        "default_offset_seconds": 32400
+      }
+    }
+  ]
+}
