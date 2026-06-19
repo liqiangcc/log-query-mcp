@@ -1,9 +1,7 @@
 use std::{env, sync::Arc};
 
 use anyhow::{Context, Result};
-use log_query_mcp::{
-    LogQueryServer, QueryService, QueryServiceLimits, SourceRegistry,
-};
+use log_query_mcp::{LogQueryServer, QueryService, QueryServiceLimits, SourceRegistry};
 use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::EnvFilter;
 
