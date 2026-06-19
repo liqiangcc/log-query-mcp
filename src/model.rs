@@ -28,9 +28,7 @@ pub struct ListLogSourcesResponse {
     pub sources: Vec<LogSource>,
 }
 
-#[derive(
-    Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq,
-)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ResultOrder {
     #[default]
