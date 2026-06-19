@@ -31,7 +31,7 @@ impl CursorSnapshotReader {
     }
 
     #[must_use]
-    pub const fn remaining_bytes(&self) -> u64 {
+    pub fn remaining_bytes(&self) -> u64 {
         self.inner.limit()
     }
 
@@ -104,9 +104,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use crate::{
-        CursorCandidateFile, FileIdentity, ResultOrder, SearchCursorQuery, SafeRoot,
-    };
+    use crate::{CursorCandidateFile, ResultOrder, SafeRoot, SearchCursorQuery};
 
     use super::*;
 
@@ -132,10 +130,7 @@ mod tests {
             candidates: vec![CursorCandidateFile {
                 source_id: "payment-test".to_owned(),
                 relative_path: relative_path.into(),
-                file_identity: FileIdentity {
-                    device: safe_file.identity().device,
-                    inode: safe_file.identity().inode,
-                },
+                file_identity: safe_file.identity(),
                 file_size_at_snapshot: safe_file.size(),
             }],
             next_candidate_index: 0,
