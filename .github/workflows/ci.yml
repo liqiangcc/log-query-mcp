@@ -8,7 +8,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   rust:
@@ -20,45 +20,8 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Apply R-07 Clippy fix
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("src/match_reference.rs")
-          text = path.read_text()
-          function_start = text.index("    fn purge_expired(&mut self, now: Instant) -> usize {")
-          loop_start = text.index("        loop {", function_start)
-          loop_end = text.index("\n\n        before - self.entries.len()", loop_start)
-          replacement = '''        while let Some(token) = self.order.front().cloned() {
-              match self.entries.get(&token) {
-                  Some(entry) if entry.expires_at <= now => {
-                      self.order.pop_front();
-                      self.entries.remove(&token);
-                  }
-                  None => {
-                      self.order.pop_front();
-                  }
-                  Some(_) => break,
-              }
-          }'''
-          text = text[:loop_start] + replacement + text[loop_end:]
-          path.write_text(text)
-          PY
-          cargo fmt --all
-
-      - name: Commit source fix on branch pushes
-        if: github.event_name == 'push'
-        shell: bash
-        run: |
-          if ! git diff --quiet -- src; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src
-            git commit -m "fix: satisfy Clippy in match reference store"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
