@@ -39,9 +39,7 @@ impl ContextReadLimits {
                 "context line count exceeds the server limit",
             ));
         }
-        if self.max_backtrack_bytes == 0
-            || self.max_backtrack_bytes > MAX_CONTEXT_BACKTRACK_BYTES
-        {
+        if self.max_backtrack_bytes == 0 || self.max_backtrack_bytes > MAX_CONTEXT_BACKTRACK_BYTES {
             return Err(ContextReadError::InvalidLimits(
                 "max_backtrack_bytes is outside the server limit",
             ));
@@ -146,12 +144,13 @@ pub fn read_referenced_context(
         return Err(ContextReadError::MatchOutsideContextBudget);
     }
 
-    let start_line = reference
-        .line_number
-        .checked_sub(u64::try_from(backtrack.actual_before).map_err(|_| {
-            ContextReadError::InvalidRequest("before_lines cannot be represented")
-        })?)
-        .ok_or(ContextReadError::FileChanged)?;
+    let start_line =
+        reference
+            .line_number
+            .checked_sub(u64::try_from(backtrack.actual_before).map_err(|_| {
+                ContextReadError::InvalidRequest("before_lines cannot be represented")
+            })?)
+            .ok_or(ContextReadError::FileChanged)?;
     let target_lines = backtrack
         .actual_before
         .saturating_add(1)
@@ -207,10 +206,9 @@ fn verify_reference_bytes(
     file.read_exact(&mut observed)
         .map_err(map_reference_read_error)?;
     let expected = reference.keyword.as_bytes();
-    let matches = observed
-        .iter()
-        .zip(expected)
-        .all(|(left, right)| fold_ascii(*left, reference.case_sensitive) == fold_ascii(*right, reference.case_sensitive));
+    let matches = observed.iter().zip(expected).all(|(left, right)| {
+        fold_ascii(*left, reference.case_sensitive) == fold_ascii(*right, reference.case_sensitive)
+    });
     if !matches {
         return Err(ContextReadError::FileChanged);
     }
@@ -527,11 +525,7 @@ mod tests {
 
     use super::*;
 
-    fn create_reference(
-        root: &SafeRoot,
-        relative_path: &str,
-        keyword: &str,
-    ) -> MatchReferenceData {
+    fn create_reference(root: &SafeRoot, relative_path: &str, keyword: &str) -> MatchReferenceData {
         let safe_file = root
             .open_regular_file(relative_path)
             .expect("fixture should open safely");
@@ -570,19 +564,11 @@ mod tests {
         let reference = create_reference(&root, "application.log", "abc123");
         let store = MatchReferenceStore::new(10, std::time::Duration::from_secs(60))
             .expect("store should be created");
-        let token = store
-            .insert(reference)
-            .expect("reference should be stored");
+        let token = store.insert(reference).expect("reference should be stored");
         let resolved = store.resolve(&token).expect("reference should resolve");
 
-        let context = read_referenced_context(
-            &root,
-            &resolved,
-            1,
-            2,
-            ContextReadLimits::default(),
-        )
-        .expect("context should be read");
+        let context = read_referenced_context(&root, &resolved, 1, 2, ContextReadLimits::default())
+            .expect("context should be read");
 
         assert_eq!(context.start_line, 2);
         assert_eq!(context.end_line, 5);
@@ -606,15 +592,11 @@ mod tests {
         fs::write(&path, "prefix changed suffix\n").expect("fixture should be rewritten");
 
         assert!(matches!(
-            read_referenced_context(
-                &root,
-                &reference,
-                0,
-                0,
-                ContextReadLimits::default()
-            ),
+            read_referenced_context(&root, &reference, 0, 0, ContextReadLimits::default()),
             Err(ContextReadError::FileChanged)
-                | Err(ContextReadError::Reference(MatchReferenceFileError::FileChanged))
+                | Err(ContextReadError::Reference(
+                    MatchReferenceFileError::FileChanged
+                ))
         ));
     }
 
