@@ -8,7 +8,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   rust:
@@ -23,12 +23,17 @@ jobs:
       - name: Format research sources
         run: cargo fmt --all
 
-      - name: Upload formatted sources
-        uses: actions/upload-artifact@v4
-        with:
-          name: r05-r06-formatted-sources
-          path: src
-          if-no-files-found: error
+      - name: Commit formatted sources on branch pushes
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          if ! git diff --quiet -- src; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src
+            git commit -m "style: apply rustfmt to scanner research"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
 
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
