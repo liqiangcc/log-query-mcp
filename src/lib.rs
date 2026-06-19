@@ -9,6 +9,8 @@ mod time_filter;
 #[cfg(target_os = "linux")]
 mod context_reader;
 #[cfg(target_os = "linux")]
+mod cursor_reader;
+#[cfg(target_os = "linux")]
 mod match_reference;
 #[cfg(target_os = "linux")]
 mod safe_fs;
@@ -33,6 +35,10 @@ pub use time_filter::{
 pub use context_reader::{
     ContextReadError, ContextReadLimits, ContextReadLine, ContextReadOutcome,
     MAX_CONTEXT_BACKTRACK_BYTES, MAX_CONTEXT_FORWARD_BYTES, read_referenced_context,
+};
+#[cfg(target_os = "linux")]
+pub use cursor_reader::{
+    CursorSnapshotError, CursorSnapshotReader, open_cursor_snapshot_reader,
 };
 #[cfg(target_os = "linux")]
 pub use match_reference::{
