@@ -210,6 +210,8 @@ def decode_http_messages(media_type: str, body: bytes) -> list[dict[str, Any]]:
                 return
             payload = "\n".join(data_lines)
             data_lines.clear()
+            if not payload.strip():
+                return
             try:
                 message = json.loads(payload)
             except json.JSONDecodeError as error:
