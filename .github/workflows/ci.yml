@@ -1,19 +1,22 @@
 name: CI
 
 on:
+  push:
+    branches:
+      - "spike/**"
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   rust:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out pull request head branch
+      - name: Check out research branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
+          ref: spike/technical-research
 
       - name: Install Rust toolchain
         run: rustup show
@@ -43,11 +46,13 @@ jobs:
               ".get(candidate.source_id.as_str())",
               ".get(&candidate.source_id)",
           )
-          text = text.replace(
-              "            for scan_match in outcome.results {\n",
-              "            let accepted_before = results.len();\n            for scan_match in outcome.results {\n",
-              1,
-          )
+          if "            let accepted_before = results.len();\n            for scan_match in outcome.results {\n" not in text:
+              text = text.replace(
+                  "            for scan_match in outcome.results {\n",
+                  "            let accepted_before = results.len();\n"
+                  "            for scan_match in outcome.results {\n",
+                  1,
+              )
           text = text.replace(
               "                    timestamp: timestamp.clone(),",
               "                    timestamp,",
@@ -55,7 +60,9 @@ jobs:
           )
           text = text.replace(
               "            state.results_returned = state.results_returned.saturating_add(results.len());\n",
-              "            state.results_returned = state\n                .results_returned\n                .saturating_add(results.len().saturating_sub(accepted_before));\n",
+              "            state.results_returned = state\n"
+              "                .results_returned\n"
+              "                .saturating_add(results.len().saturating_sub(accepted_before));\n",
               1,
           )
           query.write_text(text)
@@ -63,24 +70,24 @@ jobs:
           executor = Path("src/scan_executor.rs")
           text = executor.read_text().replace(
               "#[derive(Clone)]\npub struct ScanExecutor",
-              "#[derive(Clone, Debug)]\npub struct ScanExecutor",
+              "#[derive(Debug, Clone)]\npub struct ScanExecutor",
               1,
           )
           executor.write_text(text)
           PY
           cargo fmt --all
 
-      - name: Commit repaired sources
-        shell: bash
-        run: |
-          if git diff --quiet -- src; then
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src
-          git commit -m "fix: compile integrated query engine"
-          git push origin "HEAD:${GITHUB_HEAD_REF}"
+      - name: Upload repaired sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: repaired-integrated-query-sources
+          path: |
+            src/query_engine.rs
+            src/scan_executor.rs
+          if-no-files-found: error
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
