@@ -164,10 +164,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn returns_sanitized_tool_error_for_unknown_source() {
         let (_directory, server) = server();
-        let error = server
+        let error = match server
             .search_logs(Parameters(request("unknown-source")))
             .await
-            .expect_err("unknown source should fail");
+        {
+            Ok(_) => panic!("unknown source should fail"),
+            Err(error) => error,
+        };
 
         assert!(error.contains("configuration"));
         assert!(!error.contains('/'));
