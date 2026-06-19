@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches:
+      - main
       - "spike/**"
   pull_request:
 
@@ -13,78 +14,11 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out research branch
+      - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          ref: spike/technical-research
 
       - name: Install Rust toolchain
         run: rustup show
-
-      - name: Repair integrated query source
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          query = Path("src/query_engine.rs")
-          text = query.read_text()
-          text = text.replace("    io::Read,\n", "")
-          text = text.replace(
-              "    MatchReferenceData, MatchReferenceError, MatchReferenceStore, QueryServiceLimits as _,\n",
-              "    MatchReferenceData, MatchReferenceError, MatchReferenceStore,\n",
-          )
-          text = text.replace(
-              "let source_order: HashMap<&str, usize>",
-              "let source_order: HashMap<String, usize>",
-          )
-          text = text.replace(
-              ".map(|(index, source_id)| (source_id.as_str(), index))",
-              ".map(|(index, source_id)| (source_id.clone(), index))",
-          )
-          text = text.replace(
-              ".get(candidate.source_id.as_str())",
-              ".get(&candidate.source_id)",
-          )
-          if "            let accepted_before = results.len();\n            for scan_match in outcome.results {\n" not in text:
-              text = text.replace(
-                  "            for scan_match in outcome.results {\n",
-                  "            let accepted_before = results.len();\n"
-                  "            for scan_match in outcome.results {\n",
-                  1,
-              )
-          text = text.replace(
-              "                    timestamp: timestamp.clone(),",
-              "                    timestamp,",
-              1,
-          )
-          text = text.replace(
-              "            state.results_returned = state.results_returned.saturating_add(results.len());\n",
-              "            state.results_returned = state\n"
-              "                .results_returned\n"
-              "                .saturating_add(results.len().saturating_sub(accepted_before));\n",
-              1,
-          )
-          query.write_text(text)
-
-          executor = Path("src/scan_executor.rs")
-          text = executor.read_text().replace(
-              "#[derive(Clone)]\npub struct ScanExecutor",
-              "#[derive(Debug, Clone)]\npub struct ScanExecutor",
-              1,
-          )
-          executor.write_text(text)
-          PY
-          cargo fmt --all
-
-      - name: Upload repaired sources
-        uses: actions/upload-artifact@v4
-        with:
-          name: repaired-integrated-query-sources
-          path: |
-            src/query_engine.rs
-            src/scan_executor.rs
-          if-no-files-found: error
 
       - name: Check formatting
         run: cargo fmt --all -- --check
