@@ -60,7 +60,7 @@ jobs:
           python3 research/scripts/mcp_http_smoke.py \
             --server target/debug/log-query-mcp \
             --report mcp-http-smoke.json \
-            | tee protocol-http-smoke.log
+            2>&1 | tee protocol-http-smoke.log
 
       - name: Run Linux deployment doctor smoke test
         id: doctor
