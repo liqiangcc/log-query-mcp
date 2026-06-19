@@ -6,6 +6,8 @@ mod scan_executor;
 mod scanner;
 
 #[cfg(target_os = "linux")]
+mod match_reference;
+#[cfg(target_os = "linux")]
 mod safe_fs;
 
 pub use mcp_server::LogQueryServer;
@@ -16,5 +18,10 @@ pub use scanner::{
     ScanError, ScanLimits, ScanMatch, ScanOutcome, ScanRequest, ScanStopReason, scan_reader,
 };
 
+#[cfg(target_os = "linux")]
+pub use match_reference::{
+    MatchReferenceData, MatchReferenceError, MatchReferenceFileError, MatchReferenceStore,
+    open_referenced_file,
+};
 #[cfg(target_os = "linux")]
 pub use safe_fs::{FileIdentity, SafeFile, SafeOpenError, SafeRoot};
