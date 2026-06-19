@@ -242,8 +242,8 @@ mod tests {
         let rule = DirectoryDiscoveryRule::new(".", false, vec![".log".to_owned()])
             .expect("rule should be valid");
 
-        let files = discover_regular_files(&root, &[rule], 10)
-            .expect("directory discovery should succeed");
+        let files =
+            discover_regular_files(&root, &[rule], 10).expect("directory discovery should succeed");
         assert_eq!(files, vec![PathBuf::from("application.log")]);
     }
 
@@ -267,18 +267,18 @@ mod tests {
             directory.path().join("logs/linked.log"),
         )
         .expect("file symlink should be created");
-        symlink(outside.path(), directory.path().join("logs/linked-directory"))
-            .expect("directory symlink should be created");
-        let root = SafeRoot::open(directory.path()).expect("root should open");
-        let rule = DirectoryDiscoveryRule::new(
-            "logs",
-            true,
-            vec![".log".to_owned(), ".log.1".to_owned()],
+        symlink(
+            outside.path(),
+            directory.path().join("logs/linked-directory"),
         )
-        .expect("rule should be valid");
+        .expect("directory symlink should be created");
+        let root = SafeRoot::open(directory.path()).expect("root should open");
+        let rule =
+            DirectoryDiscoveryRule::new("logs", true, vec![".log".to_owned(), ".log.1".to_owned()])
+                .expect("rule should be valid");
 
-        let files = discover_regular_files(&root, &[rule], 10)
-            .expect("recursive discovery should succeed");
+        let files =
+            discover_regular_files(&root, &[rule], 10).expect("recursive discovery should succeed");
         assert_eq!(
             files,
             vec![
