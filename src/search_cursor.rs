@@ -211,13 +211,9 @@ impl SearchCursorStore {
 
         let token = new_unique_token(&state.entries);
         state.order.push_back(token.clone());
-        state.entries.insert(
-            token.clone(),
-            StoredCursor {
-                data,
-                expires_at,
-            },
-        );
+        state
+            .entries
+            .insert(token.clone(), StoredCursor { data, expires_at });
         Ok(token)
     }
 
@@ -514,21 +510,26 @@ mod tests {
 
     #[test]
     fn creates_opaque_cursor_and_resolves_state() {
-        let store = SearchCursorStore::new(10, Duration::from_secs(60))
-            .expect("store should be created");
+        let store =
+            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created");
         let token = store.insert(data()).expect("cursor should be inserted");
 
         assert!(token.starts_with(SEARCH_CURSOR_PREFIX));
         assert_eq!(token.len(), SEARCH_CURSOR_LENGTH);
         assert!(!token.contains("payment"));
         assert!(!token.contains("application"));
-        assert_eq!(store.resolve(&token, &query()).expect("cursor should resolve"), data());
+        assert_eq!(
+            store
+                .resolve(&token, &query())
+                .expect("cursor should resolve"),
+            data()
+        );
     }
 
     #[test]
     fn rejects_cursor_with_changed_query_conditions() {
-        let store = SearchCursorStore::new(10, Duration::from_secs(60))
-            .expect("store should be created");
+        let store =
+            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created");
         let token = store.insert(data()).expect("cursor should be inserted");
         let mut changed_query = query();
         changed_query.keyword = "orderId=10001".to_owned();
@@ -541,8 +542,8 @@ mod tests {
 
     #[test]
     fn replace_invalidates_previous_cursor_atomically() {
-        let store = SearchCursorStore::new(10, Duration::from_secs(60))
-            .expect("store should be created");
+        let store =
+            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created");
         let token = store.insert(data()).expect("cursor should be inserted");
         let mut next_data = data();
         next_data.next_byte_offset = 2048;
@@ -566,8 +567,8 @@ mod tests {
 
     #[test]
     fn complete_removes_cursor() {
-        let store = SearchCursorStore::new(10, Duration::from_secs(60))
-            .expect("store should be created");
+        let store =
+            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created");
         let token = store.insert(data()).expect("cursor should be inserted");
         store
             .complete(&token, &query())
@@ -582,19 +583,17 @@ mod tests {
 
     #[test]
     fn expires_and_evicts_cursor_state() {
-        let expiring = SearchCursorStore::new(10, Duration::from_millis(5))
-            .expect("store should be created");
-        let expiring_token = expiring
-            .insert(data())
-            .expect("cursor should be inserted");
+        let expiring =
+            SearchCursorStore::new(10, Duration::from_millis(5)).expect("store should be created");
+        let expiring_token = expiring.insert(data()).expect("cursor should be inserted");
         thread::sleep(Duration::from_millis(20));
         assert!(matches!(
             expiring.resolve(&expiring_token, &query()),
             Err(SearchCursorError::UnknownOrExpired)
         ));
 
-        let bounded = SearchCursorStore::new(1, Duration::from_secs(60))
-            .expect("store should be created");
+        let bounded =
+            SearchCursorStore::new(1, Duration::from_secs(60)).expect("store should be created");
         let first = bounded.insert(data()).expect("cursor should be inserted");
         let second = bounded
             .insert(data())
@@ -608,8 +607,8 @@ mod tests {
 
     #[test]
     fn new_store_invalidates_existing_cursor() {
-        let first_store = SearchCursorStore::new(10, Duration::from_secs(60))
-            .expect("store should be created");
+        let first_store =
+            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created");
         let token = first_store
             .insert(data())
             .expect("cursor should be inserted");
