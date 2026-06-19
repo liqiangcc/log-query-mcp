@@ -20,4 +20,11 @@ unit/integration tests: 78 passed
 benchmark smoke: passed
 ```
 
-CI 烟测只验证基准链路可运行，不代表生产性能结论。1 GiB、10 GiB、多文件和并发数据仍需在目标 Linux 服务器采集。
+CI 烟测验证了：
+
+- 生成器产生精确的 1 MiB 日志。
+- 不存在关键字时扫描到文件末尾。
+- 扫描字节数等于文件大小。
+- 停止原因为 `Complete`。
+
+该烟测不代表生产性能结论。1 GiB、10 GiB、多文件、并发、取消延迟和 systemd 资源限制数据仍需在目标 Linux 服务器采集。
