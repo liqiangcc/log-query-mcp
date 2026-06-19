@@ -66,13 +66,9 @@ impl MatchReferenceStore {
         };
 
         state.order.push_back(token.clone());
-        state.entries.insert(
-            token.clone(),
-            StoredReference {
-                data,
-                expires_at,
-            },
-        );
+        state
+            .entries
+            .insert(token.clone(), StoredReference { data, expires_at });
 
         Ok(token)
     }
@@ -230,8 +226,8 @@ mod tests {
 
     #[test]
     fn creates_opaque_unique_references_and_resolves_data() {
-        let store = MatchReferenceStore::new(10, Duration::from_secs(60))
-            .expect("store should be created");
+        let store =
+            MatchReferenceStore::new(10, Duration::from_secs(60)).expect("store should be created");
         let first = store
             .insert(sample_data())
             .expect("reference should be inserted");
@@ -244,13 +240,16 @@ mod tests {
         assert_eq!(first.len(), MATCH_REFERENCE_LENGTH);
         assert!(!first.contains("payment"));
         assert!(!first.contains("application"));
-        assert_eq!(store.resolve(&first).expect("reference should resolve"), sample_data());
+        assert_eq!(
+            store.resolve(&first).expect("reference should resolve"),
+            sample_data()
+        );
     }
 
     #[test]
     fn rejects_unknown_and_modified_references() {
-        let store = MatchReferenceStore::new(10, Duration::from_secs(60))
-            .expect("store should be created");
+        let store =
+            MatchReferenceStore::new(10, Duration::from_secs(60)).expect("store should be created");
         let token = store
             .insert(sample_data())
             .expect("reference should be inserted");
@@ -286,8 +285,8 @@ mod tests {
 
     #[test]
     fn evicts_oldest_reference_at_capacity() {
-        let store = MatchReferenceStore::new(2, Duration::from_secs(60))
-            .expect("store should be created");
+        let store =
+            MatchReferenceStore::new(2, Duration::from_secs(60)).expect("store should be created");
         let first = store
             .insert(sample_data())
             .expect("first reference should be inserted");
@@ -309,8 +308,8 @@ mod tests {
 
     #[test]
     fn restart_or_new_store_invalidates_existing_token() {
-        let first_store = MatchReferenceStore::new(10, Duration::from_secs(60))
-            .expect("store should be created");
+        let first_store =
+            MatchReferenceStore::new(10, Duration::from_secs(60)).expect("store should be created");
         let token = first_store
             .insert(sample_data())
             .expect("reference should be inserted");
