@@ -29,8 +29,7 @@ async fn main() -> Result<()> {
     let service = StreamableHttpService::new(
         || Ok(LogQueryServer::new()),
         LocalSessionManager::default().into(),
-        StreamableHttpServerConfig::default()
-            .with_cancellation_token(cancellation.child_token()),
+        StreamableHttpServerConfig::default().with_cancellation_token(cancellation.child_token()),
     );
     let router = axum::Router::new().nest_service("/mcp", service);
     let listener = tokio::net::TcpListener::bind(bind_address)
