@@ -1,0 +1,4 @@
+2026-06-19T14:20:00.900+09:00 INFO traceId=abc123 orderId=10001 order submitted
+2026-06-19T14:20:01.100+09:00 INFO traceId=abc123 orderId=10001 requesting payment
+2026-06-19T14:20:03.200+09:00 ERROR traceId=abc123 orderId=10001 payment failed
+2026-06-19T14:20:03.250+09:00 INFO traceId=abc123 orderId=10001 status changed to PAYMENT_FAILED
