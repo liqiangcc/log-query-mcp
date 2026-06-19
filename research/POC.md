@@ -1,6 +1,6 @@
-# R-01 至 R-06 技术预研 POC
+# R-01 至 R-07 技术预研 POC
 
-本 POC 用于验证 Rust 工程基线、官方 `rmcp` tools-only Server、MCP 工具 Schema、Linux 安全文件访问、有界日志扫描，以及阻塞任务的并发和取消控制。
+本 POC 用于验证 Rust 工程基线、官方 `rmcp` tools-only Server、MCP 工具 Schema、Linux 安全文件访问、有界日志扫描、阻塞任务控制，以及短期不透明匹配引用与受控上下文读取。
 
 ## 已实现
 
@@ -26,6 +26,11 @@
 - 基于 Semaphore 的全局扫描并发限制。
 - 排队阶段和运行阶段的 `CancellationToken` 与绝对 deadline 检查。
 - async 扫描 Future 被中止后，协作取消阻塞任务并释放许可。
+- 不可预测且带 TTL、容量上限的服务端 `match_ref`。
+- 引用绑定日志来源、规范化相对路径、文件身份和真实扫描偏移。
+- 文件轮转、截断和同 inode 内容改写检测。
+- 有界向后查找和向前读取日志上下文。
+- 安全打开、扫描、引用存储和上下文读取的完整集成测试。
 
 ## 运行 Streamable HTTP
 
@@ -69,19 +74,23 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 ```
 
+R-01 至 R-07 当前代码已通过上述严格 CI。
+
 ## 当前边界
 
 这是预研 POC，不是正式日志查询服务：
 
-- MCP 工具仍使用内存模拟记录，尚未接入真实 `SafeRoot + ScanExecutor` 查询链路。
+- MCP 三个工具仍使用内存模拟记录，尚未接入真实 `SafeRoot + ScanExecutor + MatchReferenceStore` 查询链路。
 - `SafeRoot` 只验证已知相对路径的安全打开，尚未实现目录发现和管理员文件名规则。
 - 扫描器只负责单个 `Read`，尚未实现多文件和多日志来源编排。
 - 返回内容合计限制不等于完整 MCP JSON 响应大小限制。
 - 尚未验证客户端断开能否从 `rmcp` / Axum 传递到扫描 `CancellationToken`。
+- 上下文读取尚未接入取消和 deadline。
 - 尚未执行 1 GiB、10 GiB 和大量小文件性能基准。
 - 尚未实现分页游标。
 - 时间字段已进入 Schema，但尚未执行时间过滤。
-- `match_ref` 仍为确定性测试值，不是安全的服务端状态引用。
+- `match_ref` Store 尚未成为 MCP Server 的共享状态。
+- 首期引用为单实例内存状态，服务重启后失效。
 - `openat2()` 方案要求 Linux kernel 5.6 及以上。
 - MCP Inspector 和目标 AI 客户端兼容性仍需人工执行并记录结果。
 
@@ -92,5 +101,6 @@ cargo test --all-targets --all-features
 - [安全文件访问预研](../docs/SAFE_FILE_ACCESS_RESEARCH.md)
 - [有界日志扫描器预研](../docs/SCANNER_RESEARCH.md)
 - [阻塞扫描执行器预研](../docs/EXECUTOR_RESEARCH.md)
+- [安全 match_ref 与上下文读取预研](../docs/MATCH_REFERENCE_RESEARCH.md)
 
-下一阶段进入 R-07：设计安全的服务端有状态 `match_ref`，并将安全文件打开、扫描结果和上下文读取串联起来。
+下一阶段应把已验证的组件接入真实 MCP 工具：配置一个受控日志来源，通过 `search_logs` 安全扫描真实文件并生成 `match_ref`，再由 `get_log_context` 解析引用并读取有限上下文。
