@@ -38,7 +38,7 @@ jobs:
           set -o pipefail
           cargo test --all-targets --all-features 2>&1 | tee tests.log
 
-      - name: Run scanner benchmark smoke test
+      - name: Run concurrent scanner benchmark smoke test
         id: benchmark
         continue-on-error: true
         shell: bash
@@ -53,6 +53,7 @@ jobs:
             /tmp/log-query-benchmark-smoke.log \
             __NO_MATCH__ \
             1 \
+            2 \
             | tee benchmark-smoke.json
           python3 - <<'PY'
           import json
@@ -60,9 +61,12 @@ jobs:
 
           report = json.loads(Path("benchmark-smoke.json").read_text())
           assert report["file_bytes"] == 1024 * 1024
-          assert report["total_bytes_scanned"] == 1024 * 1024
+          assert report["iterations_per_worker"] == 1
+          assert report["concurrency"] == 2
+          assert report["total_scans"] == 2
+          assert report["total_bytes_scanned"] == 2 * 1024 * 1024
           assert report["total_results"] == 0
-          assert report["last_stop_reason"] == "Complete"
+          assert report["stop_reasons"] == {"Complete": 2}
           PY
 
       - name: Upload diagnostics
