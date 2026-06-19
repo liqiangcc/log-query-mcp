@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::sync::Arc;
 
 use rmcp::{
     Json,
@@ -7,72 +7,26 @@ use rmcp::{
 };
 
 use crate::{
-    ContextLine, GetLogContextRequest, GetLogContextResponse, ListLogSourcesResponse, LogMatch,
-    LogSource, MAX_CONTEXT_LINES_PER_SIDE, MAX_KEYWORD_CHARS, MAX_REFERENCE_CHARS, MAX_RESULTS,
-    MAX_SOURCE_ID_CHARS, MAX_SOURCES, ResultOrder, SearchLogsRequest, SearchLogsResponse,
+    GetLogContextRequest, GetLogContextResponse, ListLogSourcesResponse, QueryError, QueryService,
+    SearchLogsRequest, SearchLogsResponse,
 };
-
-#[derive(Debug, Clone, Copy)]
-struct MockRecord {
-    match_ref: &'static str,
-    source_id: &'static str,
-    file_id: &'static str,
-    file_name: &'static str,
-    line_number: usize,
-    timestamp: &'static str,
-    content: &'static str,
-}
-
-const MOCK_RECORDS: &[MockRecord] = &[
-    MockRecord {
-        match_ref: "match-payment-4",
-        source_id: "payment-test",
-        file_id: "file-payment-application",
-        file_name: "application.log",
-        line_number: 4,
-        timestamp: "2026-06-19T14:20:03.125+09:00",
-        content: "ERROR traceId=abc123 orderId=10001 PaymentAuthException: channel returned 403",
-    },
-    MockRecord {
-        match_ref: "match-order-3",
-        source_id: "order-test",
-        file_id: "file-order-application",
-        file_name: "application.log",
-        line_number: 3,
-        timestamp: "2026-06-19T14:20:03.200+09:00",
-        content: "ERROR traceId=abc123 orderId=10001 payment failed",
-    },
-    MockRecord {
-        match_ref: "match-payment-8",
-        source_id: "payment-test",
-        file_id: "file-payment-application",
-        file_name: "application.log",
-        line_number: 8,
-        timestamp: "2026-06-19T14:21:11.000+09:00",
-        content: "INFO traceId=def456 orderId=10002 payment succeeded",
-    },
-];
 
 #[derive(Clone)]
 pub struct LogQueryServer {
     tool_router: ToolRouter<Self>,
+    query_service: Arc<QueryService>,
 }
 
 #[tool_handler(router = self.tool_router)]
 impl rmcp::ServerHandler for LogQueryServer {}
 
-impl Default for LogQueryServer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[tool_router(router = tool_router)]
 impl LogQueryServer {
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(query_service: Arc<QueryService>) -> Self {
         Self {
             tool_router: Self::tool_router(),
+            query_service,
         }
     }
 
@@ -81,7 +35,7 @@ impl LogQueryServer {
         description = "List configured log sources. Use source_id values from this result in search_logs. Server file-system paths are never returned."
     )]
     pub async fn list_log_sources(&self) -> Json<ListLogSourcesResponse> {
-        Json(Self::list_sources_response())
+        Json(self.query_service.list_sources())
     }
 
     #[tool(
@@ -92,7 +46,11 @@ impl LogQueryServer {
         &self,
         Parameters(request): Parameters<SearchLogsRequest>,
     ) -> Result<Json<SearchLogsResponse>, String> {
-        Self::search_response(request).map(Json)
+        self.query_service
+            .search(request)
+            .await
+            .map(Json)
+            .map_err(tool_error)
     }
 
     #[tool(
@@ -103,267 +61,115 @@ impl LogQueryServer {
         &self,
         Parameters(request): Parameters<GetLogContextRequest>,
     ) -> Result<Json<GetLogContextResponse>, String> {
-        Self::context_response(request).map(Json)
+        self.query_service
+            .get_context(request)
+            .await
+            .map(Json)
+            .map_err(tool_error)
     }
+}
 
-    fn list_sources_response() -> ListLogSourcesResponse {
-        ListLogSourcesResponse {
-            sources: vec![
-                LogSource {
-                    source_id: "payment-test".to_owned(),
-                    name: "支付服务测试环境".to_owned(),
-                    description: "payment-service application logs".to_owned(),
-                    service: "payment-service".to_owned(),
-                    environment: "test".to_owned(),
-                    tags: vec!["payment".to_owned(), "java".to_owned()],
-                },
-                LogSource {
-                    source_id: "order-test".to_owned(),
-                    name: "订单服务测试环境".to_owned(),
-                    description: "order-service application logs".to_owned(),
-                    service: "order-service".to_owned(),
-                    environment: "test".to_owned(),
-                    tags: vec!["order".to_owned(), "java".to_owned()],
-                },
-            ],
-        }
-    }
-
-    fn search_response(request: SearchLogsRequest) -> Result<SearchLogsResponse, String> {
-        Self::validate_search_request(&request)?;
-
-        if request.cursor.is_some() {
-            return Err("cursor pagination is not implemented in the first POC".to_owned());
-        }
-
-        let selected_sources: HashSet<&str> =
-            request.source_ids.iter().map(String::as_str).collect();
-        let keyword = if request.case_sensitive {
-            request.keyword.clone()
-        } else {
-            request.keyword.to_lowercase()
-        };
-
-        let mut matches: Vec<LogMatch> = MOCK_RECORDS
-            .iter()
-            .filter(|record| selected_sources.contains(record.source_id))
-            .filter(|record| {
-                if request.case_sensitive {
-                    record.content.contains(&keyword)
-                } else {
-                    record.content.to_lowercase().contains(&keyword)
-                }
-            })
-            .map(|record| LogMatch {
-                match_ref: record.match_ref.to_owned(),
-                source_id: record.source_id.to_owned(),
-                file_id: record.file_id.to_owned(),
-                file_name: record.file_name.to_owned(),
-                line_number: record.line_number,
-                timestamp: Some(record.timestamp.to_owned()),
-                content: record.content.to_owned(),
-                content_truncated: false,
-            })
-            .collect();
-
-        matches.sort_by(|left, right| left.timestamp.cmp(&right.timestamp));
-        if matches!(request.order, ResultOrder::NewestFirst) {
-            matches.reverse();
-        }
-
-        let truncated = matches.len() > request.max_results;
-        matches.truncate(request.max_results);
-
-        Ok(SearchLogsResponse {
-            results: matches,
-            truncated,
-            next_cursor: None,
-        })
-    }
-
-    fn validate_search_request(request: &SearchLogsRequest) -> Result<(), String> {
-        if request.source_ids.is_empty() {
-            return Err("source_ids must contain at least one configured source".to_owned());
-        }
-        if request.source_ids.len() > MAX_SOURCES {
-            return Err(format!(
-                "source_ids cannot contain more than {MAX_SOURCES} entries"
-            ));
-        }
-        if let Some(source_id) = request.source_ids.iter().find(|source_id| {
-            source_id.is_empty() || source_id.chars().count() > MAX_SOURCE_ID_CHARS
-        }) {
-            return Err(format!(
-                "invalid source_id length: {} characters",
-                source_id.chars().count()
-            ));
-        }
-        if request.keyword.is_empty() {
-            return Err("keyword must not be empty".to_owned());
-        }
-        if request.keyword.chars().count() > MAX_KEYWORD_CHARS {
-            return Err(format!(
-                "keyword cannot contain more than {MAX_KEYWORD_CHARS} characters"
-            ));
-        }
-        if request.max_results == 0 || request.max_results > MAX_RESULTS {
-            return Err(format!("max_results must be between 1 and {MAX_RESULTS}"));
-        }
-        if request
-            .cursor
-            .as_ref()
-            .is_some_and(|cursor| cursor.is_empty() || cursor.chars().count() > MAX_REFERENCE_CHARS)
-        {
-            return Err(format!(
-                "cursor must contain between 1 and {MAX_REFERENCE_CHARS} characters"
-            ));
-        }
-
-        let known_sources: HashSet<String> = Self::list_sources_response()
-            .sources
-            .into_iter()
-            .map(|source| source.source_id)
-            .collect();
-        if let Some(unknown) = request
-            .source_ids
-            .iter()
-            .find(|source_id| !known_sources.contains(source_id.as_str()))
-        {
-            return Err(format!("unknown log source: {unknown}"));
-        }
-
-        Ok(())
-    }
-
-    fn context_response(request: GetLogContextRequest) -> Result<GetLogContextResponse, String> {
-        if request.match_ref.is_empty() || request.match_ref.chars().count() > MAX_REFERENCE_CHARS {
-            return Err(format!(
-                "match_ref must contain between 1 and {MAX_REFERENCE_CHARS} characters"
-            ));
-        }
-        if request.before_lines > MAX_CONTEXT_LINES_PER_SIDE
-            || request.after_lines > MAX_CONTEXT_LINES_PER_SIDE
-        {
-            return Err(format!(
-                "before_lines and after_lines cannot exceed {MAX_CONTEXT_LINES_PER_SIDE}"
-            ));
-        }
-
-        if request.match_ref != "match-payment-4" {
-            return Err("unknown or expired match_ref".to_owned());
-        }
-
-        let all_lines = [
-            ContextLine {
-                line_number: 1,
-                content: "INFO traceId=abc123 request received".to_owned(),
-            },
-            ContextLine {
-                line_number: 2,
-                content: "INFO traceId=abc123 orderId=10001 calling payment channel".to_owned(),
-            },
-            ContextLine {
-                line_number: 3,
-                content: "WARN traceId=abc123 channel response status=403".to_owned(),
-            },
-            ContextLine {
-                line_number: 4,
-                content:
-                    "ERROR traceId=abc123 orderId=10001 PaymentAuthException: channel returned 403"
-                        .to_owned(),
-            },
-            ContextLine {
-                line_number: 5,
-                content: "    at payment::authorize(payment.rs:42)".to_owned(),
-            },
-            ContextLine {
-                line_number: 6,
-                content: "Caused by: HttpException: forbidden".to_owned(),
-            },
-        ];
-
-        let match_index = 3usize;
-        let start_index = match_index.saturating_sub(request.before_lines);
-        let end_index = (match_index + request.after_lines + 1).min(all_lines.len());
-        let lines = all_lines[start_index..end_index].to_vec();
-        let start_line = lines.first().map_or(4, |line| line.line_number);
-        let end_line = lines.last().map_or(4, |line| line.line_number);
-
-        Ok(GetLogContextResponse {
-            source_id: "payment-test".to_owned(),
-            file_id: "file-payment-application".to_owned(),
-            file_name: "application.log".to_owned(),
-            start_line,
-            end_line,
-            lines,
-            truncated: false,
-        })
-    }
+fn tool_error(error: QueryError) -> String {
+    error.to_string()
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{fs, path::PathBuf};
+
+    use tempfile::{TempDir, tempdir};
+
+    use crate::{
+        LogSourceConfig, QueryServiceLimits, ResultOrder, ServiceConfig, SourceRegistry,
+        TimestampRuleConfig,
+    };
+
     use super::*;
 
-    fn request(keyword: &str) -> SearchLogsRequest {
+    fn server() -> (TempDir, LogQueryServer) {
+        let directory = tempdir().expect("temporary directory should be created");
+        let content = concat!(
+            "2026-06-19T14:20:01+09:00 INFO before\n",
+            "2026-06-19T14:20:02+09:00 ERROR traceId=abc123 failure\n",
+            "    at payment::authorize\n",
+        );
+        fs::write(directory.path().join("application.log"), content)
+            .expect("fixture should be written");
+        let registry = SourceRegistry::from_config(
+            ServiceConfig {
+                sources: vec![LogSourceConfig {
+                    source_id: "payment-test".to_owned(),
+                    name: "payment test".to_owned(),
+                    description: "payment application logs".to_owned(),
+                    service: "payment".to_owned(),
+                    environment: "test".to_owned(),
+                    tags: vec!["java".to_owned()],
+                    root: directory.path().to_path_buf(),
+                    files: vec![PathBuf::from("application.log")],
+                    timestamp_rule: Some(TimestampRuleConfig::Rfc3339 { prefix_bytes: 64 }),
+                }],
+            },
+            ".",
+        )
+        .expect("registry should load");
+        let query_service = QueryService::new(Arc::new(registry), QueryServiceLimits::default())
+            .expect("query service should start");
+
+        (directory, LogQueryServer::new(Arc::new(query_service)))
+    }
+
+    fn request(source_id: &str) -> SearchLogsRequest {
         SearchLogsRequest {
-            source_ids: vec!["payment-test".to_owned(), "order-test".to_owned()],
-            keyword: keyword.to_owned(),
+            source_ids: vec![source_id.to_owned()],
+            keyword: "abc123".to_owned(),
             case_sensitive: false,
             start_time: None,
             end_time: None,
             order: ResultOrder::OldestFirst,
-            max_results: crate::DEFAULT_MAX_RESULTS,
+            max_results: 10,
             cursor: None,
         }
     }
 
-    #[test]
-    fn lists_sources_without_paths() {
-        let response = LogQueryServer::list_sources_response();
-        assert_eq!(response.sources.len(), 2);
-        assert_eq!(response.sources[0].source_id, "payment-test");
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn delegates_tools_to_real_files() {
+        let (_directory, server) = server();
+
+        let sources = server.list_log_sources().await.0;
+        assert_eq!(sources.sources.len(), 1);
+        assert_eq!(sources.sources[0].source_id, "payment-test");
+
+        let search = server
+            .search_logs(Parameters(request("payment-test")))
+            .await
+            .expect("search tool should succeed")
+            .0;
+        assert_eq!(search.results.len(), 1);
+        assert!(search.results[0].content.contains("abc123"));
+        assert!(search.results[0].match_ref.starts_with("mref_"));
+
+        let context = server
+            .get_log_context(Parameters(GetLogContextRequest {
+                match_ref: search.results[0].match_ref.clone(),
+                before_lines: 1,
+                after_lines: 1,
+            }))
+            .await
+            .expect("context tool should succeed")
+            .0;
+        assert_eq!(context.lines.len(), 3);
+        assert!(context.lines[1].content.contains("abc123"));
     }
 
-    #[test]
-    fn searches_case_insensitively_by_default() {
-        let response = LogQueryServer::search_response(request("paymentauthexception"))
-            .expect("search should succeed");
-        assert_eq!(response.results.len(), 1);
-        assert_eq!(response.results[0].match_ref, "match-payment-4");
-    }
-
-    #[test]
-    fn rejects_unknown_source() {
-        let mut search_request = request("abc123");
-        search_request.source_ids = vec!["/etc".to_owned()];
-        let error = LogQueryServer::search_response(search_request)
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn returns_sanitized_tool_error_for_unknown_source() {
+        let (_directory, server) = server();
+        let error = server
+            .search_logs(Parameters(request("unknown-source")))
+            .await
             .expect_err("unknown source should fail");
-        assert!(error.contains("unknown log source"));
-    }
 
-    #[test]
-    fn enforces_result_limit() {
-        let mut search_request = request("traceId=");
-        search_request.max_results = 1;
-        let response =
-            LogQueryServer::search_response(search_request).expect("limited search should succeed");
-
-        assert_eq!(response.results.len(), 1);
-        assert!(response.truncated);
-    }
-
-    #[test]
-    fn returns_limited_context() {
-        let response = LogQueryServer::context_response(GetLogContextRequest {
-            match_ref: "match-payment-4".to_owned(),
-            before_lines: 1,
-            after_lines: 2,
-        })
-        .expect("context should succeed");
-
-        assert_eq!(response.start_line, 3);
-        assert_eq!(response.end_line, 6);
-        assert_eq!(response.lines.len(), 4);
+        assert!(error.contains("configuration"));
+        assert!(!error.contains('/'));
     }
 }
