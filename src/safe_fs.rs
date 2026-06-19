@@ -14,6 +14,11 @@ const ROOT_OPEN_FLAGS: OFlags = OFlags::PATH
     .union(OFlags::DIRECTORY)
     .union(OFlags::CLOEXEC)
     .union(OFlags::NOFOLLOW);
+const DIRECTORY_OPEN_FLAGS: OFlags = OFlags::RDONLY
+    .union(OFlags::DIRECTORY)
+    .union(OFlags::CLOEXEC)
+    .union(OFlags::NOFOLLOW)
+    .union(OFlags::NONBLOCK);
 const FILE_OPEN_FLAGS: OFlags = OFlags::RDONLY
     .union(OFlags::CLOEXEC)
     .union(OFlags::NOFOLLOW)
@@ -114,6 +119,33 @@ impl SafeRoot {
             size,
         })
     }
+
+    /// Open a directory below the configured root without following any
+    /// symlink component. The returned descriptor is intended for bounded,
+    /// fd-relative directory discovery inside the service.
+    pub(crate) fn open_directory_fd(
+        &self,
+        relative_path: impl AsRef<Path>,
+    ) -> Result<OwnedFd, SafeOpenError> {
+        let relative_path = relative_path.as_ref();
+        validate_directory_path(relative_path)?;
+
+        let fd = openat2(
+            &self.dirfd,
+            relative_path,
+            DIRECTORY_OPEN_FLAGS,
+            Mode::empty(),
+            RESOLVE_FLAGS,
+        )
+        .map_err(|source| SafeOpenError::DirectoryOpen { source })?;
+        let stat = fstat(&fd).map_err(|source| SafeOpenError::DirectoryOpen { source })?;
+
+        if !FileType::from_raw_mode(stat.st_mode).is_dir() {
+            return Err(SafeOpenError::NotDirectory);
+        }
+
+        Ok(fd)
+    }
 }
 
 fn validate_relative_path(path: &Path) -> Result<(), SafeOpenError> {
@@ -136,6 +168,13 @@ fn validate_relative_path(path: &Path) -> Result<(), SafeOpenError> {
     Ok(())
 }
 
+fn validate_directory_path(path: &Path) -> Result<(), SafeOpenError> {
+    if path == Path::new(".") {
+        return Ok(());
+    }
+    validate_relative_path(path)
+}
+
 #[derive(Debug, Error)]
 pub enum SafeOpenError {
     #[error("configured log root cannot be opened safely")]
@@ -156,8 +195,17 @@ pub enum SafeOpenError {
         source: Errno,
     },
 
+    #[error("log directory cannot be opened safely")]
+    DirectoryOpen {
+        #[source]
+        source: Errno,
+    },
+
     #[error("opened object is not a regular file")]
     NotRegularFile,
+
+    #[error("opened object is not a directory")]
+    NotDirectory,
 
     #[error("file metadata cannot be represented by the service")]
     MetadataOutOfRange,
@@ -198,6 +246,19 @@ mod tests {
     }
 
     #[test]
+    fn opens_root_and_nested_directories_without_symlinks() {
+        let root_dir = tempdir().expect("temporary root should be created");
+        fs::create_dir_all(root_dir.path().join("archive/day-1"))
+            .expect("nested directories should be created");
+        let root = SafeRoot::open(root_dir.path()).expect("root should open");
+
+        root.open_directory_fd(".")
+            .expect("root directory should open for discovery");
+        root.open_directory_fd("archive/day-1")
+            .expect("nested directory should open for discovery");
+    }
+
+    #[test]
     fn rejects_parent_traversal_and_absolute_paths() {
         let root_dir = tempdir().expect("temporary root should be created");
         let root = SafeRoot::open(root_dir.path()).expect("root should open");
@@ -212,6 +273,10 @@ mod tests {
         ));
         assert!(matches!(
             root.open_regular_file("./application.log"),
+            Err(SafeOpenError::InvalidRelativePath)
+        ));
+        assert!(matches!(
+            root.open_directory_fd("../outside"),
             Err(SafeOpenError::InvalidRelativePath)
         ));
     }
@@ -234,6 +299,7 @@ mod tests {
         let root = SafeRoot::open(root_dir.path()).expect("root should open");
         assert!(root.open_regular_file("final-link.log").is_err());
         assert!(root.open_regular_file("linked-dir/secret.log").is_err());
+        assert!(root.open_directory_fd("linked-dir").is_err());
     }
 
     #[test]
