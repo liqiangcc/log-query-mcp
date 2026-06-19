@@ -1,0 +1,48 @@
+[Unit]
+Description=Log Query MCP
+Documentation=https://github.com/liqiangcc/log-query-mcp
+After=network.target
+
+[Service]
+Type=simple
+User=log-query-mcp
+Group=log-query-mcp
+ExecStart=/usr/local/bin/log-query-mcp
+Environment=LOG_QUERY_MCP_BIND=127.0.0.1:8000
+Environment=LOG_QUERY_MCP_CONFIG=/etc/log-query-mcp/config.json
+Environment=RUST_LOG=log_query_mcp=info
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=15s
+KillSignal=SIGTERM
+UMask=0077
+
+# The service does not need to write application logs or configuration.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+# Resource limits are examples and must be validated on the target host.
+LimitNOFILE=4096
+TasksMax=64
+MemoryMax=512M
+CPUQuota=200%
+
+[Install]
+WantedBy=multi-user.target
