@@ -1,8 +1,6 @@
 use std::{cmp::Ordering, path::PathBuf, time::SystemTime};
 
-use chrono::{
-    DateTime, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc, format::ParseErrorKind,
-};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, format::ParseErrorKind};
 use thiserror::Error;
 
 use crate::ResultOrder;
@@ -242,25 +240,23 @@ pub struct OrderedFileCandidate {
 
 pub fn sort_file_candidates(candidates: &mut [OrderedFileCandidate], order: ResultOrder) {
     candidates.sort_by(|left, right| {
-        let left_millis = candidate_time_millis(left);
-        let right_millis = candidate_time_millis(right);
-        let time_order = match order {
-            ResultOrder::OldestFirst => left_millis.cmp(&right_millis),
-            ResultOrder::NewestFirst => right_millis.cmp(&left_millis),
+        let time_order = match (&left.timestamp_hint, &right.timestamp_hint) {
+            (Some(left), Some(right)) => match order {
+                ResultOrder::OldestFirst => left.cmp(right),
+                ResultOrder::NewestFirst => right.cmp(left),
+            },
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => match order {
+                ResultOrder::OldestFirst => left.modified_at.cmp(&right.modified_at),
+                ResultOrder::NewestFirst => right.modified_at.cmp(&left.modified_at),
+            },
         };
 
         time_order
             .then_with(|| left.source_index.cmp(&right.source_index))
             .then_with(|| left.relative_path.cmp(&right.relative_path))
     });
-}
-
-fn candidate_time_millis(candidate: &OrderedFileCandidate) -> i64 {
-    candidate
-        .timestamp_hint
-        .as_ref()
-        .map(DateTime::timestamp_millis)
-        .unwrap_or_else(|| DateTime::<Utc>::from(candidate.modified_at).timestamp_millis())
 }
 
 fn parse_custom_timestamp(
