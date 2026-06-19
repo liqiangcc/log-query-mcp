@@ -10,8 +10,10 @@ use rustix::{
 };
 use thiserror::Error;
 
-const ROOT_OPEN_FLAGS: OFlags =
-    OFlags::PATH.union(OFlags::DIRECTORY).union(OFlags::CLOEXEC).union(OFlags::NOFOLLOW);
+const ROOT_OPEN_FLAGS: OFlags = OFlags::PATH
+    .union(OFlags::DIRECTORY)
+    .union(OFlags::CLOEXEC)
+    .union(OFlags::NOFOLLOW);
 const FILE_OPEN_FLAGS: OFlags = OFlags::RDONLY
     .union(OFlags::CLOEXEC)
     .union(OFlags::NOFOLLOW)
@@ -102,8 +104,8 @@ impl SafeRoot {
             return Err(SafeOpenError::NotRegularFile);
         }
 
-        let device = u64::try_from(stat.st_dev).map_err(|_| SafeOpenError::MetadataOutOfRange)?;
-        let inode = u64::try_from(stat.st_ino).map_err(|_| SafeOpenError::MetadataOutOfRange)?;
+        let device = stat.st_dev;
+        let inode = stat.st_ino;
         let size = u64::try_from(stat.st_size).map_err(|_| SafeOpenError::MetadataOutOfRange)?;
 
         Ok(SafeFile {
