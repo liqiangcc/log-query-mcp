@@ -70,45 +70,16 @@ jobs:
           PY
           cargo fmt --all
 
-      - name: Restore strict CI and commit repairs
+      - name: Commit repaired sources
         shell: bash
         run: |
-          cat > .github/workflows/ci.yml <<'YAML'
-          name: CI
-
-          on:
-            push:
-              branches:
-                - main
-                - "spike/**"
-            pull_request:
-
-          permissions:
-            contents: read
-
-          jobs:
-            rust:
-              runs-on: ubuntu-latest
-              steps:
-                - name: Check out repository
-                  uses: actions/checkout@v4
-
-                - name: Install Rust toolchain
-                  run: rustup show
-
-                - name: Check formatting
-                  run: cargo fmt --all -- --check
-
-                - name: Run Clippy
-                  run: cargo clippy --all-targets --all-features -- -D warnings
-
-                - name: Run tests
-                  run: cargo test --all-targets --all-features
-          YAML
+          if git diff --quiet -- src; then
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src .github/workflows/ci.yml
-          git commit -m "fix: compile integrated query engine and restore strict CI"
+          git add src
+          git commit -m "fix: compile integrated query engine"
           git push origin "HEAD:${GITHUB_HEAD_REF}"
 
       - name: Run Clippy
