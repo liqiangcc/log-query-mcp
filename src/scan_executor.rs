@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{ScanError, ScanOutcome, ScanRequest, ScanStopReason, scan_reader};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ScanExecutor {
     permits: Arc<Semaphore>,
 }

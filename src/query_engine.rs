@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    io::Read,
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -12,12 +11,11 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     ContextLine, ContextReadError, ContextReadLimits, CursorCandidateFile, CursorSnapshotError,
     GetLogContextRequest, GetLogContextResponse, ListLogSourcesResponse, LogMatch,
-    MatchReferenceData, MatchReferenceError, MatchReferenceStore, QueryServiceLimits as _,
-    ResultOrder, RuntimeConfigError, ScanExecutor, ScanLimits, ScanMatch, ScanStopReason,
-    ScanTaskError, SearchCursorData, SearchCursorError, SearchCursorQuery, SearchCursorStore,
-    SearchLogsRequest, SearchLogsResponse, SourceRegistry, TimeFilterDecision, TimeFilterError,
-    TimeRange, TimedLogResult, open_cursor_snapshot_reader, read_referenced_context,
-    sort_timed_results,
+    MatchReferenceData, MatchReferenceError, MatchReferenceStore, ResultOrder, RuntimeConfigError,
+    ScanExecutor, ScanLimits, ScanMatch, ScanStopReason, ScanTaskError, SearchCursorData,
+    SearchCursorError, SearchCursorQuery, SearchCursorStore, SearchLogsRequest, SearchLogsResponse,
+    SourceRegistry, TimeFilterDecision, TimeFilterError, TimeRange, TimedLogResult,
+    open_cursor_snapshot_reader, read_referenced_context, sort_timed_results,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,10 +116,8 @@ impl QueryService {
             return Err(QueryError::NewestFirstNotIntegrated);
         }
         self.registry.selected(&query.source_ids)?;
-        let time_range = TimeRange::from_rfc3339(
-            query.start_time.as_deref(),
-            query.end_time.as_deref(),
-        )?;
+        let time_range =
+            TimeRange::from_rfc3339(query.start_time.as_deref(), query.end_time.as_deref())?;
         let deadline = Instant::now()
             .checked_add(self.limits.query_timeout)
             .ok_or(QueryError::InvalidLimits)?;
@@ -130,12 +126,7 @@ impl QueryService {
         if let Some(cursor) = request.cursor.as_deref() {
             let lease = self.cursors.begin(cursor, &query)?;
             let page = self
-                .scan_page(
-                    lease.data().clone(),
-                    &time_range,
-                    deadline,
-                    cancellation,
-                )
+                .scan_page(lease.data().clone(), &time_range, deadline, cancellation)
                 .await?;
             let next_cursor = lease.commit(page.next_state)?;
             let response = SearchLogsResponse {
@@ -200,18 +191,13 @@ impl QueryService {
         let before_lines = request.before_lines;
         let after_lines = request.after_lines;
         let outcome = tokio::task::spawn_blocking(move || {
-            read_referenced_context(
-                &root,
-                &reference,
-                before_lines,
-                after_lines,
-                limits,
-            )
+            read_referenced_context(&root, &reference, before_lines, after_lines, limits)
         })
         .await
         .map_err(QueryError::Join)??;
 
-        let start_line = usize::try_from(outcome.start_line).map_err(|_| QueryError::LineOverflow)?;
+        let start_line =
+            usize::try_from(outcome.start_line).map_err(|_| QueryError::LineOverflow)?;
         let end_line = usize::try_from(outcome.end_line).map_err(|_| QueryError::LineOverflow)?;
         let mut truncated = outcome.before_truncated || outcome.content_truncated;
         let lines = outcome
@@ -273,12 +259,12 @@ impl QueryService {
         cancellation: CancellationToken,
     ) -> Result<PageResult, QueryError> {
         state.validate()?;
-        let source_order: HashMap<&str, usize> = state
+        let source_order: HashMap<String, usize> = state
             .query
             .source_ids
             .iter()
             .enumerate()
-            .map(|(index, source_id)| (source_id.as_str(), index))
+            .map(|(index, source_id)| (source_id.clone(), index))
             .collect();
         let mut results = Vec::new();
         let mut page_scan_bytes = 0_u64;
@@ -337,11 +323,12 @@ impl QueryService {
             state.next_line_number = state.next_line_number.saturating_add(outcome.lines_scanned);
 
             let source_index = *source_order
-                .get(candidate.source_id.as_str())
+                .get(&candidate.source_id)
                 .ok_or(QueryError::InternalInvariant)?;
             let file_index = source
                 .file_index(&candidate.relative_path)
                 .ok_or(QueryError::InternalInvariant)?;
+            let accepted_before = results.len();
             for scan_match in outcome.results {
                 let scan_match = rebase_match(scan_match, base_offset, base_line)?;
                 let timestamp = source
@@ -366,7 +353,7 @@ impl QueryService {
                 returned_content_bytes =
                     returned_content_bytes.saturating_add(scan_match.content.len());
                 results.push(TimedLogResult {
-                    timestamp: timestamp.clone(),
+                    timestamp,
                     source_index,
                     file_index,
                     line_number: scan_match.line_number,
@@ -386,7 +373,9 @@ impl QueryService {
                     break;
                 }
             }
-            state.results_returned = state.results_returned.saturating_add(results.len());
+            state.results_returned = state
+                .results_returned
+                .saturating_add(results.len().saturating_sub(accepted_before));
 
             match outcome.stop_reason {
                 ScanStopReason::Complete => {
@@ -414,13 +403,12 @@ impl QueryService {
 
         sort_timed_results(&mut results, state.query.order);
         let values = results.into_iter().map(|result| result.value).collect();
-        let next_state = if !truncated_without_cursor
-            && state.next_candidate_index < state.candidates.len()
-        {
-            Some(state)
-        } else {
-            None
-        };
+        let next_state =
+            if !truncated_without_cursor && state.next_candidate_index < state.candidates.len() {
+                Some(state)
+            } else {
+                None
+            };
         Ok(PageResult {
             results: values,
             next_state,
@@ -553,9 +541,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use crate::{
-        LogSourceConfig, ServiceConfig, TimestampRuleConfig,
-    };
+    use crate::{LogSourceConfig, ServiceConfig, TimestampRuleConfig};
 
     use super::*;
 
@@ -585,9 +571,7 @@ mod tests {
                         tags: vec!["java".to_owned()],
                         root,
                         files: vec![PathBuf::from("application.log")],
-                        timestamp_rule: Some(TimestampRuleConfig::Rfc3339 {
-                            prefix_bytes: 64,
-                        }),
+                        timestamp_rule: Some(TimestampRuleConfig::Rfc3339 { prefix_bytes: 64 }),
                     }],
                 },
                 ".",
@@ -607,10 +591,14 @@ mod tests {
         );
         fs::write(directory.path().join("application.log"), content)
             .expect("fixture should be written");
-        let service = QueryService::new(registry(directory.path().to_path_buf()), Default::default())
-            .expect("service should start");
+        let service =
+            QueryService::new(registry(directory.path().to_path_buf()), Default::default())
+                .expect("service should start");
 
-        let first = service.search(request(1)).await.expect("search should succeed");
+        let first = service
+            .search(request(1))
+            .await
+            .expect("search should succeed");
         assert_eq!(first.results.len(), 1);
         assert!(first.next_cursor.is_some());
         assert!(first.results[0].content.contains("first"));
@@ -645,8 +633,9 @@ mod tests {
         );
         fs::write(directory.path().join("application.log"), content)
             .expect("fixture should be written");
-        let service = QueryService::new(registry(directory.path().to_path_buf()), Default::default())
-            .expect("service should start");
+        let service =
+            QueryService::new(registry(directory.path().to_path_buf()), Default::default())
+                .expect("service should start");
         let mut search = request(10);
         search.start_time = Some("2026-06-19T14:20:03+09:00".to_owned());
         search.end_time = Some("2026-06-19T14:20:04+09:00".to_owned());

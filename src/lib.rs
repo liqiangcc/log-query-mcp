@@ -41,9 +41,7 @@ pub use context_reader::{
     MAX_CONTEXT_BACKTRACK_BYTES, MAX_CONTEXT_FORWARD_BYTES, read_referenced_context,
 };
 #[cfg(target_os = "linux")]
-pub use cursor_reader::{
-    CursorSnapshotError, CursorSnapshotReader, open_cursor_snapshot_reader,
-};
+pub use cursor_reader::{CursorSnapshotError, CursorSnapshotReader, open_cursor_snapshot_reader};
 #[cfg(target_os = "linux")]
 pub use match_reference::{
     MatchReferenceData, MatchReferenceError, MatchReferenceFileError, MatchReferenceStore,
@@ -53,8 +51,8 @@ pub use match_reference::{
 pub use query_engine::{QueryError, QueryService, QueryServiceLimits};
 #[cfg(target_os = "linux")]
 pub use runtime_config::{
-    ConfiguredLogSource, LogSourceConfig, MAX_CONFIGURED_SOURCES, RuntimeConfigError, ServiceConfig,
-    SourceRegistry, TimestampRuleConfig,
+    ConfiguredLogSource, LogSourceConfig, MAX_CONFIGURED_SOURCES, RuntimeConfigError,
+    ServiceConfig, SourceRegistry, TimestampRuleConfig,
 };
 #[cfg(target_os = "linux")]
 pub use safe_fs::{FileIdentity, SafeFile, SafeOpenError, SafeRoot};

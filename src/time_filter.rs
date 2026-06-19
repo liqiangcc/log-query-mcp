@@ -237,9 +237,7 @@ impl TimestampTracker {
 }
 
 fn looks_like_timestamp_prefix(line: &[u8]) -> bool {
-    line.len() >= 5
-        && line[..4].iter().all(u8::is_ascii_digit)
-        && matches!(line[4], b'-' | b'/')
+    line.len() >= 5 && line[..4].iter().all(u8::is_ascii_digit) && matches!(line[4], b'-' | b'/')
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

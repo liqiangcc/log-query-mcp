@@ -163,8 +163,8 @@ mod tests {
         appended.extend_from_slice(b"third traceId=abc123\n");
         fs::write(&path, appended).expect("fixture should be appended");
 
-        let mut reader = open_cursor_snapshot_reader(&root, &cursor)
-            .expect("snapshot reader should open");
+        let mut reader =
+            open_cursor_snapshot_reader(&root, &cursor).expect("snapshot reader should open");
         let mut observed = Vec::new();
         reader
             .read_to_end(&mut observed)
@@ -220,8 +220,8 @@ mod tests {
         let root = SafeRoot::open(directory.path()).expect("root should open");
         let cursor = cursor_for_file(&root, "application.log", 0, 1);
 
-        let mut reader = open_cursor_snapshot_reader(&root, &cursor)
-            .expect("snapshot reader should open");
+        let mut reader =
+            open_cursor_snapshot_reader(&root, &cursor).expect("snapshot reader should open");
         let mut observed = Vec::new();
         reader
             .read_to_end(&mut observed)

@@ -102,7 +102,9 @@ impl ConfiguredLogSource {
 
     #[must_use]
     pub fn file_index(&self, relative_path: &Path) -> Option<usize> {
-        self.files.iter().position(|candidate| candidate == relative_path)
+        self.files
+            .iter()
+            .position(|candidate| candidate == relative_path)
     }
 }
 
@@ -142,7 +144,8 @@ impl SourceRegistry {
             if !source_ids.insert(source.source_id.clone()) {
                 return Err(RuntimeConfigError::DuplicateSourceId(source.source_id));
             }
-            if source.name.is_empty() || source.service.is_empty() || source.environment.is_empty() {
+            if source.name.is_empty() || source.service.is_empty() || source.environment.is_empty()
+            {
                 return Err(RuntimeConfigError::InvalidConfig(
                     "source name, service and environment must not be empty",
                 ));
