@@ -24,7 +24,8 @@
 - 扫描字节、结果数量、单条内容和返回内容合计限制。
 - 基于 `spawn_blocking` 的扫描执行器。
 - 基于 Semaphore 的全局扫描并发限制。
-- `CancellationToken` 和绝对 deadline 的协作检查。
+- 排队阶段和运行阶段的 `CancellationToken` 与绝对 deadline 检查。
+- async 扫描 Future 被中止后，协作取消阻塞任务并释放许可。
 
 ## 运行 Streamable HTTP
 
@@ -76,8 +77,7 @@ cargo test --all-targets --all-features
 - `SafeRoot` 只验证已知相对路径的安全打开，尚未实现目录发现和管理员文件名规则。
 - 扫描器只负责单个 `Read`，尚未实现多文件和多日志来源编排。
 - 返回内容合计限制不等于完整 MCP JSON 响应大小限制。
-- 等待 Semaphore 许可期间尚未观察取消和 deadline。
-- 尚未验证客户端断开能否从 `rmcp` / Axum 传递到扫描 CancellationToken。
+- 尚未验证客户端断开能否从 `rmcp` / Axum 传递到扫描 `CancellationToken`。
 - 尚未执行 1 GiB、10 GiB 和大量小文件性能基准。
 - 尚未实现分页游标。
 - 时间字段已进入 Schema，但尚未执行时间过滤。
