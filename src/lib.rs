@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod mcp_server;
 mod model;
-mod server;
 
+pub use mcp_server::LogQueryServer;
 pub use model::*;
-pub use server::LogQueryServer;
