@@ -9,8 +9,9 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::{
-    LogSource, MAX_CURSOR_CANDIDATE_FILES, MAX_SOURCE_ID_CHARS, SafeOpenError, SafeRoot,
-    TimeFilterError, TimestampRule,
+    DirectoryDiscoveryRule, LogSource, MAX_CURSOR_CANDIDATE_FILES, MAX_DIRECTORY_RULES_PER_SOURCE,
+    MAX_SOURCE_ID_CHARS, SafeOpenError, SafeRoot, SourceDiscoveryError, TimeFilterError,
+    TimestampRule, discover_regular_files,
 };
 
 pub const MAX_CONFIGURED_SOURCES: usize = 100;
@@ -35,8 +36,33 @@ pub struct LogSourceConfig {
     /// Trusted administrator configuration. This path is never exposed through MCP.
     pub root: PathBuf,
     /// Explicit normalized paths relative to `root`.
+    #[serde(default)]
     pub files: Vec<PathBuf>,
+    /// Bounded directory discovery rules relative to `root`.
+    #[serde(default)]
+    pub directories: Vec<DirectorySourceConfig>,
     pub timestamp_rule: Option<TimestampRuleConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectorySourceConfig {
+    /// `.` means the source root; other values must be normalized relative paths.
+    pub path: PathBuf,
+    #[serde(default)]
+    pub recursive: bool,
+    /// Case-sensitive filename suffixes, for example `.log` and `.log.1`.
+    pub include_suffixes: Vec<String>,
+}
+
+impl DirectorySourceConfig {
+    fn build(&self) -> Result<DirectoryDiscoveryRule, RuntimeConfigError> {
+        Ok(DirectoryDiscoveryRule::new(
+            self.path.clone(),
+            self.recursive,
+            self.include_suffixes.clone(),
+        )?)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -150,20 +176,17 @@ impl SourceRegistry {
                     "source name, service and environment must not be empty",
                 ));
             }
-            if source.files.is_empty() || source.files.len() > MAX_CURSOR_CANDIDATE_FILES {
+            if source.files.is_empty() && source.directories.is_empty() {
                 return Err(RuntimeConfigError::InvalidConfig(
-                    "source file count is outside the service limit",
+                    "source must configure at least one file or directory",
                 ));
             }
-
-            let mut unique_files = HashSet::with_capacity(source.files.len());
-            for relative_path in &source.files {
-                validate_relative_path(relative_path)?;
-                if !unique_files.insert(relative_path.clone()) {
-                    return Err(RuntimeConfigError::InvalidConfig(
-                        "source contains a duplicate relative file path",
-                    ));
-                }
+            if source.files.len() > MAX_CURSOR_CANDIDATE_FILES
+                || source.directories.len() > MAX_DIRECTORY_RULES_PER_SOURCE
+            {
+                return Err(RuntimeConfigError::InvalidConfig(
+                    "source file or directory rule count is outside the service limit",
+                ));
             }
 
             let root_path = if source.root.is_absolute() {
@@ -173,11 +196,40 @@ impl SourceRegistry {
             };
             let root = Arc::new(SafeRoot::open(root_path)?);
 
-            // Fail configuration loading early if any configured object is missing,
-            // unsafe, or not a regular file.
+            let mut files = Vec::with_capacity(source.files.len());
+            let mut unique_files = HashSet::with_capacity(source.files.len());
             for relative_path in &source.files {
+                validate_relative_path(relative_path)?;
+                if !unique_files.insert(relative_path.clone()) {
+                    return Err(RuntimeConfigError::InvalidConfig(
+                        "source contains a duplicate relative file path",
+                    ));
+                }
                 root.open_regular_file(relative_path)?;
+                files.push(relative_path.clone());
             }
+
+            if !source.directories.is_empty() {
+                let rules = source
+                    .directories
+                    .iter()
+                    .map(DirectorySourceConfig::build)
+                    .collect::<Result<Vec<_>, RuntimeConfigError>>()?;
+                let remaining = MAX_CURSOR_CANDIDATE_FILES.saturating_sub(files.len());
+                let discovered = discover_regular_files(&root, &rules, remaining)?;
+                for relative_path in discovered {
+                    if unique_files.insert(relative_path.clone()) {
+                        files.push(relative_path);
+                    }
+                }
+            }
+
+            if files.len() > MAX_CURSOR_CANDIDATE_FILES {
+                return Err(RuntimeConfigError::InvalidConfig(
+                    "source resolved file count is outside the service limit",
+                ));
+            }
+            files.sort();
 
             let timestamp_rule = source
                 .timestamp_rule
@@ -196,7 +248,7 @@ impl SourceRegistry {
             sources.push(Arc::new(ConfiguredLogSource {
                 public,
                 root,
-                files: source.files,
+                files,
                 timestamp_rule,
             }));
         }
@@ -287,13 +339,16 @@ pub enum RuntimeConfigError {
     #[error("configured log file cannot be opened safely")]
     SafeOpen(#[from] SafeOpenError),
 
+    #[error("configured log directory cannot be discovered safely")]
+    Discovery(#[from] SourceDiscoveryError),
+
     #[error("configured timestamp rule is invalid")]
     Timestamp(#[from] TimeFilterError),
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, os::unix::fs::symlink};
 
     use tempfile::tempdir;
 
@@ -309,6 +364,7 @@ mod tests {
             tags: vec!["java".to_owned()],
             root,
             files: vec![PathBuf::from("application.log")],
+            directories: Vec::new(),
             timestamp_rule: Some(TimestampRuleConfig::Rfc3339 { prefix_bytes: 64 }),
         }
     }
@@ -329,6 +385,54 @@ mod tests {
         assert_eq!(registry.list().len(), 1);
         assert_eq!(registry.list()[0].source_id, "payment-test");
         assert!(registry.get("payment-test").is_some());
+    }
+
+    #[test]
+    fn loads_directory_rules_and_skips_symlinks() {
+        let directory = tempdir().expect("temporary directory should be created");
+        let outside = tempdir().expect("outside directory should be created");
+        fs::create_dir_all(directory.path().join("logs/archive"))
+            .expect("log directories should be created");
+        fs::write(directory.path().join("logs/application.log"), "current\n")
+            .expect("current log should be written");
+        fs::write(
+            directory.path().join("logs/archive/application.log.1"),
+            "rotated\n",
+        )
+        .expect("rotated log should be written");
+        fs::write(directory.path().join("logs/notes.txt"), "ignore\n")
+            .expect("non-log file should be written");
+        fs::write(outside.path().join("secret.log"), "secret\n")
+            .expect("outside file should be written");
+        symlink(
+            outside.path().join("secret.log"),
+            directory.path().join("logs/linked.log"),
+        )
+        .expect("symlink should be created");
+
+        let mut config = source(directory.path().to_path_buf());
+        config.files.clear();
+        config.directories = vec![DirectorySourceConfig {
+            path: PathBuf::from("logs"),
+            recursive: true,
+            include_suffixes: vec![".log".to_owned(), ".log.1".to_owned()],
+        }];
+        let registry = SourceRegistry::from_config(
+            ServiceConfig {
+                sources: vec![config],
+            },
+            ".",
+        )
+        .expect("directory source should load");
+        let configured = registry.get("payment-test").expect("source should exist");
+
+        assert_eq!(
+            configured.files(),
+            &[
+                PathBuf::from("logs/application.log"),
+                PathBuf::from("logs/archive/application.log.1")
+            ]
+        );
     }
 
     #[test]
