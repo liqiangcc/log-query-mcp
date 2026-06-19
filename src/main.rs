@@ -66,8 +66,36 @@ async fn main() -> Result<()> {
 }
 
 async fn shutdown_signal(cancellation: CancellationToken) {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    result = tokio::signal::ctrl_c() => {
+                        if let Err(error) = result {
+                            tracing::error!(%error, "failed to listen for Ctrl+C");
+                        }
+                    }
+                    _ = terminate.recv() => {
+                        tracing::info!("received SIGTERM");
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::error!(%error, "failed to install SIGTERM handler");
+                if let Err(error) = tokio::signal::ctrl_c().await {
+                    tracing::error!(%error, "failed to listen for Ctrl+C");
+                }
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
     if let Err(error) = tokio::signal::ctrl_c().await {
         tracing::error!(%error, "failed to listen for Ctrl+C");
     }
+
     cancellation.cancel();
 }
