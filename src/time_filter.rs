@@ -1,8 +1,7 @@
 use std::{cmp::Ordering, path::PathBuf, time::SystemTime};
 
 use chrono::{
-    DateTime, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc,
-    format::ParseErrorKind,
+    DateTime, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc, format::ParseErrorKind,
 };
 use thiserror::Error;
 
@@ -112,10 +111,7 @@ pub struct TimeRange {
 }
 
 impl TimeRange {
-    pub fn from_rfc3339(
-        start: Option<&str>,
-        end: Option<&str>,
-    ) -> Result<Self, TimeFilterError> {
+    pub fn from_rfc3339(start: Option<&str>, end: Option<&str>) -> Result<Self, TimeFilterError> {
         let start = start
             .map(DateTime::parse_from_rfc3339)
             .transpose()
@@ -145,10 +141,7 @@ impl TimeRange {
 
     #[must_use]
     pub fn contains(&self, timestamp: &DateTime<FixedOffset>) -> bool {
-        let after_start = self
-            .start
-            .as_ref()
-            .is_none_or(|start| timestamp >= start);
+        let after_start = self.start.as_ref().is_none_or(|start| timestamp >= start);
         let before_end = self.end.as_ref().is_none_or(|end| timestamp <= end);
         after_start && before_end
     }
@@ -385,10 +378,7 @@ mod tests {
             range.classify(Some(&outside)),
             TimeFilterDecision::OutOfRange
         );
-        assert_eq!(
-            range.classify(None),
-            TimeFilterDecision::UnknownTimestamp
-        );
+        assert_eq!(range.classify(None), TimeFilterDecision::UnknownTimestamp);
     }
 
     #[test]
@@ -454,13 +444,19 @@ mod tests {
 
         sort_timed_results(&mut results, ResultOrder::OldestFirst);
         assert_eq!(
-            results.iter().map(|result| result.value).collect::<Vec<_>>(),
+            results
+                .iter()
+                .map(|result| result.value)
+                .collect::<Vec<_>>(),
             vec!["early", "late", "unknown"]
         );
 
         sort_timed_results(&mut results, ResultOrder::NewestFirst);
         assert_eq!(
-            results.iter().map(|result| result.value).collect::<Vec<_>>(),
+            results
+                .iter()
+                .map(|result| result.value)
+                .collect::<Vec<_>>(),
             vec!["late", "early", "unknown"]
         );
     }

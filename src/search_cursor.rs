@@ -163,10 +163,9 @@ impl SearchCursorData {
         let mut unique_candidates = HashSet::with_capacity(self.candidates.len());
         for candidate in &self.candidates {
             candidate.validate(&query_sources)?;
-            if !unique_candidates.insert((
-                candidate.source_id.clone(),
-                candidate.relative_path.clone(),
-            )) {
+            if !unique_candidates
+                .insert((candidate.source_id.clone(), candidate.relative_path.clone()))
+            {
                 return Err(SearchCursorError::InvalidData(
                     "candidate snapshot must not contain duplicate files",
                 ));
@@ -193,7 +192,8 @@ impl SearchCursorData {
     }
 
     fn validate_continuation(&self, next: &Self) -> Result<(), SearchCursorError> {
-        next.validate()?;
+        next.validate()
+            .map_err(|_| SearchCursorError::InvalidContinuation("continuation state is invalid"))?;
         if next.query != self.query {
             return Err(SearchCursorError::InvalidContinuation(
                 "continuation query differs from the original query",
@@ -684,8 +684,7 @@ mod tests {
     #[test]
     fn creates_opaque_cursor_and_binds_query() {
         let store = Arc::new(
-            SearchCursorStore::new(10, Duration::from_secs(60))
-                .expect("store should be created"),
+            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created"),
         );
         let token = store.insert(data()).expect("cursor should be inserted");
         let lease = store.begin(&token, &query()).expect("cursor should begin");
@@ -700,8 +699,7 @@ mod tests {
     #[test]
     fn rejects_cursor_with_changed_query_conditions() {
         let store = Arc::new(
-            SearchCursorStore::new(10, Duration::from_secs(60))
-                .expect("store should be created"),
+            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created"),
         );
         let token = store.insert(data()).expect("cursor should be inserted");
         let mut changed_query = query();
@@ -716,11 +714,12 @@ mod tests {
     #[test]
     fn prevents_concurrent_consumption_and_drop_releases_lease() {
         let store = Arc::new(
-            SearchCursorStore::new(10, Duration::from_secs(60))
-                .expect("store should be created"),
+            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created"),
         );
         let token = store.insert(data()).expect("cursor should be inserted");
-        let lease = store.begin(&token, &query()).expect("first lease should begin");
+        let lease = store
+            .begin(&token, &query())
+            .expect("first lease should begin");
 
         assert!(matches!(
             store.begin(&token, &query()),
@@ -733,8 +732,7 @@ mod tests {
     #[test]
     fn commit_invalidates_previous_cursor_atomically() {
         let store = Arc::new(
-            SearchCursorStore::new(10, Duration::from_secs(60))
-                .expect("store should be created"),
+            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created"),
         );
         let token = store.insert(data()).expect("cursor should be inserted");
         let lease = store.begin(&token, &query()).expect("cursor should begin");
@@ -757,8 +755,7 @@ mod tests {
     #[test]
     fn completing_last_page_consumes_cursor_without_replacement() {
         let store = Arc::new(
-            SearchCursorStore::new(10, Duration::from_secs(60))
-                .expect("store should be created"),
+            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created"),
         );
         let token = store.insert(data()).expect("cursor should be inserted");
         let lease = store.begin(&token, &query()).expect("cursor should begin");
@@ -770,8 +767,7 @@ mod tests {
     #[test]
     fn invalid_continuation_releases_original_cursor_for_retry() {
         let store = Arc::new(
-            SearchCursorStore::new(10, Duration::from_secs(60))
-                .expect("store should be created"),
+            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created"),
         );
         let token = store.insert(data()).expect("cursor should be inserted");
         let lease = store.begin(&token, &query()).expect("cursor should begin");
@@ -788,8 +784,7 @@ mod tests {
     #[test]
     fn capacity_does_not_evict_an_active_cursor() {
         let store = Arc::new(
-            SearchCursorStore::new(1, Duration::from_secs(60))
-                .expect("store should be created"),
+            SearchCursorStore::new(1, Duration::from_secs(60)).expect("store should be created"),
         );
         let first = store.insert(data()).expect("cursor should be inserted");
         let lease = store.begin(&first, &query()).expect("cursor should begin");
@@ -808,8 +803,7 @@ mod tests {
     #[test]
     fn expires_and_evicts_cursor_state() {
         let expiring = Arc::new(
-            SearchCursorStore::new(10, Duration::from_millis(5))
-                .expect("store should be created"),
+            SearchCursorStore::new(10, Duration::from_millis(5)).expect("store should be created"),
         );
         let token = expiring.insert(data()).expect("cursor should be inserted");
         thread::sleep(Duration::from_millis(20));
@@ -819,8 +813,7 @@ mod tests {
         ));
 
         let bounded = Arc::new(
-            SearchCursorStore::new(1, Duration::from_secs(60))
-                .expect("store should be created"),
+            SearchCursorStore::new(1, Duration::from_secs(60)).expect("store should be created"),
         );
         let first = bounded.insert(data()).expect("cursor should be inserted");
         let second = bounded
@@ -836,8 +829,7 @@ mod tests {
     #[test]
     fn new_store_invalidates_existing_cursor() {
         let first_store = Arc::new(
-            SearchCursorStore::new(10, Duration::from_secs(60))
-                .expect("store should be created"),
+            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created"),
         );
         let token = first_store
             .insert(data())
