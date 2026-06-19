@@ -1,7 +1,9 @@
 use std::{env, net::SocketAddr, sync::Arc};
 
 use anyhow::{Context, Result};
-use log_query_mcp::{LogQueryServer, QueryService, QueryServiceLimits, SourceRegistry};
+use log_query_mcp::{
+    LogQueryServer, QueryService, SourceRegistry, query_service_limits_from_env,
+};
 use rmcp::transport::streamable_http_server::{
     StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
 };
@@ -31,9 +33,9 @@ async fn main() -> Result<()> {
         SourceRegistry::from_config_path(&config_path)
             .with_context(|| format!("failed to load configuration from {config_path}"))?,
     );
+    let limits = query_service_limits_from_env().context("failed to load query service limits")?;
     let query_service = Arc::new(
-        QueryService::new(registry, QueryServiceLimits::default())
-            .context("failed to initialize log query service")?,
+        QueryService::new(registry, limits).context("failed to initialize log query service")?,
     );
     let source_count = query_service.list_sources().sources.len();
 
@@ -53,6 +55,10 @@ async fn main() -> Result<()> {
         %bind_address,
         %config_path,
         source_count,
+        max_scan_bytes_per_page = limits.max_scan_bytes_per_page,
+        max_response_bytes = limits.max_response_bytes,
+        query_timeout_milliseconds = limits.query_timeout.as_millis(),
+        max_concurrent_scans = limits.max_concurrent_scans,
         endpoint = "/mcp",
         "starting log-query-mcp"
     );
