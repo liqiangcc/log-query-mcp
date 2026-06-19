@@ -4,7 +4,7 @@
 
 ## 1. 必须记录的环境
 
-每次基准同时记录：Git 提交、Rust 版本、CPU、内存、Linux 内核、文件系统、存储介质、日志大小、缓存状态、关键字频率、迭代次数和并发数。
+每次基准同时记录：Git 提交、Rust 版本、CPU、内存、Linux 内核、文件系统、存储介质、日志大小、缓存状态、关键字频率、每个 worker 的迭代次数和并发数。
 
 ```bash
 git rev-parse HEAD
@@ -21,6 +21,21 @@ findmnt -T /tmp
 ```bash
 cargo build --release --locked --bin log-query-benchmark
 ```
+
+命令格式：
+
+```text
+log-query-benchmark <log-file> <keyword> [iterations-per-worker] [concurrency]
+```
+
+默认值：
+
+```text
+iterations-per-worker = 3
+concurrency = 1
+```
+
+并发硬上限为 64，避免误操作一次创建过多线程。
 
 ## 3. 生成确定性日志
 
@@ -45,20 +60,31 @@ python3 research/scripts/generate_benchmark_log.py \
   target/release/log-query-benchmark \
   /tmp/log-query-benchmark-1g.log \
   __NO_MATCH__ \
-  3
+  3 \
+  1
 ```
 
 基准程序输出 JSON：
 
 - 文件大小。
-- 迭代次数。
+- 每个 worker 的迭代次数。
+- 并发数和总扫描次数。
 - 总扫描字节数。
 - 总匹配数。
-- 总耗时。
-- MiB/s。
-- 最后一次停止原因。
+- 墙钟耗时。
+- 聚合 MiB/s。
+- 平均单次扫描耗时。
+- 各停止原因及次数。
 
-完整扫描的停止原因应为 `Complete`。
+完整扫描时，所有停止原因都应为 `Complete`。例如 1 个 worker、3 次迭代时：
+
+```json
+{
+  "stop_reasons": {
+    "Complete": 3
+  }
+}
+```
 
 ## 5. 匹配场景
 
@@ -68,7 +94,8 @@ python3 research/scripts/generate_benchmark_log.py \
 target/release/log-query-benchmark \
   /tmp/log-query-benchmark-1g.log \
   BENCHMARK_MATCH \
-  3
+  3 \
+  1
 ```
 
 高频匹配应使用单独生成的数据，并记录是否因结果数量或返回内容上限提前停止。提前停止场景的吞吐量不能与完整文件扫描直接比较。
@@ -81,16 +108,37 @@ target/release/log-query-benchmark \
 
 ## 7. 并发测试
 
-分别测试 1、4、8 个并发查询。除总吞吐外，还需要记录：
+基准程序可以直接启动多个同步扫描 worker。分别测试 1、4、8 个并发查询：
 
-- 单查询延迟。
+```bash
+for concurrency in 1 4 8; do
+  /usr/bin/time -v \
+    target/release/log-query-benchmark \
+    /tmp/log-query-benchmark-1g.log \
+    __NO_MATCH__ \
+    3 \
+    "$concurrency" \
+    > "benchmark-c${concurrency}.json" \
+    2> "benchmark-c${concurrency}.time.txt"
+done
+```
+
+每个 worker 独立打开并扫描同一个文件。输出中的：
+
+```text
+total_scans = iterations_per_worker × concurrency
+```
+
+除了聚合吞吐，还需要从 `/usr/bin/time -v`、`pidstat`、`iostat` 或等价工具记录：
+
+- 单查询平均时延。
 - 峰值 RSS。
 - CPU 使用率。
 - 磁盘吞吐和等待时间。
 - 文件描述符数量。
 - 取消响应时间。
 
-正式服务内部使用 Semaphore 限制并发，进程级并发测试不能替代 `QueryService` 集成测试。
+命令行并发基准测试的是扫描器和文件系统，不会经过 `QueryService` 的 Semaphore，因此不能替代服务集成测试。
 
 ## 8. 大量小文件
 
@@ -144,10 +192,12 @@ research/results/YYYY-MM-DD-hostname/
 | Cache state | |
 | Keyword frequency | |
 | Iterations / Concurrency | |
-| Throughput MiB/s | |
+| Total scans | |
+| Aggregate throughput MiB/s | |
+| Mean scan ms | |
 | Max RSS | |
 | CPU user / system | |
-| Stop reason | |
+| Stop reasons | |
 | Notes | |
 
 ## 11. R-10 完成条件
