@@ -50,6 +50,18 @@ jobs:
             --report mcp-stdio-smoke.json \
             | tee protocol-smoke.log
 
+      - name: Run independent Streamable HTTP MCP protocol smoke test
+        id: protocol_http
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo build --bin log-query-mcp 2>&1 | tee protocol-http-build.log
+          python3 research/scripts/mcp_http_smoke.py \
+            --server target/debug/log-query-mcp \
+            --report mcp-http-smoke.json \
+            | tee protocol-http-smoke.log
+
       - name: Run Linux deployment doctor smoke test
         id: doctor
         continue-on-error: true
@@ -141,6 +153,9 @@ jobs:
             protocol-build.log
             protocol-smoke.log
             mcp-stdio-smoke.json
+            protocol-http-build.log
+            protocol-http-smoke.log
+            mcp-http-smoke.json
             doctor-smoke.json
             benchmark-generator.log
             benchmark-smoke.json
@@ -153,5 +168,6 @@ jobs:
           test "${{ steps.clippy.outcome }}" = "success"
           test "${{ steps.tests.outcome }}" = "success"
           test "${{ steps.protocol.outcome }}" = "success"
+          test "${{ steps.protocol_http.outcome }}" = "success"
           test "${{ steps.doctor.outcome }}" = "success"
           test "${{ steps.benchmark.outcome }}" = "success"
