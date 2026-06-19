@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches:
+      - main
       - "spike/**"
   pull_request:
 
@@ -13,26 +14,11 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out research branch
+      - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          ref: spike/technical-research
 
       - name: Install Rust toolchain
         run: rustup show
-
-      - name: Format MCP integration sources
-        run: cargo fmt --all
-
-      - name: Upload formatted integration sources
-        uses: actions/upload-artifact@v4
-        with:
-          name: formatted-mcp-integration-sources
-          path: |
-            src/mcp_server.rs
-            src/main.rs
-            src/bin/log-query-mcp-stdio.rs
-          if-no-files-found: error
 
       - name: Check formatting
         run: cargo fmt --all -- --check
