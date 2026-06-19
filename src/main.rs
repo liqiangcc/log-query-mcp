@@ -1,9 +1,7 @@
 use std::{env, net::SocketAddr, sync::Arc};
 
 use anyhow::{Context, Result};
-use log_query_mcp::{
-    LogQueryServer, QueryService, SourceRegistry, query_service_limits_from_env,
-};
+use log_query_mcp::{LogQueryServer, QueryService, SourceRegistry, query_service_limits_from_env};
 use rmcp::transport::streamable_http_server::{
     StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
 };

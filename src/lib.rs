@@ -50,8 +50,7 @@ pub use cursor_reader::{CursorSnapshotError, CursorSnapshotReader, open_cursor_s
 pub use limits_config::{
     LimitConfigError, MAX_CONFIGURED_CONCURRENT_SCANS, MAX_CONFIGURED_QUERY_TIMEOUT_MILLIS,
     MAX_CONFIGURED_RESPONSE_BYTES, MAX_CONFIGURED_SCAN_BYTES_PER_PAGE,
-    MAX_CONFIGURED_STATE_CAPACITY, MAX_CONFIGURED_STATE_TTL_SECONDS,
-    query_service_limits_from_env,
+    MAX_CONFIGURED_STATE_CAPACITY, MAX_CONFIGURED_STATE_TTL_SECONDS, query_service_limits_from_env,
 };
 #[cfg(target_os = "linux")]
 pub use match_reference::{

@@ -172,8 +172,10 @@ fn read_usize(
     default: usize,
     maximum: usize,
 ) -> Result<usize, LimitConfigError> {
-    let maximum_u64 = u64::try_from(maximum).map_err(|_| LimitConfigError::PlatformRange { name })?;
-    let default_u64 = u64::try_from(default).map_err(|_| LimitConfigError::PlatformRange { name })?;
+    let maximum_u64 =
+        u64::try_from(maximum).map_err(|_| LimitConfigError::PlatformRange { name })?;
+    let default_u64 =
+        u64::try_from(default).map_err(|_| LimitConfigError::PlatformRange { name })?;
     let value = read_u64(lookup, name, default_u64, maximum_u64)?;
     usize::try_from(value).map_err(|_| LimitConfigError::PlatformRange { name })
 }
