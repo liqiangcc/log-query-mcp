@@ -38,6 +38,18 @@ jobs:
           set -o pipefail
           cargo test --all-targets --all-features 2>&1 | tee tests.log
 
+      - name: Run independent stdio MCP protocol smoke test
+        id: protocol
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo build --bin log-query-mcp-stdio 2>&1 | tee protocol-build.log
+          python3 research/scripts/mcp_stdio_smoke.py \
+            --server target/debug/log-query-mcp-stdio \
+            --report mcp-stdio-smoke.json \
+            | tee protocol-smoke.log
+
       - name: Run concurrent scanner benchmark smoke test
         id: benchmark
         continue-on-error: true
@@ -77,6 +89,9 @@ jobs:
           path: |
             clippy.log
             tests.log
+            protocol-build.log
+            protocol-smoke.log
+            mcp-stdio-smoke.json
             benchmark-generator.log
             benchmark-smoke.json
           if-no-files-found: warn
@@ -87,4 +102,5 @@ jobs:
         run: |
           test "${{ steps.clippy.outcome }}" = "success"
           test "${{ steps.tests.outcome }}" = "success"
+          test "${{ steps.protocol.outcome }}" = "success"
           test "${{ steps.benchmark.outcome }}" = "success"
