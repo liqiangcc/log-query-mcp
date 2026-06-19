@@ -91,12 +91,9 @@ impl MatchReferenceData {
         let keyword_len = u64::try_from(keyword_bytes.len()).map_err(|_| {
             MatchReferenceError::InvalidData("keyword byte length cannot be represented")
         })?;
-        let match_end = self
-            .match_byte_offset
-            .checked_add(keyword_len)
-            .ok_or(MatchReferenceError::InvalidData(
-                "match byte range overflows",
-            ))?;
+        let match_end = self.match_byte_offset.checked_add(keyword_len).ok_or(
+            MatchReferenceError::InvalidData("match byte range overflows"),
+        )?;
         if match_end > self.file_size_at_match {
             return Err(MatchReferenceError::InvalidData(
                 "match byte range exceeds the scanned file",
@@ -157,13 +154,9 @@ impl MatchReferenceStore {
         };
 
         state.order.push_back(token.clone());
-        state.entries.insert(
-            token.clone(),
-            StoredReference {
-                data,
-                expires_at,
-            },
-        );
+        state
+            .entries
+            .insert(token.clone(), StoredReference { data, expires_at });
 
         Ok(token)
     }
@@ -218,14 +211,10 @@ impl StoreState {
     fn purge_expired(&mut self, now: Instant) -> usize {
         let before = self.entries.len();
 
-        loop {
-            let Some(token) = self.order.front() else {
-                break;
-            };
-
-            match self.entries.get(token) {
+        while let Some(token) = self.order.front().cloned() {
+            match self.entries.get(&token) {
                 Some(entry) if entry.expires_at <= now => {
-                    let token = self.order.pop_front().expect("front token exists");
+                    self.order.pop_front();
                     self.entries.remove(&token);
                 }
                 None => {
@@ -368,8 +357,8 @@ mod tests {
 
     #[test]
     fn creates_opaque_unique_references_and_resolves_data() {
-        let store = MatchReferenceStore::new(10, Duration::from_secs(60))
-            .expect("store should be created");
+        let store =
+            MatchReferenceStore::new(10, Duration::from_secs(60)).expect("store should be created");
         let first = store
             .insert(sample_data())
             .expect("reference should be inserted");
@@ -390,8 +379,8 @@ mod tests {
 
     #[test]
     fn rejects_unknown_and_modified_references() {
-        let store = MatchReferenceStore::new(10, Duration::from_secs(60))
-            .expect("store should be created");
+        let store =
+            MatchReferenceStore::new(10, Duration::from_secs(60)).expect("store should be created");
         let token = store
             .insert(sample_data())
             .expect("reference should be inserted");
@@ -427,8 +416,8 @@ mod tests {
 
     #[test]
     fn evicts_oldest_reference_at_capacity() {
-        let store = MatchReferenceStore::new(2, Duration::from_secs(60))
-            .expect("store should be created");
+        let store =
+            MatchReferenceStore::new(2, Duration::from_secs(60)).expect("store should be created");
         let first = store
             .insert(sample_data())
             .expect("first reference should be inserted");
@@ -450,8 +439,8 @@ mod tests {
 
     #[test]
     fn restart_or_new_store_invalidates_existing_token() {
-        let first_store = MatchReferenceStore::new(10, Duration::from_secs(60))
-            .expect("store should be created");
+        let first_store =
+            MatchReferenceStore::new(10, Duration::from_secs(60)).expect("store should be created");
         let token = first_store
             .insert(sample_data())
             .expect("reference should be inserted");
