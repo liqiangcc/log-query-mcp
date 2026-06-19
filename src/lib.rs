@@ -4,6 +4,7 @@ mod mcp_server;
 mod model;
 mod scan_executor;
 mod scanner;
+mod time_filter;
 
 #[cfg(target_os = "linux")]
 mod context_reader;
@@ -20,6 +21,12 @@ pub use scan_executor::{ScanExecutor, ScanTaskError};
 pub use scanner::{
     MAX_LINE_PREVIEW_BYTES, MAX_READ_BUFFER_BYTES, MAX_RETURNED_CONTENT_BYTES, MAX_SCAN_RESULTS,
     ScanError, ScanLimits, ScanMatch, ScanOutcome, ScanRequest, ScanStopReason, scan_reader,
+};
+pub use time_filter::{
+    LineTimestamp, MAX_ROTATION_COMPONENT_CHARS, MAX_TIMESTAMP_FORMAT_CHARS,
+    MAX_TIMESTAMP_PREFIX_BYTES, OrderedFileCandidate, RotationTimestampRule, TimeFilterDecision,
+    TimeFilterError, TimeRange, TimedLogResult, TimestampRule, TimestampTracker,
+    sort_file_candidates, sort_timed_results,
 };
 
 #[cfg(target_os = "linux")]
