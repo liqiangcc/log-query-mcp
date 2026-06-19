@@ -37,5 +37,6 @@ pub use safe_fs::{FileIdentity, SafeFile, SafeOpenError, SafeRoot};
 #[cfg(target_os = "linux")]
 pub use search_cursor::{
     CursorCandidateFile, MAX_CURSOR_CANDIDATE_FILES, SearchCursorData, SearchCursorError,
-    SearchCursorFileError, SearchCursorQuery, SearchCursorStore, open_cursor_file,
+    SearchCursorFileError, SearchCursorLease, SearchCursorQuery, SearchCursorStore,
+    open_cursor_file,
 };
