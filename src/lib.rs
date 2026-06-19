@@ -20,6 +20,8 @@ mod runtime_config;
 mod safe_fs;
 #[cfg(target_os = "linux")]
 mod search_cursor;
+#[cfg(target_os = "linux")]
+mod source_discovery;
 
 pub use mcp_server::LogQueryServer;
 pub use model::*;
@@ -51,8 +53,8 @@ pub use match_reference::{
 pub use query_engine::{QueryError, QueryService, QueryServiceLimits};
 #[cfg(target_os = "linux")]
 pub use runtime_config::{
-    ConfiguredLogSource, LogSourceConfig, MAX_CONFIGURED_SOURCES, RuntimeConfigError,
-    ServiceConfig, SourceRegistry, TimestampRuleConfig,
+    ConfiguredLogSource, DirectorySourceConfig, LogSourceConfig, MAX_CONFIGURED_SOURCES,
+    RuntimeConfigError, ServiceConfig, SourceRegistry, TimestampRuleConfig,
 };
 #[cfg(target_os = "linux")]
 pub use safe_fs::{FileIdentity, SafeFile, SafeOpenError, SafeRoot};
@@ -61,4 +63,10 @@ pub use search_cursor::{
     CursorCandidateFile, MAX_CURSOR_CANDIDATE_FILES, SearchCursorData, SearchCursorError,
     SearchCursorFileError, SearchCursorLease, SearchCursorQuery, SearchCursorStore,
     open_cursor_file,
+};
+#[cfg(target_os = "linux")]
+pub use source_discovery::{
+    DirectoryDiscoveryRule, MAX_DIRECTORY_RULES_PER_SOURCE, MAX_DISCOVERY_DIRECTORIES,
+    MAX_DISCOVERY_ENTRIES, MAX_DISCOVERY_SUFFIX_BYTES, MAX_DISCOVERY_SUFFIXES,
+    SourceDiscoveryError, discover_regular_files,
 };
