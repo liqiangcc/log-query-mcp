@@ -15,7 +15,7 @@ pub const MAX_CONFIGURED_STATE_CAPACITY: usize = 1_000_000;
 pub const MAX_CONFIGURED_STATE_TTL_SECONDS: u64 = 24 * 60 * 60;
 
 pub fn query_service_limits_from_env() -> Result<QueryServiceLimits, LimitConfigError> {
-    query_service_limits_from_lookup(env::var_os)
+    query_service_limits_from_lookup(|name| env::var_os(name))
 }
 
 fn query_service_limits_from_lookup(
