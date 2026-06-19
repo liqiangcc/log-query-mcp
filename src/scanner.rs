@@ -86,20 +86,23 @@ impl ScanRequest {
 
     fn validate(&self) -> Result<(), ScanError> {
         let keyword_bytes = self.keyword.as_bytes();
-        if keyword_bytes.is_empty() || keyword_bytes.contains(&b'\n') || keyword_bytes.contains(&b'\r') {
+        if keyword_bytes.is_empty()
+            || keyword_bytes.contains(&b'\n')
+            || keyword_bytes.contains(&b'\r')
+        {
             return Err(ScanError::InvalidKeyword);
         }
         if self.limits.max_scan_bytes == 0 {
-            return Err(ScanError::InvalidLimits("max_scan_bytes must be greater than zero"));
+            return Err(ScanError::InvalidLimits(
+                "max_scan_bytes must be greater than zero",
+            ));
         }
         if self.limits.max_results == 0 || self.limits.max_results > MAX_SCAN_RESULTS {
             return Err(ScanError::InvalidLimits(
                 "max_results must be between 1 and 200",
             ));
         }
-        if self.limits.max_line_bytes == 0
-            || self.limits.max_line_bytes > MAX_LINE_PREVIEW_BYTES
-        {
+        if self.limits.max_line_bytes == 0 || self.limits.max_line_bytes > MAX_LINE_PREVIEW_BYTES {
             return Err(ScanError::InvalidLimits(
                 "max_line_bytes must be between 1 and 1048576",
             ));
@@ -458,7 +461,10 @@ fn interrupt_reason(request: &ScanRequest) -> Option<ScanStopReason> {
     if request.cancellation.is_cancelled() {
         return Some(ScanStopReason::Cancelled);
     }
-    if request.deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+    if request
+        .deadline
+        .is_some_and(|deadline| Instant::now() >= deadline)
+    {
         return Some(ScanStopReason::DeadlineExceeded);
     }
     None
@@ -505,11 +511,8 @@ mod tests {
             read_buffer_bytes: 2,
             ..ScanLimits::default()
         };
-        let outcome = scan(
-            b"xxabcxx\n",
-            ScanRequest::new("abc").with_limits(limits),
-        )
-        .expect("scan should succeed");
+        let outcome = scan(b"xxabcxx\n", ScanRequest::new("abc").with_limits(limits))
+            .expect("scan should succeed");
 
         assert_eq!(outcome.results.len(), 1);
         assert_eq!(outcome.results[0].match_byte_offset, 2);
@@ -554,8 +557,8 @@ mod tests {
             ..ScanLimits::default()
         };
         let data = b"aaaaaaaaaaaaaaaaaaaaMATCHbbbbbbbbbbbbbbbb\n";
-        let outcome = scan(data, ScanRequest::new("MATCH").with_limits(limits))
-            .expect("scan should succeed");
+        let outcome =
+            scan(data, ScanRequest::new("MATCH").with_limits(limits)).expect("scan should succeed");
 
         assert_eq!(outcome.results.len(), 1);
         let result = &outcome.results[0];
@@ -577,8 +580,8 @@ mod tests {
 
     #[test]
     fn strips_carriage_return_from_complete_crlf_line() {
-        let outcome = scan(b"traceId=abc123\r\n", ScanRequest::new("abc123"))
-            .expect("scan should succeed");
+        let outcome =
+            scan(b"traceId=abc123\r\n", ScanRequest::new("abc123")).expect("scan should succeed");
 
         assert_eq!(outcome.results[0].content, "traceId=abc123");
     }
@@ -605,11 +608,8 @@ mod tests {
             max_scan_bytes: 4,
             ..ScanLimits::default()
         };
-        let outcome = scan(
-            b"abcdef\n",
-            ScanRequest::new("def").with_limits(limits),
-        )
-        .expect("scan should succeed");
+        let outcome = scan(b"abcdef\n", ScanRequest::new("def").with_limits(limits))
+            .expect("scan should succeed");
 
         assert!(outcome.results.is_empty());
         assert_eq!(outcome.bytes_scanned, 4);
@@ -622,11 +622,8 @@ mod tests {
             max_returned_content_bytes: 3,
             ..ScanLimits::default()
         };
-        let outcome = scan(
-            b"MATCH\n",
-            ScanRequest::new("MATCH").with_limits(limits),
-        )
-        .expect("scan should succeed");
+        let outcome = scan(b"MATCH\n", ScanRequest::new("MATCH").with_limits(limits))
+            .expect("scan should succeed");
 
         assert!(outcome.results.is_empty());
         assert_eq!(
