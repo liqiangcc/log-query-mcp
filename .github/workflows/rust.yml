@@ -20,30 +20,33 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Apply exact compiler fixes
+      - name: Patch source and format
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("src/context_reader.rs")
           text = path.read_text()
-          old = '''        let allowed = available
-              .len()
-              .min(usize::try_from(*remaining_scan_bytes).unwrap_or(usize::MAX));'''
-          new = '''        let available_len = available.len();
-          let allowed = available_len
-              .min(usize::try_from(*remaining_scan_bytes).unwrap_or(usize::MAX));'''
-          if old not in text:
-              raise SystemExit("available length pattern not found")
-          text = text.replace(old, new, 1)
-          old = '''        let mut reference = reference(1, 0, 7);
-          reference.file_size_at_match = data.len() as u64;'''
-          new = '''        let mut stale_reference = reference(1, 0, 7);
-          stale_reference.file_size_at_match = data.len() as u64;'''
-          if old not in text:
-              raise SystemExit("stale reference pattern not found")
-          text = text.replace(old, new, 1)
+          text, count = re.subn(
+              r"        let allowed = available\s*\.len\(\)\s*\.min\(usize::try_from\(\*remaining_scan_bytes\)\.unwrap_or\(usize::MAX\)\);",
+              "        let available_len = available.len();\n        let allowed = available_len.min(usize::try_from(*remaining_scan_bytes).unwrap_or(usize::MAX));",
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f"expected one available-length replacement, got {count}")
+          text = text.replace(
+              "        let mut reference = reference(1, 0, 7);",
+              "        let mut stale_reference = reference(1, 0, 7);",
+              1,
+          )
+          text = text.replace(
+              "        reference.file_size_at_match = data.len() as u64;",
+              "        stale_reference.file_size_at_match = data.len() as u64;",
+              1,
+          )
           path.write_text(text)
           PY
           cargo fmt --all
@@ -84,13 +87,11 @@ jobs:
                 - name: Run tests
                   run: cargo test --locked --all-targets --all-features
           YAML
-          if test -n "$(git status --porcelain -- src .github/workflows/rust.yml)"; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src .github/workflows/rust.yml
-            git commit -m "fix: finalize context reader compiler fixes"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/context_reader.rs .github/workflows/rust.yml
+          git commit -m "fix: resolve context reader borrow and test shadowing"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Run Clippy
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
