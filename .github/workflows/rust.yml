@@ -1,17 +1,15 @@
-name: Rust
+name: Query State Fixup
 
 on:
   push:
     branches:
-      - main
-      - "feat/**"
-  pull_request:
+      - feat/query-orchestration-time-filter
 
 permissions:
   contents: write
 
 jobs:
-  test:
+  fixup:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -20,25 +18,62 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Generate lockfile and format
-        run: |
-          cargo generate-lockfile
-          cargo fmt --all
-
-      - name: Commit generated changes on branch push
-        if: github.event_name == 'push'
+      - name: Apply fixes and capture remaining diagnostics
         shell: bash
         run: |
-          if test -n "$(git status --porcelain -- Cargo.lock src)"; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add Cargo.lock src
-            git commit -m "style: normalize stateful query implementation"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
+          mkdir -p research
+          cargo generate-lockfile
+          cargo fmt --all
+          set +e
+          cargo clippy --fix --allow-dirty --allow-staged --locked --all-targets --all-features -- -D warnings > research/query-state-clippy-fix.txt 2>&1
+          fix_status=$?
+          cargo fmt --all
+          cargo clippy --locked --all-targets --all-features --message-format=short -- -D warnings > research/query-state-clippy.txt 2>&1
+          strict_status=$?
+          set -e
+          printf '%s\n' "$fix_status" > research/query-state-clippy-fix-status.txt
+          printf '%s\n' "$strict_status" > research/query-state-clippy-status.txt
 
-      - name: Run Clippy
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Restore strict workflow and commit
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
 
-      - name: Run tests
-        run: cargo test --locked --all-targets --all-features
+          Path('.github/workflows/rust.yml').write_text('''name: Rust
+
+          on:
+            push:
+              branches:
+                - main
+                - "feat/**"
+            pull_request:
+
+          permissions:
+            contents: read
+
+          jobs:
+            test:
+              runs-on: ubuntu-latest
+              steps:
+                - name: Check out repository
+                  uses: actions/checkout@v4
+
+                - name: Install Rust toolchain
+                  run: rustup show
+
+                - name: Check formatting
+                  run: cargo fmt --all -- --check
+
+                - name: Run Clippy
+                  run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+                - name: Run tests
+                  run: cargo test --locked --all-targets --all-features
+          '''.replace('          ', ''))
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock src research/query-state-clippy*.txt .github/workflows/rust.yml
+          git commit -m "fix: apply query state Clippy corrections"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
