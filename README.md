@@ -4,7 +4,7 @@
 
 Log Query MCP 部署在能够访问日志文件的 Linux 服务器上。管理员配置允许查询的日志来源，本地 AI 通过 MCP 搜索运行日志，并结合本地代码仓库定位开发环境或测试环境问题。
 
-> 项目已从技术预研进入正式实现阶段。当前分支首先冻结 v1 需求、MCP API 和服务配置 Schema，尚未形成生产发布版本。
+> 项目已从技术预研进入正式实现阶段。M1 已完成 v1 需求、MCP API、错误模型和服务配置 Schema 的对齐，尚未形成生产发布版本。
 
 ## 工作方式
 
@@ -46,19 +46,23 @@ get_log_context
 
 - 目标平台：Linux kernel `>= 5.6`。
 - 正式传输：Streamable HTTP；stdio 用于本机调试。
-- 文件访问：日志来源白名单 + `openat2()` + 普通文件校验。
+- 文件访问：来源白名单 + `openat2()` + `RESOLVE_NO_XDEV` + 普通文件校验。
 - 搜索：字面量子串；不区分大小写仅保证 ASCII。
 - 时间区间：`[start_time, end_time)`。
 - 排序：v1 只支持 `oldest_first`。
 - `match_ref` 和 cursor：单实例、服务端有状态、短期随机 token，重启后失效。
+- 错误：稳定错误代码 + 去敏消息 + `retryable`。
 - 内网使用：v1 不内置认证和 TLS。
 
 ## 正式化文档
 
 - [v1 实现基线](./docs/IMPLEMENTATION_BASELINE_V1.md)
 - [v1 MCP API](./docs/MCP_API_V1.md)
+- [v1 错误模型](./docs/ERROR_MODEL_V1.md)
 - [v1 配置 Schema 说明](./docs/CONFIG_SCHEMA_V1.md)
+- [架构决策记录](./docs/adr/README.md)
 - [MCP 工具机器 Schema](./schemas/mcp-tools-v1.schema.json)
+- [工具错误机器 Schema](./schemas/tool-error-v1.schema.json)
 - [服务配置机器 Schema](./schemas/log-query-mcp-config-v1.schema.json)
 - [完整需求文档](./REQUIREMENTS.md)
 
@@ -68,16 +72,20 @@ get_log_context
 - [x] 技术预研
 - [x] Rust / rmcp 技术栈决策
 - [x] 正式实现分支建立
-- [x] v1 实现基线草案
-- [x] v1 MCP API 草案
-- [x] v1 配置 Schema 草案
-- [ ] 需求文档同步
-- [ ] Schema 评审与冻结
-- [ ] 正式核心实现
+- [x] v1 实现基线
+- [x] v1 MCP API
+- [x] v1 配置 Schema
+- [x] v1 错误模型
+- [x] 需求文档同步
+- [x] `RESOLVE_NO_XDEV` 决策
+- [x] 契约自动校验
+- [ ] M1 人工评审与合并
+- [ ] M2 正式核心实现
 - [ ] 目标 Linux 环境验收
 
 ## 首期不包含
 
+- `newest_first` 实际扫描。
 - 正则表达式或复杂查询语言。
 - 压缩日志和实时 tail。
 - Kubernetes、Loki、Elasticsearch。
