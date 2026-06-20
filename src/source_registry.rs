@@ -93,9 +93,7 @@ impl ConfiguredLogSource {
     }
 
     pub fn open_file(&self, file_id: &str) -> Result<SafeFile, ConfiguredFileError> {
-        let file = self
-            .file(file_id)
-            .ok_or(ConfiguredFileError::UnknownFile)?;
+        let file = self.file(file_id).ok_or(ConfiguredFileError::UnknownFile)?;
         Ok(self.root.open_regular_file(&file.relative_path)?)
     }
 }
@@ -110,8 +108,11 @@ impl SourceRegistry {
     pub fn from_config(config: &AppConfig) -> Result<Self, SourceRegistryError> {
         config.validate()?;
 
-        let enabled_sources: Vec<&LogSourceConfig> =
-            config.sources.iter().filter(|source| source.enabled).collect();
+        let enabled_sources: Vec<&LogSourceConfig> = config
+            .sources
+            .iter()
+            .filter(|source| source.enabled)
+            .collect();
         if enabled_sources.is_empty() {
             return Err(SourceRegistryError::NoEnabledSources);
         }
@@ -296,7 +297,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use crate::{DirectoryRule, Encoding, LimitsConfig, CONFIG_VERSION};
+    use crate::{CONFIG_VERSION, DirectoryRule, Encoding, LimitsConfig};
 
     use super::*;
 
@@ -332,8 +333,7 @@ mod tests {
             .expect("current log should be written");
         fs::write(directory.path().join("audit.log"), "audit\n")
             .expect("audit log should be written");
-        fs::write(directory.path().join("notes.txt"), "notes\n")
-            .expect("notes should be written");
+        fs::write(directory.path().join("notes.txt"), "notes\n").expect("notes should be written");
         let mut configured = source(directory.path().to_path_buf());
         configured.directories = vec![DirectoryRule {
             path: PathBuf::from("."),
@@ -437,10 +437,9 @@ mod tests {
         fs::write(&path, "current\n").expect("current log should be written");
         fs::write(outside.path().join("secret.log"), "secret\n")
             .expect("outside fixture should be written");
-        let registry = SourceRegistry::from_config(&app_config(vec![source(
-            directory.path().to_path_buf(),
-        )]))
-        .expect("registry should load");
+        let registry =
+            SourceRegistry::from_config(&app_config(vec![source(directory.path().to_path_buf())]))
+                .expect("registry should load");
         let loaded = registry.get("payment-test").expect("source should exist");
         let file_id = loaded.files()[0].file_id().to_owned();
 
@@ -459,10 +458,9 @@ mod tests {
         let directory = tempdir().expect("temporary directory should be created");
         fs::write(directory.path().join("application.log"), "current\n")
             .expect("current log should be written");
-        let registry = SourceRegistry::from_config(&app_config(vec![source(
-            directory.path().to_path_buf(),
-        )]))
-        .expect("registry should load");
+        let registry =
+            SourceRegistry::from_config(&app_config(vec![source(directory.path().to_path_buf())]))
+                .expect("registry should load");
 
         assert!(matches!(
             registry.selected(&["unknown".to_owned()]),

@@ -17,9 +17,7 @@ pub use config::{
 #[cfg(target_os = "linux")]
 pub use safe_fs::{FileIdentity, SafeFile, SafeOpenError, SafeRoot};
 #[cfg(target_os = "linux")]
-pub use source_discovery::{
-    DirectoryDiscoveryRule, SourceDiscoveryError, discover_regular_files,
-};
+pub use source_discovery::{DirectoryDiscoveryRule, SourceDiscoveryError, discover_regular_files};
 #[cfg(target_os = "linux")]
 pub use source_registry::{
     ConfiguredFile, ConfiguredFileError, ConfiguredLogSource, LogSourceDescriptor, SourceRegistry,

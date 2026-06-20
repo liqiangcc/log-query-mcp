@@ -272,8 +272,7 @@ mod tests {
         let rule = DirectoryDiscoveryRule::new(".", false, vec![".log".to_owned()])
             .expect("rule should be valid");
 
-        let files =
-            discover_regular_files(&root, &[rule], 10).expect("discovery should succeed");
+        let files = discover_regular_files(&root, &[rule], 10).expect("discovery should succeed");
         assert_eq!(files, vec![PathBuf::from("application.log")]);
     }
 
@@ -303,15 +302,11 @@ mod tests {
         )
         .expect("directory symlink should be created");
         let root = SafeRoot::open(directory.path()).expect("root should open");
-        let rule = DirectoryDiscoveryRule::new(
-            "logs",
-            true,
-            vec![".log".to_owned(), ".log.1".to_owned()],
-        )
-        .expect("rule should be valid");
+        let rule =
+            DirectoryDiscoveryRule::new("logs", true, vec![".log".to_owned(), ".log.1".to_owned()])
+                .expect("rule should be valid");
 
-        let files =
-            discover_regular_files(&root, &[rule], 10).expect("discovery should succeed");
+        let files = discover_regular_files(&root, &[rule], 10).expect("discovery should succeed");
         assert_eq!(
             files,
             vec![
@@ -336,8 +331,7 @@ mod tests {
             DirectoryDiscoveryRule::new(".", false, vec![".log".to_owned(), ".log".to_owned()]);
         assert!(overlapping.is_err());
 
-        let files =
-            discover_regular_files(&root, &[first], 10).expect("discovery should succeed");
+        let files = discover_regular_files(&root, &[first], 10).expect("discovery should succeed");
         assert_eq!(files, vec![PathBuf::from("application.log")]);
     }
 
