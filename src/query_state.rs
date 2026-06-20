@@ -254,9 +254,8 @@ impl SearchCursorData {
     }
 
     fn validate_continuation(&self, next: &Self) -> Result<(), QueryStateError> {
-        next.validate().map_err(|_| {
-            QueryStateError::InvalidContinuation("next cursor state is invalid")
-        })?;
+        next.validate()
+            .map_err(|_| QueryStateError::InvalidContinuation("next cursor state is invalid"))?;
         if next.query != self.query {
             return Err(QueryStateError::InvalidContinuation(
                 "query binding changed between pages",
@@ -476,10 +475,7 @@ impl SearchCursorStore {
             .transpose()?;
         let mut state = self.lock_state();
         state.purge_expired(now);
-        let entry = state
-            .entries
-            .get(token)
-            .ok_or(QueryStateError::LeaseLost)?;
+        let entry = state.entries.get(token).ok_or(QueryStateError::LeaseLost)?;
         if entry.lease_id != Some(lease_id) || &entry.data != current {
             return Err(QueryStateError::LeaseLost);
         }
@@ -882,8 +878,7 @@ mod tests {
     #[test]
     fn cursor_lease_releases_on_drop_and_commits_new_token() {
         let store = Arc::new(
-            SearchCursorStore::new(10, Duration::from_secs(60))
-                .expect("store should be created"),
+            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created"),
         );
         let token = store
             .insert(cursor_data())
@@ -930,8 +925,7 @@ mod tests {
     #[test]
     fn query_mismatch_does_not_consume_cursor() {
         let store = Arc::new(
-            SearchCursorStore::new(10, Duration::from_secs(60))
-                .expect("store should be created"),
+            SearchCursorStore::new(10, Duration::from_secs(60)).expect("store should be created"),
         );
         let token = store
             .insert(cursor_data())
@@ -949,8 +943,7 @@ mod tests {
     #[test]
     fn cursor_expires_and_capacity_evicts_oldest_unleased() {
         let expiring = Arc::new(
-            SearchCursorStore::new(2, Duration::from_millis(5))
-                .expect("store should be created"),
+            SearchCursorStore::new(2, Duration::from_millis(5)).expect("store should be created"),
         );
         let token = expiring
             .insert(cursor_data())
@@ -962,8 +955,7 @@ mod tests {
         ));
 
         let bounded = Arc::new(
-            SearchCursorStore::new(1, Duration::from_secs(60))
-                .expect("store should be created"),
+            SearchCursorStore::new(1, Duration::from_secs(60)).expect("store should be created"),
         );
         let first = bounded
             .insert(cursor_data())
@@ -980,8 +972,8 @@ mod tests {
 
     #[test]
     fn match_references_are_opaque_bounded_and_expire() {
-        let store = MatchReferenceStore::new(1, Duration::from_millis(5))
-            .expect("store should be created");
+        let store =
+            MatchReferenceStore::new(1, Duration::from_millis(5)).expect("store should be created");
         let snapshot = snapshot();
         let data = MatchReferenceData {
             source_id: snapshot.source_id().to_owned(),

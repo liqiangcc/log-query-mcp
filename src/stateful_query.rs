@@ -356,11 +356,7 @@ impl StatefulQueryService {
 
                 let safe_file = source.open_snapshot_file(&candidate.snapshot)?;
                 let mut file = safe_file.into_file();
-                seek_to_scan_position(
-                    &mut file,
-                    position,
-                    candidate.snapshot.size_at_snapshot(),
-                )?;
+                seek_to_scan_position(&mut file, position, candidate.snapshot.size_at_snapshot())?;
 
                 let scan_limits = ScanLimits {
                     max_scan_bytes: scan_budget,
@@ -574,42 +570,35 @@ fn process_matches(
     };
 
     for scan_match in matches {
-        let observation = if let (Some(parser), Some(file)) =
-            (timestamp_parser, prefix_file.as_mut())
-        {
-            let prefix = read_line_prefix(
-                file,
-                scan_match.line_start_offset,
-                candidate.snapshot.size_at_snapshot(),
-                parser.prefix_bytes(),
-            )?;
-            parser.observe(&prefix)
-        } else {
-            TimestampObservation {
-                timestamp: None,
-                malformed: false,
-            }
-        };
+        let observation =
+            if let (Some(parser), Some(file)) = (timestamp_parser, prefix_file.as_mut()) {
+                let prefix = read_line_prefix(
+                    file,
+                    scan_match.line_start_offset,
+                    candidate.snapshot.size_at_snapshot(),
+                    parser.prefix_bytes(),
+                )?;
+                parser.observe(&prefix)
+            } else {
+                TimestampObservation {
+                    timestamp: None,
+                    malformed: false,
+                }
+            };
 
         match time_range.classify(&observation) {
             TimeFilterDecision::OutOfRange => {
-                summary.page.filtered_out_matches = checked_add_u64(
-                    summary.page.filtered_out_matches,
-                    1,
-                )?;
+                summary.page.filtered_out_matches =
+                    checked_add_u64(summary.page.filtered_out_matches, 1)?;
                 continue;
             }
             TimeFilterDecision::UnknownTimestamp => {
-                summary.page.unknown_timestamp_matches = checked_add_u64(
-                    summary.page.unknown_timestamp_matches,
-                    1,
-                )?;
+                summary.page.unknown_timestamp_matches =
+                    checked_add_u64(summary.page.unknown_timestamp_matches, 1)?;
             }
             TimeFilterDecision::MalformedTimestamp => {
-                summary.page.malformed_timestamp_matches = checked_add_u64(
-                    summary.page.malformed_timestamp_matches,
-                    1,
-                )?;
+                summary.page.malformed_timestamp_matches =
+                    checked_add_u64(summary.page.malformed_timestamp_matches, 1)?;
             }
             TimeFilterDecision::InRange => {}
         }
@@ -622,10 +611,8 @@ fn process_matches(
             match_byte_offset: scan_match.match_byte_offset,
         };
         if after.is_some_and(|watermark| key <= *watermark) {
-            summary.skipped_before_watermark = checked_add_u64(
-                summary.skipped_before_watermark,
-                1,
-            )?;
+            summary.skipped_before_watermark =
+                checked_add_u64(summary.skipped_before_watermark, 1)?;
             continue;
         }
 
@@ -932,7 +919,10 @@ mod tests {
             ),
         )
         .expect("fixture should be written");
-        let service = service(vec![source(root.path(), "payment-test")], LimitsConfig::default());
+        let service = service(
+            vec![source(root.path(), "payment-test")],
+            LimitsConfig::default(),
+        );
 
         let first = service
             .search(
@@ -987,7 +977,10 @@ mod tests {
             "2026-06-19T14:00:01+09:00 MATCH one\n2026-06-19T14:00:02+09:00 MATCH two\n",
         )
         .expect("fixture should be written");
-        let service = service(vec![source(root.path(), "payment-test")], LimitsConfig::default());
+        let service = service(
+            vec![source(root.path(), "payment-test")],
+            LimitsConfig::default(),
+        );
         let first = service
             .search(
                 StatefulQueryRequest::new(vec!["payment-test".to_owned()], "MATCH")
@@ -1006,7 +999,9 @@ mod tests {
             .await;
         assert!(matches!(
             mismatch,
-            Err(StatefulQueryError::QueryState(QueryStateError::QueryMismatch))
+            Err(StatefulQueryError::QueryState(
+                QueryStateError::QueryMismatch
+            ))
         ));
 
         let retry = service
@@ -1029,7 +1024,10 @@ mod tests {
             "2026-06-19T14:00:01+09:00 MATCH one\n2026-06-19T14:00:02+09:00 MATCH two\n",
         )
         .expect("fixture should be written");
-        let service = service(vec![source(root.path(), "payment-test")], LimitsConfig::default());
+        let service = service(
+            vec![source(root.path(), "payment-test")],
+            LimitsConfig::default(),
+        );
         let first = service
             .search(
                 StatefulQueryRequest::new(vec!["payment-test".to_owned()], "MATCH")
