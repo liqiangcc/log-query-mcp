@@ -55,11 +55,7 @@ impl QueryRequest {
     }
 
     #[must_use]
-    pub fn with_time_range(
-        mut self,
-        start_time: Option<String>,
-        end_time: Option<String>,
-    ) -> Self {
+    pub fn with_time_range(mut self, start_time: Option<String>, end_time: Option<String>) -> Self {
         self.start_time = start_time;
         self.end_time = end_time;
         self
@@ -167,18 +163,13 @@ impl QueryEngine {
     pub async fn execute(&self, request: QueryRequest) -> Result<QueryPage, QueryError> {
         let limits = self.registry.limits();
         let max_results = validate_request(&request, limits)?;
-        let time_range = TimeRange::from_rfc3339(
-            request.start_time.as_deref(),
-            request.end_time.as_deref(),
-        )?;
+        let time_range =
+            TimeRange::from_rfc3339(request.start_time.as_deref(), request.end_time.as_deref())?;
         let deadline = effective_deadline(request.deadline, limits.query_timeout_millis)?;
         check_interrupted(&request.cancellation, deadline)?;
 
         let selected_sources = self.registry.selected(&request.source_ids)?;
-        let candidates = build_candidates(
-            &selected_sources,
-            limits.max_scan_files_per_query,
-        )?;
+        let candidates = build_candidates(&selected_sources, limits.max_scan_files_per_query)?;
 
         let mut summary = QuerySummary {
             files_considered: candidates.len(),
@@ -220,11 +211,7 @@ impl QueryEngine {
 
                 let safe_file = candidate.source.open_snapshot_file(&candidate.snapshot)?;
                 let mut file = safe_file.into_file();
-                seek_to_scan_position(
-                    &mut file,
-                    position,
-                    candidate.snapshot.size_at_snapshot(),
-                )?;
+                seek_to_scan_position(&mut file, position, candidate.snapshot.size_at_snapshot())?;
 
                 let chunk_result_limit = chunk_result_limit(limits.max_line_bytes);
                 let scan_limits = ScanLimits {
@@ -281,8 +268,7 @@ impl QueryEngine {
                     ScanStopReason::DeadlineExceeded => {
                         return Err(QueryError::DeadlineExceeded);
                     }
-                    ScanStopReason::ResultLimit
-                    | ScanStopReason::ReturnedContentByteLimit => {
+                    ScanStopReason::ResultLimit | ScanStopReason::ReturnedContentByteLimit => {
                         if reached_snapshot_end {
                             break;
                         }
@@ -623,9 +609,8 @@ fn read_line_prefix(
     }
     file.seek(SeekFrom::Start(line_start_offset))?;
     let available = snapshot_size - line_start_offset;
-    let limit = available.min(
-        u64::try_from(maximum_bytes).map_err(|_| QueryError::ResourceCounterOverflow)?,
-    );
+    let limit = available
+        .min(u64::try_from(maximum_bytes).map_err(|_| QueryError::ResourceCounterOverflow)?);
     let capacity = usize::try_from(limit).map_err(|_| QueryError::ResourceCounterOverflow)?;
     let mut prefix = Vec::with_capacity(capacity);
     let mut buffer = [0_u8; 64];
@@ -660,8 +645,7 @@ fn chunk_result_limit(max_line_bytes: usize) -> usize {
     let expanded_line = max_line_bytes
         .saturating_mul(LOSSY_UTF8_EXPANSION_FACTOR)
         .max(1);
-    (MAX_RETURNED_CONTENT_BYTES / expanded_line)
-        .clamp(1, MAX_SCAN_RESULTS)
+    (MAX_RETURNED_CONTENT_BYTES / expanded_line).clamp(1, MAX_SCAN_RESULTS)
 }
 
 fn truncate_utf8(content: &mut String, maximum_bytes: usize) {
@@ -783,7 +767,9 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use crate::{AppConfig, CONFIG_VERSION, Encoding, LimitsConfig, LogSourceConfig, TimestampRule};
+    use crate::{
+        AppConfig, CONFIG_VERSION, Encoding, LimitsConfig, LogSourceConfig, TimestampRule,
+    };
 
     use super::*;
 
@@ -849,7 +835,10 @@ mod tests {
             ),
         )
         .expect("fixture should be written");
-        let engine = engine(vec![source(root.path(), "payment")], LimitsConfig::default());
+        let engine = engine(
+            vec![source(root.path(), "payment")],
+            LimitsConfig::default(),
+        );
         let request = QueryRequest::new(vec!["payment".to_owned()], "MATCH").with_time_range(
             Some("2026-06-19T14:00:00+09:00".to_owned()),
             Some("2026-06-19T15:00:00+09:00".to_owned()),
@@ -858,7 +847,11 @@ mod tests {
         let page = engine.execute(request).await.expect("query should succeed");
 
         assert_eq!(page.results.len(), 4);
-        assert!(page.results.iter().all(|result| !result.content.ends_with(" end")));
+        assert!(
+            page.results
+                .iter()
+                .all(|result| !result.content.ends_with(" end"))
+        );
         assert_eq!(page.summary.filtered_out_matches, 1);
         assert_eq!(page.summary.malformed_timestamp_matches, 1);
         assert_eq!(page.summary.unknown_timestamp_matches, 1);
@@ -904,8 +897,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn aggregates_page_scan_byte_limit() {
         let root = tempdir().expect("root should be created");
-        fs::write(root.path().join("application.log"), "abcdefghij MATCH later\n")
-            .expect("fixture should be written");
+        fs::write(
+            root.path().join("application.log"),
+            "abcdefghij MATCH later\n",
+        )
+        .expect("fixture should be written");
         let mut limits = LimitsConfig::default();
         limits.max_scan_bytes_per_page = 10;
         let engine = engine(vec![source(root.path(), "payment")], limits);
@@ -926,7 +922,10 @@ mod tests {
         let root = tempdir().expect("root should be created");
         fs::write(root.path().join("application.log"), "MATCH\n")
             .expect("fixture should be written");
-        let engine = engine(vec![source(root.path(), "payment")], LimitsConfig::default());
+        let engine = engine(
+            vec![source(root.path(), "payment")],
+            LimitsConfig::default(),
+        );
 
         assert!(matches!(
             engine

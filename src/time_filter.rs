@@ -35,12 +35,7 @@ impl TimestampParser {
                 prefix_bytes,
                 format,
                 default_offset_seconds,
-            } => parse_custom_prefix(
-                line_prefix,
-                *prefix_bytes,
-                format,
-                *default_offset_seconds,
-            ),
+            } => parse_custom_prefix(line_prefix, *prefix_bytes, format, *default_offset_seconds),
         };
 
         TimestampObservation {
@@ -118,8 +113,9 @@ pub enum TimeFilterDecision {
 
 fn validate_rule(rule: &TimestampRule) -> Result<(), TimeFilterError> {
     let prefix_bytes = match rule {
-        TimestampRule::Rfc3339 { prefix_bytes }
-        | TimestampRule::Custom { prefix_bytes, .. } => *prefix_bytes,
+        TimestampRule::Rfc3339 { prefix_bytes } | TimestampRule::Custom { prefix_bytes, .. } => {
+            *prefix_bytes
+        }
     };
     if prefix_bytes == 0 || prefix_bytes > MAX_TIMESTAMP_PREFIX_BYTES {
         return Err(TimeFilterError::InvalidConfiguration(
