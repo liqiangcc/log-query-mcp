@@ -13,6 +13,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_SCHEMA_PATH = ROOT / "schemas" / "log-query-mcp-config-v1.schema.json"
 MCP_SCHEMA_PATH = ROOT / "schemas" / "mcp-tools-v1.schema.json"
+ERROR_SCHEMA_PATH = ROOT / "schemas" / "tool-error-v1.schema.json"
 CONFIG_EXAMPLE_PATH = ROOT / "examples" / "log-query-mcp.v1.json"
 
 
@@ -178,18 +179,58 @@ def validate_mcp_contracts(schema: dict[str, Any]) -> None:
     )
 
 
+def validate_error_contract(schema: dict[str, Any]) -> None:
+    valid_errors = [
+        {
+            "code": "UNKNOWN_SOURCE",
+            "message": "one or more requested log sources are unavailable",
+            "retryable": False,
+        },
+        {
+            "code": "FILE_CHANGED",
+            "message": "the referenced log file changed; run the search again",
+            "retryable": True,
+        },
+    ]
+    for instance in valid_errors:
+        validate_instance(schema, instance, f"valid {instance['code']} error")
+
+    assert_invalid(
+        schema,
+        {
+            "code": "SERVER_PATH_LEAK",
+            "message": "/var/log/private/application.log",
+            "retryable": False,
+        },
+        "unknown tool error code",
+    )
+    assert_invalid(
+        schema,
+        {
+            "code": "INTERNAL_ERROR",
+            "message": "failure",
+            "retryable": True,
+            "details": {"path": "/var/log/private/application.log"},
+        },
+        "tool error containing an unapproved details field",
+    )
+
+
 def main() -> int:
     config_schema = load_json(CONFIG_SCHEMA_PATH)
     mcp_schema = load_json(MCP_SCHEMA_PATH)
+    error_schema = load_json(ERROR_SCHEMA_PATH)
     config_example = load_json(CONFIG_EXAMPLE_PATH)
 
     check_schema(config_schema, CONFIG_SCHEMA_PATH)
     check_schema(mcp_schema, MCP_SCHEMA_PATH)
+    check_schema(error_schema, ERROR_SCHEMA_PATH)
     validate_instance(config_schema, config_example, "v1 configuration example")
     validate_config_rules(config_example)
     validate_mcp_contracts(mcp_schema)
+    validate_error_contract(error_schema)
 
-    print("v1 schemas, examples, and frozen contract rules are valid")
+    print("v1 schemas, examples, error model, and frozen rules are valid")
     return 0
 
 
