@@ -8,7 +8,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -20,66 +20,8 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Patch stale reference assignment
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path("src/context_reader.rs")
-          text = path.read_text()
-          marker = '        let mut stale_reference = reference(1, 0, 7);\n'
-          index = text.index(marker) + len(marker)
-          suffix = text[index:]
-          suffix = suffix.replace(
-              '        reference.file_size_at_match = data.len() as u64;',
-              '        stale_reference.file_size_at_match = data.len() as u64;',
-              1,
-          )
-          path.write_text(text[:index] + suffix)
-          PY
-          cargo fmt --all
-
-      - name: Restore strict workflow and commit fix
-        if: github.event_name == 'push'
-        shell: bash
-        run: |
-          cat > .github/workflows/rust.yml <<'YAML'
-          name: Rust
-
-          on:
-            push:
-              branches:
-                - main
-                - "feat/**"
-            pull_request:
-
-          permissions:
-            contents: read
-
-          jobs:
-            test:
-              runs-on: ubuntu-latest
-              steps:
-                - name: Check out repository
-                  uses: actions/checkout@v4
-
-                - name: Install Rust toolchain
-                  run: rustup show
-
-                - name: Check formatting
-                  run: cargo fmt --all -- --check
-
-                - name: Run Clippy
-                  run: cargo clippy --locked --all-targets --all-features -- -D warnings
-
-                - name: Run tests
-                  run: cargo test --locked --all-targets --all-features
-          YAML
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/context_reader.rs .github/workflows/rust.yml
-          git commit -m "fix: correct stale context reference test"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
       - name: Run Clippy
         run: cargo clippy --locked --all-targets --all-features -- -D warnings

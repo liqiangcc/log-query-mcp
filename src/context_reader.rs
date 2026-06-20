@@ -966,7 +966,7 @@ mod tests {
     fn detects_rewritten_keyword_and_cancelled_request() {
         let data = b"prefix changed suffix\n";
         let mut stale_reference = reference(1, 0, 7);
-        reference.file_size_at_match = data.len() as u64;
+        stale_reference.file_size_at_match = data.len() as u64;
         let mut reader = Cursor::new(data.to_vec());
         assert!(matches!(
             read_context(
