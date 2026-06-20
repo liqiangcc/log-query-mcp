@@ -8,7 +8,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -20,50 +20,11 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Apply Clippy fixes and capture diagnostics
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
-          path = Path("src/query_engine.rs")
-          text = path.read_text()
-          text = text.replace(
-              ".map_err(|error| map_position_read_error(error))?;",
-              ".map_err(map_position_read_error)?;",
-          )
-          text = text.replace(
-              "let mut limits = LimitsConfig::default();\n        limits.max_scan_bytes_per_page = 10;",
-              "let limits = LimitsConfig {\n            max_scan_bytes_per_page: 10,\n            ..LimitsConfig::default()\n        };",
-          )
-          path.write_text(text)
-          PY
-          cargo generate-lockfile
-          cargo fmt --all
-          mkdir -p research
-          set +e
-          cargo clippy --locked --all-targets --all-features --message-format=short -- -D warnings > research/query-clippy-diagnostics.txt 2>&1
-          clippy_status=$?
-          cargo test --locked --all-targets --all-features > research/query-test-diagnostics.txt 2>&1
-          test_status=$?
-          set -e
-          echo "$clippy_status" > research/query-clippy-status.txt
-          echo "$test_status" > research/query-test-status.txt
+      - name: Run Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
-      - name: Commit fixes and diagnostics on branch push
-        if: github.event_name == 'push'
-        shell: bash
-        run: |
-          if test -n "$(git status --porcelain -- Cargo.lock src research/query-*-diagnostics.txt research/query-*-status.txt)"; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add Cargo.lock src research/query-*-diagnostics.txt research/query-*-status.txt
-            git commit -m "fix: apply query orchestration Clippy corrections"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
-
-      - name: Enforce Clippy result
-        run: test "$(cat research/query-clippy-status.txt)" -eq 0
-
-      - name: Enforce test result
-        run: test "$(cat research/query-test-status.txt)" -eq 0
+      - name: Run tests
+        run: cargo test --locked --all-targets --all-features
