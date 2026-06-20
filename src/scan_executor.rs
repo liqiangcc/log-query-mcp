@@ -217,7 +217,12 @@ mod tests {
             .with_cancellation(cancellation.clone());
         let scan_task = tokio::spawn(async move {
             executor
-                .scan(SlowReader { reads_left: 100_000 }, request)
+                .scan(
+                    SlowReader {
+                        reads_left: 100_000,
+                    },
+                    request,
+                )
                 .await
         });
 
@@ -242,8 +247,7 @@ mod tests {
             let executor = executor.clone();
             let started = Arc::clone(&first_started);
             let reader_cancellation = first_cancellation.clone();
-            let request = ScanRequest::new("never")
-                .with_cancellation(first_cancellation.clone());
+            let request = ScanRequest::new("never").with_cancellation(first_cancellation.clone());
             tokio::spawn(async move {
                 executor
                     .scan(
@@ -280,7 +284,13 @@ mod tests {
             .expect("queued task should not panic")
             .expect("queued scan should return an outcome");
         assert_eq!(outcome.stop_reason, ScanStopReason::Cancelled);
-        assert_eq!(outcome.next_position, Some(ScanPosition { byte_offset: 100, line_number: 10 }));
+        assert_eq!(
+            outcome.next_position,
+            Some(ScanPosition {
+                byte_offset: 100,
+                line_number: 10
+            })
+        );
         assert_eq!(second_reads.load(Ordering::SeqCst), 0);
 
         first_cancellation.cancel();
@@ -300,8 +310,7 @@ mod tests {
             let executor = executor.clone();
             let started = Arc::clone(&first_started);
             let reader_cancellation = first_cancellation.clone();
-            let request = ScanRequest::new("never")
-                .with_cancellation(first_cancellation.clone());
+            let request = ScanRequest::new("never").with_cancellation(first_cancellation.clone());
             tokio::spawn(async move {
                 executor
                     .scan(
@@ -317,8 +326,8 @@ mod tests {
         wait_until_true(&first_started).await;
 
         let reads = Arc::new(AtomicUsize::new(0));
-        let request = ScanRequest::new("MATCH")
-            .with_deadline(Instant::now() + Duration::from_millis(30));
+        let request =
+            ScanRequest::new("MATCH").with_deadline(Instant::now() + Duration::from_millis(30));
         let outcome = timeout(
             Duration::from_secs(1),
             executor.scan(

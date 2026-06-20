@@ -678,8 +678,8 @@ mod tests {
             ..ScanLimits::default()
         };
         let data = b"aaaaaaaaaaaaaaaaaaaaMATCHbbbbbbbbbbbbbbbb\n";
-        let outcome = scan(data, ScanRequest::new("MATCH").with_limits(limits))
-            .expect("scan should succeed");
+        let outcome =
+            scan(data, ScanRequest::new("MATCH").with_limits(limits)).expect("scan should succeed");
 
         let result = &outcome.results[0];
         assert!(result.content.contains("MATCH"));
