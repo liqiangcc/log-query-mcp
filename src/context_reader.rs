@@ -32,8 +32,7 @@ impl ContextReadLimits {
     pub fn from_service_limits(limits: &LimitsConfig) -> Self {
         let scan_bytes = limits
             .max_scan_bytes_per_page
-            .min(DEFAULT_CONTEXT_SCAN_BYTES)
-            .max(1);
+            .clamp(1, DEFAULT_CONTEXT_SCAN_BYTES);
         Self {
             max_lines_per_side: limits.max_context_lines_per_side,
             max_line_bytes: limits.max_line_bytes,
@@ -141,6 +140,7 @@ pub fn read_referenced_context(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn read_context<R: Read + Seek>(
     reader: &mut R,
     file_size: u64,
@@ -832,7 +832,7 @@ mod tests {
     fn reads_before_match_and_after_lines() {
         let data = b"one\ntwo\nMATCH three\nfour\nfive\n";
         let mut reference = reference(3, 8, 8);
-        stale_reference.file_size_at_match = data.len() as u64;
+        reference.file_size_at_match = data.len() as u64;
         let mut reader = Cursor::new(data.to_vec());
         let outcome = read_context(
             &mut reader,
