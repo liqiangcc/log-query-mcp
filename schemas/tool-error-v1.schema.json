@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://log-query-mcp.local/schemas/tool-error-v1.schema.json",
+  "title": "Log Query MCP tool error v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code", "message", "retryable"],
+  "properties": {
+    "code": {
+      "type": "string",
+      "enum": [
+        "INVALID_ARGUMENT",
+        "UNKNOWN_SOURCE",
+        "SOURCE_UNAVAILABLE",
+        "DEADLINE_EXCEEDED",
+        "QUERY_CANCELLED",
+        "RESOURCE_LIMIT",
+        "CURSOR_INVALID",
+        "MATCH_REF_INVALID",
+        "FILE_CHANGED",
+        "INTERNAL_ERROR"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "retryable": {
+      "type": "boolean"
+    }
+  }
+}

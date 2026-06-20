@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://log-query-mcp.local/schemas/mcp-tools-v1.schema.json",
+  "title": "Log Query MCP tool contracts v1",
+  "type": "object",
+  "$defs": {
+    "ListLogSourcesRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "LogSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "name",
+        "description",
+        "service",
+        "environment",
+        "tags"
+      ],
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "service": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "environment": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "tags": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      }
+    },
+    "ListLogSourcesResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sources"],
+      "properties": {
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LogSource"
+          }
+        }
+      }
+    },
+    "SearchLogsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_ids", "keyword"],
+      "properties": {
+        "source_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "keyword": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\r\\n]+$"
+        },
+        "case_sensitive": {
+          "type": "boolean",
+          "default": false
+        },
+        "start_time": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "minLength": 1,
+          "maxLength": 64,
+          "default": null
+        },
+        "end_time": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "minLength": 1,
+          "maxLength": 64,
+          "default": null
+        },
+        "order": {
+          "type": "string",
+          "enum": ["oldest_first"],
+          "default": "oldest_first"
+        },
+        "max_results": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 50
+        },
+        "cursor": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 512,
+          "default": null
+        }
+      }
+    },
+    "LogMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "match_ref",
+        "source_id",
+        "file_id",
+        "file_name",
+        "line_number",
+        "timestamp",
+        "content",
+        "content_truncated"
+      ],
+      "properties": {
+        "match_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "source_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "file_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "file_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "line_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timestamp": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "content": {
+          "type": "string"
+        },
+        "content_truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "SearchLogsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["results", "truncated", "next_cursor"],
+      "properties": {
+        "results": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/LogMatch"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "next_cursor": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "GetLogContextRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["match_ref"],
+      "properties": {
+        "match_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "before_lines": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50,
+          "default": 0
+        },
+        "after_lines": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50,
+          "default": 0
+        }
+      }
+    },
+    "ContextLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line_number", "content"],
+      "properties": {
+        "line_number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "content": {
+          "type": "string"
+        }
+      }
+    },
+    "GetLogContextResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "file_id",
+        "file_name",
+        "start_line",
+        "end_line",
+        "lines",
+        "truncated"
+      ],
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "file_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "file_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "lines": {
+          "type": "array",
+          "maxItems": 101,
+          "items": {
+            "$ref": "#/$defs/ContextLine"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
