@@ -8,7 +8,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -20,27 +20,28 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Apply formatting and Clippy fixes
-        run: |
-          cargo generate-lockfile
-          cargo fmt --all
-          cargo clippy --fix --allow-dirty --allow-staged --all-targets --all-features -- -D warnings
-          cargo fmt --all
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
-      - name: Commit generated corrections on branch push
-        if: github.event_name == 'push'
+      - name: Run Clippy and capture diagnostics
+        id: clippy
+        continue-on-error: true
         shell: bash
         run: |
-          if test -n "$(git status --porcelain -- Cargo.lock src)"; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add Cargo.lock src
-            git commit -m "fix: apply Clippy corrections to source registry"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
+          set -o pipefail
+          cargo clippy --locked --all-targets --all-features --message-format=short -- -D warnings 2>&1 | tee clippy-diagnostics.txt
 
-      - name: Run strict Clippy
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Upload Clippy diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-registry-clippy
+          path: clippy-diagnostics.txt
+          if-no-files-found: error
+
+      - name: Enforce Clippy result
+        if: always()
+        run: test "${{ steps.clippy.outcome }}" = "success"
 
       - name: Run tests
         run: cargo test --locked --all-targets --all-features
