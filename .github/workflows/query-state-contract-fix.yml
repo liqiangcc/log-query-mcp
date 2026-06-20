@@ -20,6 +20,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           time_filter = Path("src/time_filter.rs")
           text = time_filter.read_text()
@@ -31,45 +32,41 @@ jobs:
               '"start_time must be earlier than end_time"',
               '"start_time must not be later than end_time"',
           )
-          old_test = '''    #[test]
-              fn rejects_reverse_or_equal_range() {
-                  assert!(matches!(
-                      TimeRange::from_rfc3339(
-                          Some("2026-06-19T15:00:00+09:00"),
-                          Some("2026-06-19T15:00:00+09:00")
-                      ),
-                      Err(TimeFilterError::InvalidRange(_))
-                  ));
-              }
-          '''
-          new_test = '''    #[test]
-              fn equal_range_is_empty_and_reverse_range_is_rejected() {
-                  let equal = TimeRange::from_rfc3339(
-                      Some("2026-06-19T15:00:00+09:00"),
-                      Some("2026-06-19T15:00:00+09:00"),
-                  )
-                  .expect("equal half-open range should be valid");
-                  let boundary = TimestampObservation {
-                      timestamp: Some(
-                          DateTime::parse_from_rfc3339("2026-06-19T15:00:00+09:00")
-                              .expect("timestamp should parse"),
-                      ),
-                      malformed: false,
-                  };
-                  assert_eq!(equal.classify(&boundary), TimeFilterDecision::OutOfRange);
+          replacement = '''    #[test]
+          fn equal_range_is_empty_and_reverse_range_is_rejected() {
+              let equal = TimeRange::from_rfc3339(
+                  Some("2026-06-19T15:00:00+09:00"),
+                  Some("2026-06-19T15:00:00+09:00"),
+              )
+              .expect("equal half-open range should be valid");
+              let boundary = TimestampObservation {
+                  timestamp: Some(
+                      DateTime::parse_from_rfc3339("2026-06-19T15:00:00+09:00")
+                          .expect("timestamp should parse"),
+                  ),
+                  malformed: false,
+              };
+              assert_eq!(equal.classify(&boundary), TimeFilterDecision::OutOfRange);
 
-                  assert!(matches!(
-                      TimeRange::from_rfc3339(
-                          Some("2026-06-19T15:00:01+09:00"),
-                          Some("2026-06-19T15:00:00+09:00")
-                      ),
-                      Err(TimeFilterError::InvalidRange(_))
-                  ));
-              }
-          '''
-          if old_test not in text:
-              raise SystemExit("expected time range test block was not found")
-          time_filter.write_text(text.replace(old_test, new_test))
+              assert!(matches!(
+                  TimeRange::from_rfc3339(
+                      Some("2026-06-19T15:00:01+09:00"),
+                      Some("2026-06-19T15:00:00+09:00")
+                  ),
+                  Err(TimeFilterError::InvalidRange(_))
+              ));
+          }
+          }'''
+          text, count = re.subn(
+              r'    #\[test\]\n    fn rejects_reverse_or_equal_range\(\) \{.*?\n    \}\n\}',
+              replacement,
+              text,
+              count=1,
+              flags=re.DOTALL,
+          )
+          if count != 1:
+              raise SystemExit("expected time range test was not replaced")
+          time_filter.write_text(text)
 
           query_state = Path("src/query_state.rs")
           text = query_state.read_text()
@@ -81,26 +78,28 @@ jobs:
               '"start_time must be earlier than end_time"',
               '"start_time must not be later than end_time"',
           )
-          marker = '''    #[test]
-              fn cursor_lease_releases_on_drop_and_commits_new_token() {
+          if 'fn query_binding_accepts_equal_half_open_range()' not in text:
+              test = '''
+          #[test]
+          fn query_binding_accepts_equal_half_open_range() {
+              let timestamp = DateTime::parse_from_rfc3339(
+                  "2026-06-19T15:00:00+09:00",
+              )
+              .expect("timestamp should parse");
+              let mut query = binding();
+              query.start_time = Some(timestamp);
+              query.end_time = Some(timestamp);
+              query.validate().expect("equal range should be valid");
+          }
           '''
-          test = '''    #[test]
-              fn query_binding_accepts_equal_half_open_range() {
-                  let timestamp = DateTime::parse_from_rfc3339(
-                      "2026-06-19T15:00:00+09:00",
-                  )
-                  .expect("timestamp should parse");
-                  let mut query = binding();
-                  query.start_time = Some(timestamp);
-                  query.end_time = Some(timestamp);
-                  query.validate().expect("equal range should be valid");
-              }
-
-          '''
-          if test not in text:
-              if marker not in text:
-                  raise SystemExit("query state test insertion marker was not found")
-              text = text.replace(marker, test + marker, 1)
+              text, count = re.subn(
+                  r'(\n    #\[test\]\n    fn cursor_lease_releases_on_drop_and_commits_new_token\(\))',
+                  test + r'\1',
+                  text,
+                  count=1,
+              )
+              if count != 1:
+                  raise SystemExit("query state test insertion point was not found")
           query_state.write_text(text)
           PY
           cargo fmt --all
