@@ -1,0 +1,53 @@
+name: Query State Fix
+
+on:
+  push:
+    branches:
+      - feat/query-orchestration-time-filter
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Fix field reassignment warning
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/stateful_query.rs')
+          text = path.read_text()
+          old = '''        let mut limits = LimitsConfig::default();
+                  limits.max_scan_bytes_per_page = 20;
+          '''
+          new = '''        let limits = LimitsConfig {
+                      max_scan_bytes_per_page: 20,
+                      ..LimitsConfig::default()
+                  };
+          '''
+          if old not in text:
+              raise SystemExit('expected LimitsConfig test snippet was not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          cargo fmt --all
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked --all-targets --all-features
+
+      - name: Remove one-shot workflow and commit
+        shell: bash
+        run: |
+          git rm .github/workflows/query-state-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/stateful_query.rs .github/workflows/query-state-fix.yml
+          git commit -m "fix: initialize query test limits directly"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
