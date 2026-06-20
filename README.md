@@ -4,7 +4,7 @@
 
 服务部署在能够访问日志文件的 Linux 服务器上。管理员配置允许查询的日志来源；本地 AI 通过 MCP 搜索运行日志，并结合本地代码仓库定位开发环境或测试环境问题。
 
-> 当前为技术预研原型。真实文件搜索、分页和上下文读取链路已经接通，但尚未达到生产发布状态。
+> 当前为技术预研原型。真实文件搜索、分页和上下文读取链路已经接通，但尚未达到生产发布状态。预研结论为 **CONDITIONAL GO**，详见[技术预研报告](./docs/TECHNICAL_RESEARCH_REPORT.md)。
 
 ## 工作方式
 
@@ -200,15 +200,12 @@ target/release/log-query-benchmark \
 
 ## 文档
 
+- [文档索引](./docs/README.md)
 - [需求文档](./REQUIREMENTS.md)
-- [技术预研计划](./docs/TECHNICAL_RESEARCH_PLAN.md)
-- [工具 Schema 草案](./docs/TOOL_SCHEMA_DRAFT.md)
-- [安全文件访问预研](./docs/SAFE_FILE_ACCESS_RESEARCH.md)
-- [扫描器预研](./docs/SCANNER_RESEARCH.md)
-- [执行器预研](./docs/EXECUTOR_RESEARCH.md)
-- [匹配引用预研](./docs/MATCH_REFERENCE_RESEARCH.md)
-- [分页游标预研](./docs/SEARCH_CURSOR_RESEARCH.md)
-- [时间范围预研](./docs/TIME_FILTER_RESEARCH.md)
+- [技术预研报告](./docs/TECHNICAL_RESEARCH_REPORT.md)
+- [架构设计](./docs/ARCHITECTURE.md)
+- [架构决策记录](./docs/adr/README.md)
+- [正式实现阶段计划](./docs/NEXT_PHASE_PLAN.md)
 - [部署指南](./docs/DEPLOYMENT.md)
 - [性能基准](./docs/PERFORMANCE_BENCHMARK.md)
 
