@@ -1,0 +1,101 @@
+   Compiling serde_core v1.0.228
+   Compiling pin-project-lite v0.2.17
+   Compiling zmij v1.0.21
+   Compiling itoa v1.0.18
+   Compiling linux-raw-sys v0.12.1
+   Compiling futures-task v0.3.32
+   Compiling futures-core v0.3.32
+   Compiling bitflags v2.13.0
+   Compiling memchr v2.8.2
+   Compiling slab v0.4.12
+   Compiling futures-util v0.3.32
+   Compiling serde v1.0.228
+   Compiling serde_json v1.0.150
+   Compiling rustix v1.1.4
+   Compiling ref-cast v1.0.25
+   Compiling tokio v1.52.3
+   Compiling num-traits v0.2.19
+   Compiling libc v0.2.186
+   Compiling futures-sink v0.3.32
+   Compiling cfg-if v1.0.4
+   Compiling dyn-clone v1.0.20
+   Compiling bytes v1.12.0
+   Compiling schemars v1.2.1
+   Compiling tokio-util v0.7.18
+   Compiling getrandom v0.4.3
+   Compiling thiserror v2.0.18
+   Compiling chrono v0.4.45
+   Compiling once_cell v1.21.4
+   Compiling fastrand v2.4.1
+   Compiling tempfile v3.27.0
+   Compiling log-query-mcp v0.1.0 (/home/runner/work/log-query-mcp/log-query-mcp)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 15.13s
+     Running unittests src/lib.rs (target/debug/deps/log_query_mcp-d52974a988de8b13)
+
+running 56 tests
+test config::tests::accepts_frozen_v1_example ... ok
+test config::tests::accepts_root_directory_rule_dot ... ok
+test config::tests::applies_frozen_defaults ... ok
+test config::tests::rejects_duplicate_tags_and_suffixes ... ok
+test config::tests::loads_configuration_from_file ... ok
+test config::tests::rejects_invalid_limit_relationships ... ok
+test config::tests::rejects_invalid_source_id_and_relative_root ... ok
+test config::tests::rejects_unknown_json_fields ... ok
+test config::tests::rejects_source_without_files_or_directories ... ok
+test config::tests::rejects_unsafe_or_duplicate_paths ... ok
+test config::tests::rejects_unsupported_version_and_duplicate_source_ids ... ok
+test query_engine::tests::aggregates_page_scan_byte_limit ... ok
+test query_engine::tests::applies_start_inclusive_end_exclusive_and_keeps_unknown_times ... ok
+test query_engine::tests::rejects_duplicate_sources_and_pre_cancelled_query ... ok
+test query_engine::tests::returns_globally_earliest_result_when_page_size_is_one ... ok
+test safe_fs::tests::opens_regular_file_and_records_identity ... ok
+test query_engine::tests::sorts_multi_source_results_by_timestamp_with_unknowns_last ... ok
+test safe_fs::tests::opens_root_and_nested_directories ... ok
+test safe_fs::tests::rejects_directory_fifo_and_socket ... ok
+test safe_fs::tests::rejects_file_replaced_by_symlink_before_open ... ok
+test safe_fs::tests::rejects_parent_traversal_and_absolute_paths ... ok
+test safe_fs::tests::rejects_final_and_intermediate_symlinks ... ok
+test safe_fs::tests::resolve_policy_includes_cross_mount_restriction ... ok
+test safe_fs::tests::rejects_root_symlink ... ok
+test scan_executor::tests::dropping_scan_future_cancels_blocking_task_and_releases_permit ... ok
+test scan_executor::tests::queued_cancellation_does_not_start_reader ... ok
+test scan_executor::tests::cancellation_interrupts_running_scan ... ok
+test scan_executor::tests::scans_on_blocking_executor ... ok
+test scan_executor::tests::validates_concurrency_and_closed_executor ... ok
+test scanner::tests::does_not_match_across_line_boundaries ... ok
+test scanner::tests::honors_pre_cancelled_request_and_expired_deadline ... ok
+test scanner::tests::matches_keyword_across_read_buffer_boundaries ... ok
+test scanner::tests::matches_utf8_keyword_and_ascii_case_insensitive_text ... ok
+test scanner::tests::rejects_invalid_keyword_limits_and_position ... ok
+test scanner::tests::reports_lossy_preview_and_strips_crlf ... ok
+test scanner::tests::result_limit_returns_safe_continuation_position ... ok
+test scanner::tests::resumed_scan_uses_absolute_offsets_and_line_numbers ... ok
+test scanner::tests::returns_bounded_preview_containing_late_match ... ok
+test scanner::tests::scan_byte_limit_only_returns_continuation_at_line_boundary ... ok
+test source_discovery::tests::discovers_non_recursive_files_by_suffix ... ok
+test source_discovery::tests::enforces_file_limit ... ok
+test source_discovery::tests::overlapping_rules_are_deduplicated ... ok
+test source_discovery::tests::recursively_discovers_rotation_files_without_following_symlinks ... ok
+test source_registry::tests::builds_registry_and_excludes_disabled_sources ... ok
+test source_registry::tests::detects_file_replacement_after_snapshot ... ok
+test source_registry::tests::directory_rule_does_not_authorize_unconfigured_nested_path ... ok
+test source_registry::tests::fails_startup_for_missing_explicit_file ... ok
+test source_registry::tests::rejects_unknown_source_selection ... ok
+test source_registry::tests::snapshots_explicit_and_discovered_files_in_stable_order ... ok
+test source_registry::tests::symlink_discovery_entries_are_not_registered ... ok
+test time_filter::tests::applies_start_inclusive_end_exclusive_range ... ok
+test time_filter::tests::marks_date_like_parse_failures_as_malformed ... ok
+test time_filter::tests::parses_custom_prefix_with_default_offset ... ok
+test time_filter::tests::parses_rfc3339_token_with_variable_precision ... ok
+test time_filter::tests::rejects_reverse_or_equal_range ... ok
+test scan_executor::tests::queued_deadline_does_not_start_reader ... ok
+
+test result: ok. 56 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/scanner_integration.rs (target/debug/deps/scanner_integration-9d4fcaf4e77c29a3)
+
+running 1 test
+test scans_a_source_registry_snapshot_through_safe_file_access ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
