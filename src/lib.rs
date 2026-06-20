@@ -10,8 +10,8 @@ pub mod source_discovery;
 pub mod source_registry;
 
 pub use config::{
-    AppConfig, ConfigLoadError, ConfigValidationError, DirectoryRule, Encoding, LimitsConfig,
-    LogSourceConfig, TimestampRule, ValidationIssue,
+    AppConfig, CONFIG_VERSION, ConfigLoadError, ConfigValidationError, DirectoryRule, Encoding,
+    LimitsConfig, LogSourceConfig, TimestampRule, ValidationIssue,
 };
 
 #[cfg(target_os = "linux")]
