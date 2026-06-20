@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 pub mod config;
+mod scan_executor;
+mod scanner;
 
 #[cfg(target_os = "linux")]
 mod safe_fs;
@@ -12,6 +14,12 @@ mod source_registry;
 pub use config::{
     AppConfig, CONFIG_VERSION, ConfigLoadError, ConfigValidationError, DirectoryRule, Encoding,
     LimitsConfig, LogSourceConfig, TimestampRule, ValidationIssue,
+};
+pub use scan_executor::{MAX_CONCURRENT_SCAN_TASKS, ScanExecutor, ScanTaskError};
+pub use scanner::{
+    MAX_LINE_PREVIEW_BYTES, MAX_READ_BUFFER_BYTES, MAX_RETURNED_CONTENT_BYTES, MAX_SCAN_BYTES,
+    MAX_SCAN_KEYWORD_CHARS, MAX_SCAN_RESULTS, ScanError, ScanLimits, ScanMatch, ScanOutcome,
+    ScanPosition, ScanRequest, ScanStopReason, scan_reader,
 };
 
 #[cfg(target_os = "linux")]
