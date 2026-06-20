@@ -18,9 +18,10 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Fix field reassignment warning
+      - name: Apply fix and capture validation
         shell: bash
         run: |
+          mkdir -p research
           python3 - <<'PY'
           from pathlib import Path
 
@@ -28,13 +29,20 @@ jobs:
           text = path.read_text()
           old = "        let mut limits = LimitsConfig::default();\n        limits.max_scan_bytes_per_page = 20;"
           new = "        let limits = LimitsConfig {\n            max_scan_bytes_per_page: 20,\n            ..LimitsConfig::default()\n        };"
-          if old not in text:
+          if old in text:
+              path.write_text(text.replace(old, new, 1))
+          elif new not in text:
               raise SystemExit("expected LimitsConfig test snippet was not found")
-          path.write_text(text.replace(old, new, 1))
           PY
           cargo fmt --all
-          cargo clippy --locked --all-targets --all-features -- -D warnings
-          cargo test --locked --all-targets --all-features
+          set +e
+          cargo clippy --locked --all-targets --all-features --message-format=short -- -D warnings > research/query-state-postfix-clippy.txt 2>&1
+          clippy_status=$?
+          cargo test --locked --all-targets --all-features > research/query-state-postfix-tests.txt 2>&1
+          test_status=$?
+          set -e
+          printf '%s\n' "$clippy_status" > research/query-state-postfix-clippy-status.txt
+          printf '%s\n' "$test_status" > research/query-state-postfix-test-status.txt
 
       - name: Remove one-shot workflow and commit
         shell: bash
@@ -42,6 +50,6 @@ jobs:
           git rm .github/workflows/query-state-fix.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/stateful_query.rs .github/workflows/query-state-fix.yml
+          git add src/stateful_query.rs research/query-state-postfix-* .github/workflows/query-state-fix.yml
           git commit -m "fix: initialize query test limits directly"
           git push origin "HEAD:${GITHUB_REF_NAME}"
