@@ -1,10 +1,10 @@
 # Log Query MCP v1 实现基线
 
-> 状态：M1 接口冻结草案  
+> 状态：M1 已完成，待 PR 评审合并  
 > 日期：2026-06-20  
 > 适用分支：`feat/initial-implementation`
 
-本文用于把需求文档与技术预研结论对齐。正式实现和验收以本文、`MCP_API_V1.md`、`CONFIG_SCHEMA_V1.md` 及对应机器可读 Schema 为准；与原始需求冲突的内容，以本基线为准，后续再同步回 `REQUIREMENTS.md`。
+本文用于把需求文档与技术预研结论对齐。正式实现和验收以本文、`MCP_API_V1.md`、`CONFIG_SCHEMA_V1.md`、`ERROR_MODEL_V1.md` 及对应机器可读 Schema 为准。
 
 ## 1. 首期范围
 
@@ -74,12 +74,13 @@ get_log_context
 RESOLVE_BENEATH
 RESOLVE_NO_SYMLINKS
 RESOLVE_NO_MAGICLINKS
+RESOLVE_NO_XDEV
 ```
 
 4. 打开后通过 `fstat` 确认对象为普通文件。
 5. 不调用 Shell、`grep`、`rg` 或 `find`。
 
-`RESOLVE_NO_XDEV` 是否启用由目标部署环境验收决定。
+需要查询不同挂载点时，管理员应把每个挂载点配置为独立来源根目录。
 
 ## 4. 搜索语义
 
@@ -145,15 +146,16 @@ RESOLVE_NO_MAGICLINKS
 
 ## 7. 日志变化一致性
 
-系统不锁定日志文件，不承诺查询快照事务。
+系统不锁定日志文件，不提供查询快照事务。
 
 采用尽力而为模型：
 
-- 日志追加期间允许读取。
-- 轮转、删除或截断不得导致服务崩溃。
-- 设备号或 inode 变化时，引用或游标失效。
-- 文件大小小于保存位置时，引用或游标失效。
-- 跨服务时间排序依赖各服务日志时钟，不保证真实因果顺序。
+- 搜索开始时记录候选文件身份和大小。
+- 文件追加可以继续发生。
+- 文件被替换时，通过 device/inode 识别。
+- 文件被截断到保存位置之前时，游标或引用失效。
+- 相同 inode 被原地覆盖的所有变化无法仅靠 inode 检测；关键位置应额外复核。
+- 跨服务时间排序依赖日志时钟，不代表严格因果顺序。
 
 ## 8. v1 默认资源限制
 
@@ -164,20 +166,23 @@ RESOLVE_NO_MAGICLINKS
 | 单次最大扫描文件数 | 500 | 否 |
 | 单页最大扫描字节数 | 512 MiB | 否 |
 | 查询 deadline | 10 秒 | 否 |
-| 默认单页结果数 | 50 | `max_results` 可缩小或提高至 200 |
-| 单页结果硬上限 | 200 | 是，不得超过上限 |
+| 默认单页结果数 | 50 | `max_results` 可设置 1–200 |
+| 单页结果硬上限 | 200 | 不得超过上限 |
 | 单条返回内容 | 16 KiB | 否 |
+| 返回内容合计 | 512 KiB | 否 |
 | 完整 MCP 响应 | 1 MiB | 否 |
 | 单侧上下文行数 | 50 | `before_lines` / `after_lines` 可缩小 |
 | 同时扫描任务数 | 4 | 否 |
 | `match_ref` TTL | 10 分钟 | 否 |
 | cursor TTL | 5 分钟 | 否 |
 
-服务端可以通过受控配置调小或在编译期硬上限内调大；客户端不能突破服务端生效上限。
+服务端可以通过受控配置调小或在代码硬上限内调大；客户端不能突破服务端生效上限。
 
 ## 9. v1 工具错误类别
 
-客户端可依赖以下稳定类别，而不能依赖内部系统调用文本：
+业务错误使用 `CallToolResult.isError=true`，第一个文本内容块是符合 `tool-error-v1.schema.json` 的紧凑 JSON。
+
+稳定代码：
 
 ```text
 INVALID_ARGUMENT
@@ -192,24 +197,18 @@ FILE_CHANGED
 INTERNAL_ERROR
 ```
 
-无匹配不是错误，返回空 `results`。
+错误中不得包含服务器绝对路径、底层系统调用参数、Rust backtrace、配置文件位置或凭证。
 
-错误中不得包含：
+## 10. M1 冻结产物
 
-- 服务器绝对路径。
-- Rust backtrace。
-- 操作系统用户名。
-- 配置文件位置。
-- 服务器凭证。
-
-## 10. M1 冻结项
-
-本阶段需要冻结：
-
+- `REQUIREMENTS.md` v1.1。
 - `schemas/mcp-tools-v1.schema.json`。
+- `schemas/tool-error-v1.schema.json`。
 - `schemas/log-query-mcp-config-v1.schema.json`。
 - `docs/MCP_API_V1.md`。
+- `docs/ERROR_MODEL_V1.md`。
 - `docs/CONFIG_SCHEMA_V1.md`。
-- 本文中的范围、安全、时间、顺序和 token 语义。
+- `docs/adr/README.md` 及 ADR-0001 至 ADR-0006。
+- `scripts/validate_contracts.py` 与 Contracts CI。
 
 任何破坏兼容性的变更需要提高版本号或通过 ADR 明确记录。
