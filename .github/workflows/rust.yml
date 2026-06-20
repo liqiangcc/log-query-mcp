@@ -20,25 +20,35 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Generate lockfile and format
+      - name: Capture compiler diagnostics
+        shell: bash
         run: |
           cargo generate-lockfile
           cargo fmt --all
+          mkdir -p research
+          set +e
+          cargo clippy --locked --all-targets --all-features --message-format=short -- -D warnings > research/query-clippy-diagnostics.txt 2>&1
+          clippy_status=$?
+          cargo test --locked --all-targets --all-features > research/query-test-diagnostics.txt 2>&1
+          test_status=$?
+          set -e
+          echo "$clippy_status" > research/query-clippy-status.txt
+          echo "$test_status" > research/query-test-status.txt
 
-      - name: Commit generated changes on branch push
+      - name: Commit diagnostics on branch push
         if: github.event_name == 'push'
         shell: bash
         run: |
-          if test -n "$(git status --porcelain -- Cargo.lock src)"; then
+          if test -n "$(git status --porcelain -- Cargo.lock src research/query-*-diagnostics.txt research/query-*-status.txt)"; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add Cargo.lock src
-            git commit -m "style: normalize query orchestration implementation"
+            git add Cargo.lock src research/query-*-diagnostics.txt research/query-*-status.txt
+            git commit -m "ci: capture query orchestration diagnostics"
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
 
-      - name: Run Clippy
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Enforce Clippy result
+        run: test "$(cat research/query-clippy-status.txt)" -eq 0
 
-      - name: Run tests
-        run: cargo test --locked --all-targets --all-features
+      - name: Enforce test result
+        run: test "$(cat research/query-test-status.txt)" -eq 0
