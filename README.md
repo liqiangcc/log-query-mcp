@@ -1,10 +1,10 @@
 # Log Query MCP
 
-面向 AI 问题排查的只读日志搜索服务。
+面向 AI 问题排查的只读日志搜索 MCP 服务。
 
-Log Query MCP 部署在能够访问日志文件的服务器上，通过预先配置的日志来源，为本地 AI 提供受控的日志搜索能力。AI 可以结合本地代码仓库和服务器运行日志，定位开发环境或测试环境中的代码、数据、配置及运行问题。
+Log Query MCP 部署在能够访问日志文件的 Linux 服务器上。管理员配置允许查询的日志来源，本地 AI 通过 MCP 搜索运行日志，并结合本地代码仓库定位开发环境或测试环境问题。
 
-> 当前项目处于需求定义阶段，尚未提供可运行实现。完整需求请参阅 [REQUIREMENTS.md](./REQUIREMENTS.md)。
+> 项目已从技术预研进入正式实现阶段。当前分支首先冻结 v1 需求、MCP API 和服务配置 Schema，尚未形成生产发布版本。
 
 ## 工作方式
 
@@ -15,205 +15,74 @@ Log Query MCP 部署在能够访问日志文件的服务器上，通过预先配
       ↓
 AI 调用 Log Query MCP
       ↓
-MCP 搜索已配置的服务器日志
+MCP 搜索白名单日志文件
       ↓
-AI 结合代码与日志定位问题
+AI 结合代码与日志诊断问题
 ```
 
 职责划分：
 
 - **本地 AI**：读取代码、分析日志、诊断问题。
-- **Log Query MCP**：搜索服务器日志并返回匹配内容和有限上下文。
-- **人工管理员**：配置允许查询的日志文件和目录。
+- **Log Query MCP**：安全搜索服务器日志，返回匹配位置和有限上下文。
+- **管理员**：配置允许查询的日志来源和只读权限。
 
-## 核心能力
+## v1 工具
 
-- 查询人工配置的日志来源。
-- 按普通字符串搜索单个或多个日志来源。
-- 支持 `requestId`、`traceId`、异常名、错误码、接口路径和业务 ID 等搜索内容。
-- 支持限定查询时间范围。
-- 返回日志来源、文件标识、行号和匹配内容。
-- 按需读取匹配位置前后的有限上下文。
-- 支持跨服务搜索同一个关联标识。
-- 结果过多时截断并通过游标继续查询。
-- 限制扫描文件数、扫描数据量、查询时间和响应大小。
-- 不开放任意文件读取、Shell 命令执行或日志修改能力。
-
-## MCP 工具
-
-首期计划提供三个工具。
-
-### `list_log_sources`
-
-查询当前已配置并启用的日志来源。
-
-示例响应：
-
-```json
-{
-  "sources": [
-    {
-      "source_id": "payment-test",
-      "name": "支付服务测试环境",
-      "service": "payment-service",
-      "environment": "test",
-      "tags": ["payment", "java"]
-    }
-  ]
-}
+```text
+list_log_sources
+search_logs
+get_log_context
 ```
 
-### `search_logs`
+核心能力：
 
-在一个或多个日志来源中执行字面量子串搜索。
+- 按字面量关键字搜索一个或多个来源。
+- 支持 `requestId`、`traceId`、异常名、错误码和业务 ID。
+- 支持 RFC 3339 时间范围、分页和有限上下文。
+- 限制扫描字节、结果数量、响应大小、上下文和并发任务。
+- 不接受客户端服务器路径，不执行 Shell，不修改日志。
 
-示例请求：
+## v1 已冻结决策
 
-```json
-{
-  "source_ids": ["payment-test", "order-test"],
-  "keyword": "traceId=abc123",
-  "case_sensitive": false,
-  "start_time": "2026-06-19T14:00:00+09:00",
-  "end_time": "2026-06-19T15:00:00+09:00",
-  "order": "oldest_first",
-  "max_results": 50
-}
-```
+- 目标平台：Linux kernel `>= 5.6`。
+- 正式传输：Streamable HTTP；stdio 用于本机调试。
+- 文件访问：日志来源白名单 + `openat2()` + 普通文件校验。
+- 搜索：字面量子串；不区分大小写仅保证 ASCII。
+- 时间区间：`[start_time, end_time)`。
+- 排序：v1 只支持 `oldest_first`。
+- `match_ref` 和 cursor：单实例、服务端有状态、短期随机 token，重启后失效。
+- 内网使用：v1 不内置认证和 TLS。
 
-示例响应：
+## 正式化文档
 
-```json
-{
-  "results": [
-    {
-      "match_ref": "match-7ac9",
-      "source_id": "payment-test",
-      "file_id": "file-91c2",
-      "file_name": "application.log",
-      "line_number": 1842,
-      "timestamp": "2026-06-19T14:20:03.125+09:00",
-      "content": "traceId=abc123 PaymentAuthException",
-      "content_truncated": false
-    }
-  ],
-  "truncated": false,
-  "next_cursor": null
-}
-```
+- [v1 实现基线](./docs/IMPLEMENTATION_BASELINE_V1.md)
+- [v1 MCP API](./docs/MCP_API_V1.md)
+- [v1 配置 Schema 说明](./docs/CONFIG_SCHEMA_V1.md)
+- [MCP 工具机器 Schema](./schemas/mcp-tools-v1.schema.json)
+- [服务配置机器 Schema](./schemas/log-query-mcp-config-v1.schema.json)
+- [完整需求文档](./REQUIREMENTS.md)
 
-### `get_log_context`
+## 当前阶段
 
-根据搜索结果返回的 `match_ref`，读取匹配位置前后的有限日志行。
+- [x] 需求文档
+- [x] 技术预研
+- [x] Rust / rmcp 技术栈决策
+- [x] 正式实现分支建立
+- [x] v1 实现基线草案
+- [x] v1 MCP API 草案
+- [x] v1 配置 Schema 草案
+- [ ] 需求文档同步
+- [ ] Schema 评审与冻结
+- [ ] 正式核心实现
+- [ ] 目标 Linux 环境验收
 
-示例请求：
-
-```json
-{
-  "match_ref": "match-7ac9",
-  "before_lines": 10,
-  "after_lines": 30
-}
-```
-
-该工具用于查看请求过程、下游响应、异常堆栈和 `Caused by` 等上下文，不提供任意位置读取或完整日志下载。
-
-## 典型排查场景
-
-### 根据请求标识定位问题
-
-使用 `requestId` 或 `traceId` 搜索相关服务日志，读取关键匹配的前后上下文，再结合本地代码还原执行路径。
-
-### 跨服务关联调用链路
-
-使用同一个 `traceId` 搜索 gateway、订单、支付和消息等多个服务，依据可解析的日志时间还原调用顺序。
-
-### 根据异常定位代码
-
-搜索异常类名或错误信息，获取异常堆栈，然后在本地代码仓库中定位异常定义、抛出位置和调用方。
-
-### 根据业务 ID 排查状态
-
-搜索 `orderId`、`userId`、`taskId` 或 `messageId`，从日志中提取关联请求标识和状态变化，结合业务代码判断问题原因。
-
-### 验证修复结果
-
-代码部署到测试环境后，限定部署后的时间范围再次搜索相关异常或错误码，检查问题是否仍然出现。
-
-## 设计原则
-
-### 日志来源白名单
-
-AI 只能选择人工配置的 `source_id`，不能提交服务器文件路径、目录路径或文件匹配规则。
-
-### 只读访问
-
-MCP 只能读取普通日志文件，不允许创建、修改、删除、移动或清空日志。
-
-### 小结果、按需展开
-
-搜索接口返回少量候选匹配行；AI 只对有价值的结果继续读取上下文，以减少日志传输和 token 消耗。
-
-### 受控内网部署
-
-首期仅面向受控内网环境，不在 MCP 内实现客户端认证、日志来源级授权或 TLS。网络访问范围由防火墙、安全组等基础设施控制。
-
-### 资源受限
-
-服务端必须限制：
-
-- 单次日志来源数量。
-- 查询关键字长度。
-- 扫描文件数量和字节数。
-- 查询执行时间。
-- 返回结果数量。
-- 单条日志和单次响应大小。
-- 上下文行数和并发查询数。
-
-## 首期范围
-
-首期支持：
-
-- 普通 UTF-8 文本日志。
-- 单个日志文件和日志目录。
-- 未压缩的轮转日志。
-- 字面量子串搜索。
-- 多日志来源查询。
-- 时间范围、结果排序和分页。
-- 匹配位置上下文读取。
-
-首期不支持：
+## 首期不包含
 
 - 正则表达式或复杂查询语言。
-- 压缩日志和二进制日志。
-- 实时 `tail` 或持续订阅。
-- Kubernetes API 或 `kubectl logs`。
-- Loki、Elasticsearch 等日志平台。
-- 完整日志下载。
-- 任意 Shell 命令和服务器文件操作。
+- 压缩日志和实时 tail。
+- Kubernetes、Loki、Elasticsearch。
+- 多实例共享 cursor / `match_ref`。
 - 自动根因分析和代码修复。
-
-## 安全边界
-
-- 只能读取人工配置的日志来源。
-- 禁止路径穿越和软链接逃逸。
-- 只能读取普通文件，不能读取设备文件、FIFO 或 Socket。
-- 服务进程应使用非 root 账号和只读文件权限。
-- 错误信息不得暴露服务器绝对路径、凭证或系统堆栈。
-- 日志内容被视为不可信数据，不得作为 MCP 指令执行。
-
-## 项目状态
-
-- [x] 首期需求文档
-- [ ] 技术方案与接口 Schema
-- [ ] MCP 服务实现
-- [ ] 单元测试与安全测试
-- [ ] Linux 部署方案
-- [ ] 首期验收
-
-## 文档
-
-- [完整需求文档](./REQUIREMENTS.md)
 
 ## License
 
