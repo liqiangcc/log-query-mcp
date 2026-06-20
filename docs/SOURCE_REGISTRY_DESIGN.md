@@ -98,3 +98,12 @@ RESOURCE_LIMIT
 ```
 
 不得把绝对路径或底层系统调用文本直接返回给客户端。
+
+## 8. 自动验证
+
+```text
+Contracts CI: passed
+cargo fmt --check: passed
+cargo clippy --locked -D warnings: passed
+cargo test --locked: passed
+```
