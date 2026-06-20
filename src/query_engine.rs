@@ -578,7 +578,7 @@ fn seek_to_scan_position(
         file.seek(SeekFrom::Start(position.byte_offset - 1))?;
         let mut previous = [0_u8; 1];
         file.read_exact(&mut previous)
-            .map_err(|error| map_position_read_error(error))?;
+            .map_err(map_position_read_error)?;
         if previous[0] != b'\n' {
             return Err(QueryError::ScanPositionNotLineBoundary);
         }
@@ -902,8 +902,10 @@ mod tests {
             "abcdefghij MATCH later\n",
         )
         .expect("fixture should be written");
-        let mut limits = LimitsConfig::default();
-        limits.max_scan_bytes_per_page = 10;
+        let limits = LimitsConfig {
+            max_scan_bytes_per_page: 10,
+            ..LimitsConfig::default()
+        };
         let engine = engine(vec![source(root.path(), "payment")], limits);
 
         let page = engine
