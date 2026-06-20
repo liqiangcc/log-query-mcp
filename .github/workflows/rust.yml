@@ -23,8 +23,35 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Run Clippy
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Run Clippy and capture diagnostics
+        id: clippy
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo clippy --locked --all-targets --all-features --message-format=short -- -D warnings 2>&1 | tee context-clippy.txt
 
-      - name: Run tests
-        run: cargo test --locked --all-targets --all-features
+      - name: Run tests and capture diagnostics
+        id: tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked --all-targets --all-features 2>&1 | tee context-tests.txt
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: context-reader-diagnostics
+          path: |
+            context-clippy.txt
+            context-tests.txt
+          if-no-files-found: warn
+
+      - name: Enforce validation result
+        if: always()
+        shell: bash
+        run: |
+          test "${{ steps.clippy.outcome }}" = "success"
+          test "${{ steps.tests.outcome }}" = "success"
