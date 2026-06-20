@@ -170,11 +170,13 @@ pub(crate) fn discover_regular_files(
                 } else if rule.matches(&relative_path)
                     && let Ok(file) = root.open_regular_file(&relative_path)
                 {
-                    files.entry(relative_path.clone()).or_insert(DiscoveredFile {
-                        relative_path,
-                        identity: file.identity(),
-                        size: file.size(),
-                    });
+                    files
+                        .entry(relative_path.clone())
+                        .or_insert(DiscoveredFile {
+                            relative_path,
+                            identity: file.identity(),
+                            size: file.size(),
+                        });
                     if files.len() > max_files {
                         return Err(SourceDiscoveryError::TooManyFiles);
                     }
@@ -332,12 +334,8 @@ mod tests {
         .expect("directory symlink should be created");
         let root = SafeRoot::open(directory.path()).expect("root should open");
 
-        let files = discover_regular_files(
-            &root,
-            &[rule("logs", true, &[".log", ".log.1"])],
-            10,
-        )
-        .expect("recursive discovery should succeed");
+        let files = discover_regular_files(&root, &[rule("logs", true, &[".log", ".log.1"])], 10)
+            .expect("recursive discovery should succeed");
         assert_eq!(
             files
                 .iter()
@@ -359,10 +357,7 @@ mod tests {
 
         let files = discover_regular_files(
             &root,
-            &[
-                rule(".", false, &[".log"]),
-                rule(".", false, &["application.log"]),
-            ],
+            &[rule(".", false, &[".log"]), rule(".", false, &[".log"])],
             10,
         )
         .expect("overlapping rules should succeed");

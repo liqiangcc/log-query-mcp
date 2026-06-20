@@ -100,13 +100,14 @@ impl ConfiguredSource {
 
         let mut candidates = BTreeMap::<PathBuf, (FileIdentity, u64)>::new();
         for (index, relative_path) in self.explicit_files.iter().enumerate() {
-            let file = self.root.open_regular_file(relative_path).map_err(|source| {
-                SourceRegistryError::ExplicitFileUnavailable {
+            let file = self
+                .root
+                .open_regular_file(relative_path)
+                .map_err(|source| SourceRegistryError::ExplicitFileUnavailable {
                     source_id: self.descriptor.source_id.clone(),
                     file_index: index,
                     source,
-                }
-            })?;
+                })?;
             candidates.insert(relative_path.clone(), (file.identity(), file.size()));
         }
 
@@ -131,15 +132,15 @@ impl ConfiguredSource {
         Ok(candidates
             .into_iter()
             .enumerate()
-            .map(|(index, (relative_path, (identity, size_at_snapshot)))| {
-                SourceFileSnapshot {
+            .map(
+                |(index, (relative_path, (identity, size_at_snapshot)))| SourceFileSnapshot {
                     source_id: self.descriptor.source_id.clone(),
                     file_id: stable_file_id(&self.descriptor.source_id, &relative_path, index),
                     relative_path,
                     identity,
                     size_at_snapshot,
-                }
-            })
+                },
+            )
             .collect())
     }
 
@@ -179,12 +180,12 @@ impl ConfiguredSource {
             return Err(SourceRegistryError::PathNotConfigured);
         }
 
-        self.root.open_regular_file(relative_path).map_err(|source| {
-            SourceRegistryError::FileUnavailable {
+        self.root
+            .open_regular_file(relative_path)
+            .map_err(|source| SourceRegistryError::FileUnavailable {
                 source_id: self.descriptor.source_id.clone(),
                 source,
-            }
-        })
+            })
     }
 
     #[must_use]
@@ -215,14 +216,12 @@ impl SourceRegistry {
 
         for source_config in config.sources.into_iter().filter(|source| source.enabled) {
             let source_id = source_config.source_id.clone();
-            let root = Arc::new(
-                SafeRoot::open(&source_config.root).map_err(|source| {
-                    SourceRegistryError::RootUnavailable {
-                        source_id: source_id.clone(),
-                        source,
-                    }
-                })?,
-            );
+            let root = Arc::new(SafeRoot::open(&source_config.root).map_err(|source| {
+                SourceRegistryError::RootUnavailable {
+                    source_id: source_id.clone(),
+                    source,
+                }
+            })?);
 
             let discovery_rules = source_config
                 .directories
@@ -370,7 +369,9 @@ pub enum SourceRegistryError {
         source: SafeOpenError,
     },
 
-    #[error("configured explicit log file is unavailable in source {source_id} at index {file_index}")]
+    #[error(
+        "configured explicit log file is unavailable in source {source_id} at index {file_index}"
+    )]
     ExplicitFileUnavailable {
         source_id: String,
         file_index: usize,
@@ -484,11 +485,13 @@ mod tests {
             recursive: false,
             include_suffixes: vec![".log.1".to_owned()],
         }];
-        let registry = SourceRegistry::from_config(config(vec![source]))
-            .expect("registry should build");
+        let registry =
+            SourceRegistry::from_config(config(vec![source])).expect("registry should build");
         let configured = registry.get("payment-test").expect("source should exist");
 
-        let files = configured.snapshot_files(10).expect("snapshot should succeed");
+        let files = configured
+            .snapshot_files(10)
+            .expect("snapshot should succeed");
         assert_eq!(
             files
                 .iter()
@@ -515,11 +518,9 @@ mod tests {
         let root = tempdir().expect("source root should be created");
         fs::write(root.path().join("application.log"), "current\n")
             .expect("fixture should be written");
-        let registry = SourceRegistry::from_config(config(vec![source(
-            root.path(),
-            "payment-test",
-        )]))
-        .expect("registry should build");
+        let registry =
+            SourceRegistry::from_config(config(vec![source(root.path(), "payment-test")]))
+                .expect("registry should build");
 
         assert!(matches!(
             registry.selected(&["unknown".to_owned()]),
@@ -533,11 +534,9 @@ mod tests {
         let path = root.path().join("application.log");
         let rotated = root.path().join("application.log.1");
         fs::write(&path, "original\n").expect("fixture should be written");
-        let registry = SourceRegistry::from_config(config(vec![source(
-            root.path(),
-            "payment-test",
-        )]))
-        .expect("registry should build");
+        let registry =
+            SourceRegistry::from_config(config(vec![source(root.path(), "payment-test")]))
+                .expect("registry should build");
         let configured = registry.get("payment-test").expect("source should exist");
         let snapshot = configured
             .snapshot_files(10)
@@ -568,8 +567,8 @@ mod tests {
             recursive: false,
             include_suffixes: vec![".log".to_owned()],
         }];
-        let registry = SourceRegistry::from_config(config(vec![source]))
-            .expect("registry should build");
+        let registry =
+            SourceRegistry::from_config(config(vec![source])).expect("registry should build");
         let configured = registry.get("payment-test").expect("source should exist");
 
         assert!(matches!(
@@ -597,11 +596,13 @@ mod tests {
             recursive: false,
             include_suffixes: vec![".log".to_owned()],
         }];
-        let registry = SourceRegistry::from_config(config(vec![source]))
-            .expect("registry should build");
+        let registry =
+            SourceRegistry::from_config(config(vec![source])).expect("registry should build");
         let configured = registry.get("payment-test").expect("source should exist");
 
-        let files = configured.snapshot_files(10).expect("snapshot should succeed");
+        let files = configured
+            .snapshot_files(10)
+            .expect("snapshot should succeed");
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].display_name(), "application.log");
     }
