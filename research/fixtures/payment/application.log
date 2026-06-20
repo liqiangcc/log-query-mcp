@@ -1,0 +1,8 @@
+2026-06-19T14:20:01.000+09:00 INFO traceId=abc123 request received
+2026-06-19T14:20:01.200+09:00 INFO traceId=abc123 orderId=10001 calling payment channel
+2026-06-19T14:20:03.100+09:00 WARN traceId=abc123 channel response status=403
+2026-06-19T14:20:03.125+09:00 ERROR traceId=abc123 orderId=10001 PaymentAuthException: channel returned 403
+    at payment::authorize(payment.rs:42)
+Caused by: HttpException: forbidden
+2026-06-19T14:20:03.150+09:00 INFO traceId=abc123 request completed status=failed
+2026-06-19T14:21:11.000+09:00 INFO traceId=def456 orderId=10002 payment succeeded

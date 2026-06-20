@@ -1,10 +1,10 @@
 # Log Query MCP
 
-面向 AI 问题排查的只读日志搜索服务。
+面向 AI 问题排查的只读日志搜索 MCP 服务。
 
-Log Query MCP 部署在能够访问日志文件的服务器上，通过预先配置的日志来源，为本地 AI 提供受控的日志搜索能力。AI 可以结合本地代码仓库和服务器运行日志，定位开发环境或测试环境中的代码、数据、配置及运行问题。
+服务部署在能够访问日志文件的 Linux 服务器上。管理员配置允许查询的日志来源；本地 AI 通过 MCP 搜索运行日志，并结合本地代码仓库定位开发环境或测试环境问题。
 
-> 当前项目处于需求定义阶段，尚未提供可运行实现。完整需求请参阅 [REQUIREMENTS.md](./REQUIREMENTS.md)。
+> 当前为技术预研原型。真实文件搜索、分页和上下文读取链路已经接通，但尚未达到生产发布状态。预研结论为 **CONDITIONAL GO**，详见[技术预研报告](./docs/TECHNICAL_RESEARCH_REPORT.md)。
 
 ## 工作方式
 
@@ -15,39 +15,62 @@ Log Query MCP 部署在能够访问日志文件的服务器上，通过预先配
       ↓
 AI 调用 Log Query MCP
       ↓
-MCP 搜索已配置的服务器日志
+MCP 搜索白名单日志文件
       ↓
-AI 结合代码与日志定位问题
+AI 结合代码与日志诊断问题
 ```
 
 职责划分：
 
 - **本地 AI**：读取代码、分析日志、诊断问题。
-- **Log Query MCP**：搜索服务器日志并返回匹配内容和有限上下文。
-- **人工管理员**：配置允许查询的日志文件和目录。
+- **Log Query MCP**：安全搜索服务器日志，返回匹配位置和有限上下文。
+- **管理员**：配置允许查询的日志文件及只读权限。
 
-## 核心能力
+## 当前能力
 
-- 查询人工配置的日志来源。
-- 按普通字符串搜索单个或多个日志来源。
-- 支持 `requestId`、`traceId`、异常名、错误码、接口路径和业务 ID 等搜索内容。
-- 支持限定查询时间范围。
-- 返回日志来源、文件标识、行号和匹配内容。
-- 按需读取匹配位置前后的有限上下文。
-- 支持跨服务搜索同一个关联标识。
-- 结果过多时截断并通过游标继续查询。
-- 限制扫描文件数、扫描数据量、查询时间和响应大小。
-- 不开放任意文件读取、Shell 命令执行或日志修改能力。
+- `list_log_sources`：查询已配置日志来源，不暴露绝对路径。
+- `search_logs`：对一个或多个来源执行字面量子串搜索。
+- `get_log_context`：通过短期不透明 `match_ref` 读取有限前后文。
+- 支持 `requestId`、`traceId`、异常名、错误码和业务 ID。
+- 支持时间范围、跨来源结果排序和分页游标。
+- 限制扫描字节、结果数量、上下文、响应大小和并发任务。
+- 使用 Linux `openat2()` 阻止路径逃逸和软链接访问。
+- 不执行 Shell，不接受客户端文件路径，不修改日志。
 
-## MCP 工具
+## 技术栈
 
-首期计划提供三个工具。
+```text
+Rust stable
+rmcp 1.7
+Tokio
+Axum / Streamable HTTP
+rustix / openat2
+Serde / Schemars
+```
 
-### `list_log_sources`
+目标平台：
 
-查询当前已配置并启用的日志来源。
+```text
+Linux kernel >= 5.6
+```
 
-示例响应：
+## 快速运行
+
+### 1. 构建
+
+```bash
+cargo build --release --locked
+```
+
+### 2. 准备配置
+
+```bash
+cp deploy/log-query-mcp.example.json log-query-mcp.json
+```
+
+修改 `root` 和 `files`，确保文件真实存在且当前用户只有读取权限。
+
+当前配置使用显式文件列表：
 
 ```json
 {
@@ -55,19 +78,55 @@ AI 结合代码与日志定位问题
     {
       "source_id": "payment-test",
       "name": "支付服务测试环境",
+      "description": "payment-service application logs",
       "service": "payment-service",
       "environment": "test",
-      "tags": ["payment", "java"]
+      "tags": ["payment", "java"],
+      "root": "/var/log/payment-service",
+      "files": ["application.log", "application.log.1"],
+      "timestamp_rule": {
+        "type": "rfc3339",
+        "prefix_bytes": 64
+      }
     }
   ]
 }
 ```
 
+客户端不能提交或覆盖这些路径。
+
+### 3. 启动
+
+```bash
+LOG_QUERY_MCP_CONFIG=./log-query-mcp.json \
+LOG_QUERY_MCP_BIND=127.0.0.1:8000 \
+RUST_LOG=log_query_mcp=info \
+  target/release/log-query-mcp
+```
+
+MCP 地址：
+
+```text
+http://127.0.0.1:8000/mcp
+```
+
+### 4. 验证
+
+使用 MCP Inspector 连接 Streamable HTTP 地址：
+
+```bash
+npx @modelcontextprotocol/inspector
+```
+
+依次验证：
+
+1. `list_log_sources`
+2. `search_logs`
+3. 使用搜索结果中的 `match_ref` 调用 `get_log_context`
+
+## MCP 工具示例
+
 ### `search_logs`
-
-在一个或多个日志来源中执行字面量子串搜索。
-
-示例请求：
 
 ```json
 {
@@ -81,139 +140,74 @@ AI 结合代码与日志定位问题
 }
 ```
 
-示例响应：
-
-```json
-{
-  "results": [
-    {
-      "match_ref": "match-7ac9",
-      "source_id": "payment-test",
-      "file_id": "file-91c2",
-      "file_name": "application.log",
-      "line_number": 1842,
-      "timestamp": "2026-06-19T14:20:03.125+09:00",
-      "content": "traceId=abc123 PaymentAuthException",
-      "content_truncated": false
-    }
-  ],
-  "truncated": false,
-  "next_cursor": null
-}
-```
+响应中的 `match_ref` 和 `next_cursor` 均为短期、服务端有状态的不透明 token。服务重启后会失效。
 
 ### `get_log_context`
 
-根据搜索结果返回的 `match_ref`，读取匹配位置前后的有限日志行。
-
-示例请求：
-
 ```json
 {
-  "match_ref": "match-7ac9",
+  "match_ref": "mref_...",
   "before_lines": 10,
   "after_lines": 30
 }
 ```
 
-该工具用于查看请求过程、下游响应、异常堆栈和 `Caused by` 等上下文，不提供任意位置读取或完整日志下载。
-
-## 典型排查场景
-
-### 根据请求标识定位问题
-
-使用 `requestId` 或 `traceId` 搜索相关服务日志，读取关键匹配的前后上下文，再结合本地代码还原执行路径。
-
-### 跨服务关联调用链路
-
-使用同一个 `traceId` 搜索 gateway、订单、支付和消息等多个服务，依据可解析的日志时间还原调用顺序。
-
-### 根据异常定位代码
-
-搜索异常类名或错误信息，获取异常堆栈，然后在本地代码仓库中定位异常定义、抛出位置和调用方。
-
-### 根据业务 ID 排查状态
-
-搜索 `orderId`、`userId`、`taskId` 或 `messageId`，从日志中提取关联请求标识和状态变化，结合业务代码判断问题原因。
-
-### 验证修复结果
-
-代码部署到测试环境后，限定部署后的时间范围再次搜索相关异常或错误码，检查问题是否仍然出现。
-
-## 设计原则
-
-### 日志来源白名单
-
-AI 只能选择人工配置的 `source_id`，不能提交服务器文件路径、目录路径或文件匹配规则。
-
-### 只读访问
-
-MCP 只能读取普通日志文件，不允许创建、修改、删除、移动或清空日志。
-
-### 小结果、按需展开
-
-搜索接口返回少量候选匹配行；AI 只对有价值的结果继续读取上下文，以减少日志传输和 token 消耗。
-
-### 受控内网部署
-
-首期仅面向受控内网环境，不在 MCP 内实现客户端认证、日志来源级授权或 TLS。网络访问范围由防火墙、安全组等基础设施控制。
-
-### 资源受限
-
-服务端必须限制：
-
-- 单次日志来源数量。
-- 查询关键字长度。
-- 扫描文件数量和字节数。
-- 查询执行时间。
-- 返回结果数量。
-- 单条日志和单次响应大小。
-- 上下文行数和并发查询数。
-
-## 首期范围
-
-首期支持：
-
-- 普通 UTF-8 文本日志。
-- 单个日志文件和日志目录。
-- 未压缩的轮转日志。
-- 字面量子串搜索。
-- 多日志来源查询。
-- 时间范围、结果排序和分页。
-- 匹配位置上下文读取。
-
-首期不支持：
-
-- 正则表达式或复杂查询语言。
-- 压缩日志和二进制日志。
-- 实时 `tail` 或持续订阅。
-- Kubernetes API 或 `kubectl logs`。
-- Loki、Elasticsearch 等日志平台。
-- 完整日志下载。
-- 任意 Shell 命令和服务器文件操作。
-- 自动根因分析和代码修复。
-
 ## 安全边界
 
-- 只能读取人工配置的日志来源。
-- 禁止路径穿越和软链接逃逸。
-- 只能读取普通文件，不能读取设备文件、FIFO 或 Socket。
-- 服务进程应使用非 root 账号和只读文件权限。
-- 错误信息不得暴露服务器绝对路径、凭证或系统堆栈。
-- 日志内容被视为不可信数据，不得作为 MCP 指令执行。
+- 仅能选择管理员配置的 `source_id`。
+- 客户端不能提交服务器路径、glob 或目录。
+- 文件从预先打开的来源根目录解析。
+- 禁止路径穿越、软链接和 magic link。
+- 打开后只接受普通文件。
+- 服务应使用非 root 账号和只读文件权限。
+- 日志内容被视为不可信数据，不作为 MCP 指令执行。
+- 首期仅用于受控内网，不内置认证和 TLS。
 
-## 项目状态
+## Linux 部署
 
-- [x] 首期需求文档
-- [ ] 技术方案与接口 Schema
-- [ ] MCP 服务实现
-- [ ] 单元测试与安全测试
-- [ ] Linux 部署方案
-- [ ] 首期验收
+参阅：
+
+- [Linux 与 systemd 部署](./docs/DEPLOYMENT.md)
+- [示例配置](./deploy/log-query-mcp.example.json)
+- [systemd unit](./deploy/log-query-mcp.service)
+
+## 性能验证
+
+```bash
+cargo build --release --locked --bin log-query-benchmark
+
+python3 research/scripts/generate_benchmark_log.py \
+  --output /tmp/log-query-benchmark.log \
+  --size-mib 1024
+
+target/release/log-query-benchmark \
+  /tmp/log-query-benchmark.log \
+  __NO_MATCH__ \
+  3
+```
+
+完整方法见 [R-10 性能基准执行指南](./docs/PERFORMANCE_BENCHMARK.md)。
+
+## 当前限制
+
+- 日志文件仍需显式配置，尚未提供目录 glob 自动发现。
+- `newest_first` 尚未接入真实前向扫描链路。
+- 查询资源限制目前主要使用代码默认值。
+- 暂无健康检查端点和配置热加载。
+- 多实例不共享 `match_ref` 和游标。
+- 尚未完成真实服务器上的 1 GiB、10 GiB 和大量小文件基准。
+- 尚未完成目标 AI 客户端兼容性记录。
 
 ## 文档
 
-- [完整需求文档](./REQUIREMENTS.md)
+- [文档索引](./docs/README.md)
+- [需求文档](./REQUIREMENTS.md)
+- [技术预研报告](./docs/TECHNICAL_RESEARCH_REPORT.md)
+- [架构设计](./docs/ARCHITECTURE.md)
+- [架构决策记录](./docs/adr/README.md)
+- [正式实现阶段计划](./docs/NEXT_PHASE_PLAN.md)
+- [部署指南](./docs/DEPLOYMENT.md)
+- [性能基准](./docs/PERFORMANCE_BENCHMARK.md)
 
 ## License
 

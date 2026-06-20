@@ -1,0 +1,173 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "spike/**"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy and capture diagnostics
+        id: clippy
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo clippy --all-targets --all-features -- -D warnings 2>&1 | tee clippy.log
+
+      - name: Run tests and capture diagnostics
+        id: tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --all-targets --all-features 2>&1 | tee tests.log
+
+      - name: Run independent stdio MCP protocol smoke test
+        id: protocol
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo build --bin log-query-mcp-stdio 2>&1 | tee protocol-build.log
+          python3 research/scripts/mcp_stdio_smoke.py \
+            --server target/debug/log-query-mcp-stdio \
+            --report mcp-stdio-smoke.json \
+            | tee protocol-smoke.log
+
+      - name: Run independent Streamable HTTP MCP protocol smoke test
+        id: protocol_http
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo build --bin log-query-mcp 2>&1 | tee protocol-http-build.log
+          python3 research/scripts/mcp_http_smoke.py \
+            --server target/debug/log-query-mcp \
+            --report mcp-http-smoke.json \
+            2>&1 | tee protocol-http-smoke.log
+
+      - name: Run Linux deployment doctor smoke test
+        id: doctor
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          doctor_dir="$(mktemp -d)"
+          cp research/fixtures/payment/application.log "$doctor_dir/application.log"
+          cat > "$doctor_dir/config.json" <<'JSON'
+          {
+            "sources": [
+              {
+                "source_id": "payment-test",
+                "name": "Payment test",
+                "description": "CI deployment doctor fixture",
+                "service": "payment-service",
+                "environment": "test",
+                "tags": ["doctor"],
+                "root": ".",
+                "files": ["application.log"],
+                "timestamp_rule": {
+                  "type": "rfc3339",
+                  "prefix_bytes": 64
+                }
+              }
+            ]
+          }
+          JSON
+          cargo run --quiet --bin log-query-doctor -- \
+            --config "$doctor_dir/config.json" \
+            --compact \
+            | tee doctor-smoke.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("doctor-smoke.json").read_text())
+          assert report["ok"] is True
+          assert report["effective_uid"] != 0
+          assert len(report["sources"]) == 1
+          assert report["sources"][0]["source_id"] == "payment-test"
+          assert report["sources"][0]["file_count"] == 1
+          checks = {check["name"]: check["status"] for check in report["checks"]}
+          assert checks["linux_kernel"] == "pass"
+          assert checks["non_root_user"] == "pass"
+          assert checks["source_configuration"] == "pass"
+          assert checks["query_service_initialization"] == "pass"
+          PY
+
+      - name: Run concurrent scanner benchmark smoke test
+        id: benchmark
+        continue-on-error: true
+        shell: bash
+        run: |
+          python3 research/scripts/generate_benchmark_log.py \
+            --output /tmp/log-query-benchmark-smoke.log \
+            --size-mib 1 \
+            --keyword BENCHMARK_MATCH \
+            --match-every 1000 \
+            | tee benchmark-generator.log
+          cargo run --quiet --bin log-query-benchmark -- \
+            /tmp/log-query-benchmark-smoke.log \
+            __NO_MATCH__ \
+            1 \
+            2 \
+            | tee benchmark-smoke.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("benchmark-smoke.json").read_text())
+          assert report["file_bytes"] == 1024 * 1024
+          assert report["iterations_per_worker"] == 1
+          assert report["concurrency"] == 2
+          assert report["total_scans"] == 2
+          assert report["total_bytes_scanned"] == 2 * 1024 * 1024
+          assert report["total_results"] == 0
+          assert report["stop_reasons"] == {"Complete": 2}
+          PY
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-integration-diagnostics
+          path: |
+            clippy.log
+            tests.log
+            protocol-build.log
+            protocol-smoke.log
+            mcp-stdio-smoke.json
+            protocol-http-build.log
+            protocol-http-smoke.log
+            mcp-http-smoke.json
+            doctor-smoke.json
+            benchmark-generator.log
+            benchmark-smoke.json
+          if-no-files-found: warn
+
+      - name: Enforce validation result
+        if: always()
+        shell: bash
+        run: |
+          test "${{ steps.clippy.outcome }}" = "success"
+          test "${{ steps.tests.outcome }}" = "success"
+          test "${{ steps.protocol.outcome }}" = "success"
+          test "${{ steps.protocol_http.outcome }}" = "success"
+          test "${{ steps.doctor.outcome }}" = "success"
+          test "${{ steps.benchmark.outcome }}" = "success"
