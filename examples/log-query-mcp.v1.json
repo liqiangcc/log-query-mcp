@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "source_id": "payment-test",
+      "name": "支付服务测试环境",
+      "description": "payment-service application logs",
+      "service": "payment-service",
+      "environment": "test",
+      "tags": ["payment", "java"],
+      "enabled": true,
+      "encoding": "utf-8",
+      "root": "/var/log/payment-service",
+      "files": [
+        "application.log",
+        "application.log.1"
+      ],
+      "timestamp_rule": {
+        "type": "rfc3339",
+        "prefix_bytes": 64
+      }
+    },
+    {
+      "source_id": "order-test",
+      "name": "订单服务测试环境",
+      "description": "order-service application logs",
+      "service": "order-service",
+      "environment": "test",
+      "tags": ["order", "java"],
+      "enabled": true,
+      "encoding": "utf-8",
+      "root": "/var/log/order-service",
+      "directories": [
+        {
+          "path": ".",
+          "recursive": false,
+          "include_suffixes": [".log", ".log.1"]
+        }
+      ],
+      "timestamp_rule": {
+        "type": "custom",
+        "prefix_bytes": 23,
+        "format": "%Y-%m-%d %H:%M:%S%.3f",
+        "default_offset_seconds": 32400
+      }
+    }
+  ],
+  "limits": {
+    "max_sources_per_query": 10,
+    "max_scan_files_per_query": 500,
+    "max_scan_bytes_per_page": 536870912,
+    "query_timeout_millis": 10000,
+    "default_results_per_page": 50,
+    "max_results_per_page": 200,
+    "max_line_bytes": 16384,
+    "max_returned_content_bytes": 524288,
+    "max_response_bytes": 1048576,
+    "max_context_lines_per_side": 50,
+    "max_concurrent_scans": 4,
+    "match_reference_capacity": 10000,
+    "match_reference_ttl_seconds": 600,
+    "cursor_capacity": 1000,
+    "cursor_ttl_seconds": 300
+  }
+}
