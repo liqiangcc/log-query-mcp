@@ -17,9 +17,9 @@ pub use config::{
 #[cfg(target_os = "linux")]
 pub use safe_fs::{FileIdentity, SafeFile, SafeOpenError, SafeRoot};
 #[cfg(target_os = "linux")]
-pub use source_discovery::{DirectoryDiscoveryRule, SourceDiscoveryError};
-#[cfg(target_os = "linux")]
 pub(crate) use source_discovery::discover_regular_files;
+#[cfg(target_os = "linux")]
+pub use source_discovery::{DirectoryDiscoveryRule, SourceDiscoveryError};
 #[cfg(target_os = "linux")]
 pub use source_registry::{
     ConfiguredSource, MAX_REGISTERED_FILES_PER_SOURCE, SourceDescriptor, SourceFileSnapshot,
