@@ -7,6 +7,7 @@
 - [技术预研报告](./TECHNICAL_RESEARCH_REPORT.md)
 - [架构设计草案](./ARCHITECTURE.md)
 - [Architecture Decision Records](./adr/README.md)
+- [正式实现阶段计划](./NEXT_PHASE_PLAN.md)
 
 ## MCP 与接口
 
@@ -37,6 +38,7 @@ REQUIREMENTS.md
 → TECHNICAL_RESEARCH_REPORT.md
 → ARCHITECTURE.md
 → adr/README.md
+→ NEXT_PHASE_PLAN.md
 → TOOL_SCHEMA_DRAFT.md
 → DEPLOYMENT.md
 ```
