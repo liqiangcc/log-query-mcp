@@ -1,3 +1,0 @@
-    Checking log-query-mcp v0.1.0 (/home/runner/work/log-query-mcp/log-query-mcp)
-src/stateful_query.rs:1068:9: error: field assignment outside of initializer for an instance created with Default::default()
-error: could not compile `log-query-mcp` (lib test) due to 1 previous error

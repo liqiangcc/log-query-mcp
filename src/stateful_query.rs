@@ -1064,8 +1064,10 @@ mod tests {
             "2026-06-19T14:00:01+09:00 MATCH one\n2026-06-19T14:00:02+09:00 MATCH two\n",
         )
         .expect("fixture should be written");
-        let mut limits = LimitsConfig::default();
-        limits.max_scan_bytes_per_page = 20;
+        let limits = LimitsConfig {
+            max_scan_bytes_per_page: 20,
+            ..LimitsConfig::default()
+        };
         let service = service(vec![source(root.path(), "payment-test")], limits);
 
         let page = service
