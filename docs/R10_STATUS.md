@@ -1,5 +1,8 @@
 # R-10 部署与性能验证状态
 
+> 总体预研结论：**CONDITIONAL GO**  
+> 完整结论见 [TECHNICAL_RESEARCH_REPORT.md](./TECHNICAL_RESEARCH_REPORT.md)
+
 已完成：
 
 - 真实 MCP 查询链路集成。
@@ -13,8 +16,10 @@
 - 独立 stdio MCP 协议烟测。
 - 独立 Streamable HTTP MCP 协议烟测。
 - Streamable HTTP 会话、SSE、分页、上下文和会话删除验证。
+- 部署 doctor 烟测。
+- 并发扫描基准入口。
 
-当前 CI 结果：
+当前 CI 基线：
 
 ```text
 rustfmt: passed
@@ -45,4 +50,15 @@ benchmark smoke: passed
 - 扫描字节数等于文件大小。
 - 停止原因为 `Complete`。
 
-这些烟测验证功能链路，不代表生产性能或所有 AI 客户端兼容性结论。1 GiB、10 GiB、10,000 小文件、多并发、取消延迟、实际 AI 客户端和 systemd 资源限制数据仍需在目标 Linux 服务器采集。
+这些烟测验证功能链路，不代表生产性能或所有 AI 客户端兼容性结论。
+
+转为生产 GO 前仍需：
+
+1. MCP Inspector 和至少一个实际 AI 客户端验证。
+2. 1 GiB、10 GiB 和 10,000 小文件基准。
+3. 1、4、8 并发 CPU、RSS、吞吐和 P99 数据。
+4. 客户端断连取消端到端验证。
+5. 日志持续追加、轮转、截断和删除压力测试。
+6. systemd/cgroup 资源限制实测。
+7. `RESOLVE_NO_XDEV` 部署决策。
+8. 明确 `newest_first` 是否进入首期。
