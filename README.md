@@ -4,7 +4,7 @@
 
 Log Query MCP 部署在能够访问日志文件的 Linux 服务器上。管理员配置允许查询的日志来源，本地 AI 通过 MCP 搜索运行日志，并结合本地代码仓库定位开发环境或测试环境问题。
 
-> 项目已从技术预研进入正式实现阶段。M1 已完成 v1 需求、MCP API、错误模型和服务配置 Schema 的对齐，尚未形成生产发布版本。
+> 项目处于正式实现阶段。v1 契约已经冻结，当前已完成版本化配置模型、`SourceRegistry`、`openat2()` 安全文件访问和有界目录发现，尚未形成生产发布版本。
 
 ## 工作方式
 
@@ -66,22 +66,22 @@ get_log_context
 - [服务配置机器 Schema](./schemas/log-query-mcp-config-v1.schema.json)
 - [完整需求文档](./REQUIREMENTS.md)
 
-## 当前阶段
+## 当前实现进度
 
-- [x] 需求文档
-- [x] 技术预研
-- [x] Rust / rmcp 技术栈决策
-- [x] 正式实现分支建立
-- [x] v1 实现基线
-- [x] v1 MCP API
-- [x] v1 配置 Schema
-- [x] v1 错误模型
-- [x] 需求文档同步
-- [x] `RESOLVE_NO_XDEV` 决策
-- [x] 契约自动校验
-- [ ] M1 人工评审与合并
-- [ ] M2 正式核心实现
+- [x] M1 v1 契约冻结
+- [x] Rust 正式工程和版本化配置模型
+- [x] `SafeRoot` 与 Linux `openat2()` 文件边界
+- [x] `RESOLVE_BENEATH` / `NO_SYMLINKS` / `NO_MAGICLINKS` / `NO_XDEV`
+- [x] 普通文件与目录类型校验
+- [x] 有界、可递归的目录后缀发现
+- [x] `SourceRegistry` 与不透明 `file_id`
+- [ ] 有界单文件扫描器与执行器
+- [ ] 多文件查询编排
+- [ ] MCP Server
+- [ ] cursor、`match_ref` 和上下文读取
 - [ ] 目标 Linux 环境验收
+
+详细状态见 [M2_STATUS.md](./docs/M2_STATUS.md)。
 
 ## 首期不包含
 
