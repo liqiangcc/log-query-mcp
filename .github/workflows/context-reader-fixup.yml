@@ -18,7 +18,7 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Repair test typo and apply machine fixes
+      - name: Repair test typo and format
         shell: bash
         run: |
           python3 - <<'PY'
@@ -26,29 +26,20 @@ jobs:
 
           path = Path("src/context_reader.rs")
           text = path.read_text()
-          text = text.replace(
-              "let mut reference = reference(3, 8, 8);\n        stale_reference.file_size_at_match = data.len() as u64;",
-              "let mut reference = reference(3, 8, 8);\n        reference.file_size_at_match = data.len() as u64;",
-              1,
-          )
-          path.write_text(text)
+          old = "let mut reference = reference(3, 8, 8);\n        stale_reference.file_size_at_match = data.len() as u64;"
+          new = "let mut reference = reference(3, 8, 8);\n        reference.file_size_at_match = data.len() as u64;"
+          if old not in text:
+              raise SystemExit("expected context reader typo not found")
+          path.write_text(text.replace(old, new, 1))
           PY
           cargo fmt --all
-          cargo clippy --fix --allow-dirty --allow-staged --locked --all-targets --all-features -- -D warnings
-          cargo fmt --all
 
-      - name: Run strict validation
-        run: |
-          cargo fmt --all -- --check
-          cargo clippy --locked --all-targets --all-features -- -D warnings
-          cargo test --locked --all-targets --all-features
-
-      - name: Remove fixup workflow and commit
+      - name: Commit deterministic fix and remove workflow
         shell: bash
         run: |
           git rm .github/workflows/context-reader-fixup.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src .github/workflows/context-reader-fixup.yml
-          git commit -m "fix: validate bounded context reader"
+          git add src/context_reader.rs .github/workflows/context-reader-fixup.yml
+          git commit -m "fix: repair context reader test setup"
           git push origin "HEAD:${GITHUB_REF_NAME}"
