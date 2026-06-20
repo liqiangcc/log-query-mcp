@@ -625,7 +625,7 @@ fn read_line<B: BufRead>(
                 original_line_bytes,
             }));
         }
-        if allowed < available.len() || *remaining_scan_bytes == 0 {
+        if allowed < available_len || *remaining_scan_bytes == 0 {
             if let Some(spec) = match_spec
                 && keyword_bytes_checked < spec.keyword.len()
             {
@@ -972,7 +972,7 @@ mod tests {
             read_context(
                 &mut reader,
                 data.len() as u64,
-                &reference,
+                &stale_reference,
                 0,
                 0,
                 limits(),
