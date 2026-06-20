@@ -8,7 +8,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -20,78 +20,8 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Patch source and format
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          path = Path("src/context_reader.rs")
-          text = path.read_text()
-          text, count = re.subn(
-              r"        let allowed = available\s*\.len\(\)\s*\.min\(usize::try_from\(\*remaining_scan_bytes\)\.unwrap_or\(usize::MAX\)\);",
-              "        let available_len = available.len();\n        let allowed = available_len.min(usize::try_from(*remaining_scan_bytes).unwrap_or(usize::MAX));",
-              text,
-              count=1,
-          )
-          if count != 1:
-              raise SystemExit(f"expected one available-length replacement, got {count}")
-          text = text.replace(
-              "        let mut reference = reference(1, 0, 7);",
-              "        let mut stale_reference = reference(1, 0, 7);",
-              1,
-          )
-          text = text.replace(
-              "        reference.file_size_at_match = data.len() as u64;",
-              "        stale_reference.file_size_at_match = data.len() as u64;",
-              1,
-          )
-          path.write_text(text)
-          PY
-          cargo fmt --all
-
-      - name: Restore strict workflow and commit fixes
-        if: github.event_name == 'push'
-        shell: bash
-        run: |
-          cat > .github/workflows/rust.yml <<'YAML'
-          name: Rust
-
-          on:
-            push:
-              branches:
-                - main
-                - "feat/**"
-            pull_request:
-
-          permissions:
-            contents: read
-
-          jobs:
-            test:
-              runs-on: ubuntu-latest
-              steps:
-                - name: Check out repository
-                  uses: actions/checkout@v4
-
-                - name: Install Rust toolchain
-                  run: rustup show
-
-                - name: Check formatting
-                  run: cargo fmt --all -- --check
-
-                - name: Run Clippy
-                  run: cargo clippy --locked --all-targets --all-features -- -D warnings
-
-                - name: Run tests
-                  run: cargo test --locked --all-targets --all-features
-          YAML
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/context_reader.rs .github/workflows/rust.yml
-          git commit -m "fix: resolve context reader borrow and test shadowing"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
       - name: Run Clippy
         run: cargo clippy --locked --all-targets --all-features -- -D warnings

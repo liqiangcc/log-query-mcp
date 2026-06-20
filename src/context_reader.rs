@@ -561,9 +561,9 @@ fn read_line<B: BufRead>(
             }));
         }
 
-        let allowed = available
-            .len()
-            .min(usize::try_from(*remaining_scan_bytes).unwrap_or(usize::MAX));
+        let available_len = available.len();
+        let allowed =
+            available_len.min(usize::try_from(*remaining_scan_bytes).unwrap_or(usize::MAX));
         let mut consumed = 0_usize;
         let mut completed = false;
         for &byte in &available[..allowed] {
@@ -832,7 +832,7 @@ mod tests {
     fn reads_before_match_and_after_lines() {
         let data = b"one\ntwo\nMATCH three\nfour\nfive\n";
         let mut reference = reference(3, 8, 8);
-        reference.file_size_at_match = data.len() as u64;
+        stale_reference.file_size_at_match = data.len() as u64;
         let mut reader = Cursor::new(data.to_vec());
         let outcome = read_context(
             &mut reader,
@@ -965,7 +965,7 @@ mod tests {
     #[test]
     fn detects_rewritten_keyword_and_cancelled_request() {
         let data = b"prefix changed suffix\n";
-        let mut reference = reference(1, 0, 7);
+        let mut stale_reference = reference(1, 0, 7);
         reference.file_size_at_match = data.len() as u64;
         let mut reader = Cursor::new(data.to_vec());
         assert!(matches!(
