@@ -24,18 +24,12 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path('src/stateful_query.rs')
+          path = Path("src/stateful_query.rs")
           text = path.read_text()
-          old = '''        let mut limits = LimitsConfig::default();
-                  limits.max_scan_bytes_per_page = 20;
-          '''
-          new = '''        let limits = LimitsConfig {
-                      max_scan_bytes_per_page: 20,
-                      ..LimitsConfig::default()
-                  };
-          '''
+          old = "        let mut limits = LimitsConfig::default();\n        limits.max_scan_bytes_per_page = 20;"
+          new = "        let limits = LimitsConfig {\n            max_scan_bytes_per_page: 20,\n            ..LimitsConfig::default()\n        };"
           if old not in text:
-              raise SystemExit('expected LimitsConfig test snippet was not found')
+              raise SystemExit("expected LimitsConfig test snippet was not found")
           path.write_text(text.replace(old, new, 1))
           PY
           cargo fmt --all
