@@ -1,0 +1,121 @@
+name: Query State Contract Fix
+
+on:
+  push:
+    branches:
+      - feat/query-orchestration-time-filter
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+
+      - name: Allow empty half-open time ranges
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          time_filter = Path("src/time_filter.rs")
+          text = time_filter.read_text()
+          text = text.replace(
+              '.is_some_and(|(start, end)| start >= end)',
+              '.is_some_and(|(start, end)| start > end)',
+          )
+          text = text.replace(
+              '"start_time must be earlier than end_time"',
+              '"start_time must not be later than end_time"',
+          )
+          old_test = '''    #[test]
+              fn rejects_reverse_or_equal_range() {
+                  assert!(matches!(
+                      TimeRange::from_rfc3339(
+                          Some("2026-06-19T15:00:00+09:00"),
+                          Some("2026-06-19T15:00:00+09:00")
+                      ),
+                      Err(TimeFilterError::InvalidRange(_))
+                  ));
+              }
+          '''
+          new_test = '''    #[test]
+              fn equal_range_is_empty_and_reverse_range_is_rejected() {
+                  let equal = TimeRange::from_rfc3339(
+                      Some("2026-06-19T15:00:00+09:00"),
+                      Some("2026-06-19T15:00:00+09:00"),
+                  )
+                  .expect("equal half-open range should be valid");
+                  let boundary = TimestampObservation {
+                      timestamp: Some(
+                          DateTime::parse_from_rfc3339("2026-06-19T15:00:00+09:00")
+                              .expect("timestamp should parse"),
+                      ),
+                      malformed: false,
+                  };
+                  assert_eq!(equal.classify(&boundary), TimeFilterDecision::OutOfRange);
+
+                  assert!(matches!(
+                      TimeRange::from_rfc3339(
+                          Some("2026-06-19T15:00:01+09:00"),
+                          Some("2026-06-19T15:00:00+09:00")
+                      ),
+                      Err(TimeFilterError::InvalidRange(_))
+                  ));
+              }
+          '''
+          if old_test not in text:
+              raise SystemExit("expected time range test block was not found")
+          time_filter.write_text(text.replace(old_test, new_test))
+
+          query_state = Path("src/query_state.rs")
+          text = query_state.read_text()
+          text = text.replace(
+              '.is_some_and(|(start, end)| start >= end)',
+              '.is_some_and(|(start, end)| start > end)',
+          )
+          text = text.replace(
+              '"start_time must be earlier than end_time"',
+              '"start_time must not be later than end_time"',
+          )
+          marker = '''    #[test]
+              fn cursor_lease_releases_on_drop_and_commits_new_token() {
+          '''
+          test = '''    #[test]
+              fn query_binding_accepts_equal_half_open_range() {
+                  let timestamp = DateTime::parse_from_rfc3339(
+                      "2026-06-19T15:00:00+09:00",
+                  )
+                  .expect("timestamp should parse");
+                  let mut query = binding();
+                  query.start_time = Some(timestamp);
+                  query.end_time = Some(timestamp);
+                  query.validate().expect("equal range should be valid");
+              }
+
+          '''
+          if test not in text:
+              if marker not in text:
+                  raise SystemExit("query state test insertion marker was not found")
+              text = text.replace(marker, test + marker, 1)
+          query_state.write_text(text)
+          PY
+          cargo fmt --all
+
+      - name: Validate
+        run: |
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked --all-targets --all-features
+
+      - name: Commit fix and remove workflow
+        shell: bash
+        run: |
+          git rm .github/workflows/query-state-contract-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src .github/workflows/query-state-contract-fix.yml
+          git commit -m "fix: allow empty half-open query time ranges"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
