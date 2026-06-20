@@ -1,4 +1,7 @@
-use std::{io::Cursor, time::{Duration, Instant}};
+use std::{
+    io::Cursor,
+    time::{Duration, Instant},
+};
 
 use log_query_mcp::{
     LimitsConfig, ScanError, ScanLimits, ScanOutcome, ScanRequest, ScanStopReason, scan_reader,
@@ -104,8 +107,8 @@ fn handles_invalid_utf8_and_crlf() {
     assert!(outcome.results[0].content_lossy);
     assert!(outcome.results[0].content.contains("MATCH"));
 
-    let crlf = scan(b"traceId=abc123\r\n", ScanRequest::new("abc123"))
-        .expect("CRLF scan should succeed");
+    let crlf =
+        scan(b"traceId=abc123\r\n", ScanRequest::new("abc123")).expect("CRLF scan should succeed");
     assert_eq!(crlf.results[0].content, "traceId=abc123");
 }
 

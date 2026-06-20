@@ -28,7 +28,9 @@ impl ScanLimits {
         max_results: usize,
     ) -> Result<Self, ScanError> {
         if max_results == 0 || max_results > limits.max_results_per_page {
-            return Err(ScanError::InvalidLimits("max_results exceeds service limit"));
+            return Err(ScanError::InvalidLimits(
+                "max_results exceeds service limit",
+            ));
         }
         let value = Self {
             max_scan_bytes: limits.max_scan_bytes_per_page,

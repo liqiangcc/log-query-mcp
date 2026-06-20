@@ -134,8 +134,7 @@ async fn queued_deadline_never_starts_reader() {
             CountingReader {
                 reads: reads.clone(),
             },
-            ScanRequest::new("MATCH")
-                .with_deadline(Instant::now() + Duration::from_millis(30)),
+            ScanRequest::new("MATCH").with_deadline(Instant::now() + Duration::from_millis(30)),
         ),
     )
     .await
@@ -178,10 +177,7 @@ async fn aborting_future_cancels_blocking_task_and_releases_permit() {
 
     let outcome = timeout(
         Duration::from_secs(1),
-        executor.scan(
-            Cursor::new(b"MATCH\n".to_vec()),
-            ScanRequest::new("MATCH"),
-        ),
+        executor.scan(Cursor::new(b"MATCH\n".to_vec()), ScanRequest::new("MATCH")),
     )
     .await
     .expect("permit should be released")

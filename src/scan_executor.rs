@@ -58,7 +58,9 @@ impl ScanExecutor {
         });
         let joined = task.await;
         cancel_on_drop.disarm();
-        joined.map_err(ScanTaskError::Join)?.map_err(ScanTaskError::Scan)
+        joined
+            .map_err(ScanTaskError::Join)?
+            .map_err(ScanTaskError::Scan)
     }
 
     async fn wait_for_permit(&self, request: &ScanRequest) -> Result<PermitWait, ScanTaskError> {
