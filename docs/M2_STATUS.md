@@ -40,7 +40,7 @@ cargo test --locked: passed
 
 ## 当前边界
 
-- 当前目录规则在 `SourceRegistry` 构建时形成文件集合；查询阶段的轮转文件重新发现将在多文件查询编排切片中完成。
+- 当前目录规则在 `SourceRegistry` 构建时形成启动文件快照；多文件查询编排切片会在每个查询开始时刷新目录候选，以覆盖服务启动后的日志轮转。
 - 尚未执行真实嵌套 mount 测试；当前代码和单元测试确认 `RESOLVE_NO_XDEV` 已进入解析策略。
 - 尚未实现日志流式扫描、MCP Server、时间过滤、cursor、match_ref 和上下文读取。
 
