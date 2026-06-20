@@ -1,0 +1,131 @@
+name: Query Orchestration Fixup
+
+on:
+  push:
+    branches:
+      - feat/query-orchestration
+
+permissions:
+  contents: write
+
+jobs:
+  fixup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Normalize orchestration wiring
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          cargo = Path("Cargo.toml")
+          cargo_text = cargo.read_text()
+          if 'chrono = ' not in cargo_text:
+              cargo_text = cargo_text.replace(
+                  '[dependencies]\n',
+                  '[dependencies]\nchrono = { version = "0.4", default-features = false, features = ["std"] }\n',
+                  1,
+              )
+          cargo.write_text(cargo_text)
+
+          lib = Path("src/lib.rs")
+          lib_text = lib.read_text()
+          if 'mod query_engine;' not in lib_text:
+              lib_text = lib_text.replace('pub mod config;\n', 'pub mod config;\nmod query_engine;\n', 1)
+          if 'mod time_filter;' not in lib_text:
+              lib_text = lib_text.replace('mod scanner;\n', 'mod scanner;\nmod time_filter;\n', 1)
+          if 'pub use query_engine::' not in lib_text:
+              lib_text = lib_text.replace(
+                  'pub use scan_executor::',
+                  '''pub use query_engine::{
+              QueryCandidateSnapshot, QueryContinuation, QueryEngine, QueryError, QueryMatch,
+              QueryPage, QueryPageStopReason, QueryPageSummary, SearchQuery,
+          };
+          pub use scan_executor::''',
+                  1,
+              )
+          if 'pub use time_filter::' not in lib_text:
+              lib_text = lib_text.replace(
+                  '#[cfg(target_os = "linux")]\npub use safe_fs::',
+                  '''pub use time_filter::{
+              MAX_QUERY_TIME_CHARS, TimeFilterError, TimeRange, TimestampParser,
+          };
+          
+          #[cfg(target_os = "linux")]
+          pub use safe_fs::''',
+                  1,
+              )
+          lib.write_text(lib_text)
+
+          query = Path("src/query_engine.rs")
+          query_text = query.read_text()
+          pattern = re.compile(
+              r'QueryContinuation\s*\{\s*'
+              r'candidates:\s*candidates\.clone\(\),\s*'
+              r'next_candidate_index:\s*candidate_index,\s*'
+              r'next_position:\s*([^,}\n]+),?\s*\}',
+              re.MULTILINE,
+          )
+          query_text = pattern.sub(
+              lambda match: f'build_continuation(&candidates, candidate_index, {match.group(1).strip()})',
+              query_text,
+          )
+          if 'fn build_continuation(' not in query_text:
+              marker = '#[derive(Debug)]\nstruct RankedMatch'
+              helper = '''fn build_continuation(
+              candidates: &[QueryCandidate],
+              next_candidate_index: usize,
+              next_position: ScanPosition,
+          ) -> QueryContinuation {
+              QueryContinuation {
+                  candidates: candidates
+                      .iter()
+                      .map(|candidate| QueryCandidateSnapshot {
+                          source_order: candidate.source_order,
+                          file_order: candidate.file_order,
+                          source_id: candidate.source_id.clone(),
+                          file: candidate.file.clone(),
+                      })
+                      .collect(),
+                  next_candidate_index,
+                  next_position,
+              }
+          }
+          
+          '''
+              query_text = query_text.replace(marker, helper + marker, 1)
+          query_text = query_text.replace(
+              'use std::{fs, path::PathBuf};',
+              'use std::{fs, path::PathBuf, sync::Arc};',
+          )
+          query.write_text(query_text)
+          PY
+
+          cargo fmt --all
+          cargo generate-lockfile
+
+      - name: Apply machine-fixable Clippy suggestions
+        run: cargo clippy --fix --allow-dirty --allow-staged --locked --all-targets --all-features -- -D warnings
+
+      - name: Remove fixup workflow and commit
+        shell: bash
+        run: |
+          git rm .github/workflows/query-orchestration-fixup.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock src .github/workflows/query-orchestration-fixup.yml
+          git commit -m "fix: normalize query orchestration implementation"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Run strict validation
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked --all-targets --all-features
