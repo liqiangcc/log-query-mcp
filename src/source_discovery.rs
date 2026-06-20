@@ -214,12 +214,8 @@ mod tests {
         .expect("directory symlink should be created");
         let root = SafeRoot::open(directory.path()).expect("root should open");
 
-        let files = discover_regular_files(
-            &root,
-            &[rule("logs", true, &[".log", ".log.1"])],
-            10,
-        )
-        .expect("recursive discovery should succeed");
+        let files = discover_regular_files(&root, &[rule("logs", true, &[".log", ".log.1"])], 10)
+            .expect("recursive discovery should succeed");
         assert_eq!(
             files,
             vec![
@@ -251,10 +247,8 @@ mod tests {
     #[test]
     fn enforces_file_limit() {
         let directory = tempdir().expect("temporary directory should be created");
-        fs::write(directory.path().join("one.log"), "one\n")
-            .expect("fixture should be written");
-        fs::write(directory.path().join("two.log"), "two\n")
-            .expect("fixture should be written");
+        fs::write(directory.path().join("one.log"), "one\n").expect("fixture should be written");
+        fs::write(directory.path().join("two.log"), "two\n").expect("fixture should be written");
         let root = SafeRoot::open(directory.path()).expect("root should open");
 
         assert!(matches!(

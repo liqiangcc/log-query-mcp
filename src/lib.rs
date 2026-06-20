@@ -18,8 +18,7 @@ pub use config::{
 pub use safe_fs::{FileIdentity, SafeFile, SafeOpenError, SafeRoot};
 #[cfg(target_os = "linux")]
 pub use source_discovery::{
-    MAX_DISCOVERY_DIRECTORIES, MAX_DISCOVERY_ENTRIES, SourceDiscoveryError,
-    discover_regular_files,
+    MAX_DISCOVERY_DIRECTORIES, MAX_DISCOVERY_ENTRIES, SourceDiscoveryError, discover_regular_files,
 };
 #[cfg(target_os = "linux")]
 pub use source_registry::{

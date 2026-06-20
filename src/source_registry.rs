@@ -105,12 +105,12 @@ impl SourceRegistry {
         let mut by_id = HashMap::new();
 
         for source in enabled_sources {
-            let root = Arc::new(
-                SafeRoot::open(&source.root).map_err(|error| SourceRegistryError::SourceOpen {
+            let root = Arc::new(SafeRoot::open(&source.root).map_err(|error| {
+                SourceRegistryError::SourceOpen {
                     source_id: source.source_id.clone(),
                     source: error,
-                })?,
-            );
+                }
+            })?);
 
             let file_limit = config.limits.max_scan_files_per_query;
             if source.files.len() > file_limit {
@@ -329,8 +329,8 @@ mod tests {
             include_suffixes: vec![".log.1".to_owned()],
         }];
 
-        let registry = SourceRegistry::build(&config(vec![payment_source]))
-            .expect("registry should build");
+        let registry =
+            SourceRegistry::build(&config(vec![payment_source])).expect("registry should build");
         let configured = registry
             .get("payment-test")
             .expect("source should be available");
@@ -405,16 +405,14 @@ mod tests {
     fn selection_preserves_request_order_and_rejects_invalid_selection() {
         let first_root = tempdir().expect("first root should be created");
         let second_root = tempdir().expect("second root should be created");
-        fs::write(first_root.path().join("one.log"), "one\n")
-            .expect("fixture should be written");
-        fs::write(second_root.path().join("two.log"), "two\n")
-            .expect("fixture should be written");
+        fs::write(first_root.path().join("one.log"), "one\n").expect("fixture should be written");
+        fs::write(second_root.path().join("two.log"), "two\n").expect("fixture should be written");
         let mut first = source("first", first_root.path());
         first.files = vec![PathBuf::from("one.log")];
         let mut second = source("second", second_root.path());
         second.files = vec![PathBuf::from("two.log")];
-        let registry = SourceRegistry::build(&config(vec![first, second]))
-            .expect("registry should build");
+        let registry =
+            SourceRegistry::build(&config(vec![first, second])).expect("registry should build");
 
         let selected = registry
             .selected(&["second".to_owned(), "first".to_owned()])
