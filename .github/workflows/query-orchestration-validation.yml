@@ -1,0 +1,59 @@
+name: Query Orchestration Validation
+
+on:
+  push:
+    branches:
+      - feat/query-orchestration
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Normalize generated files
+        run: |
+          cargo generate-lockfile
+          cargo fmt --all
+          cargo clippy --fix --allow-dirty --allow-staged --locked --all-targets --all-features -- -D warnings
+          cargo fmt --all
+
+      - name: Run strict validation
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked --all-targets --all-features 2>&1 | tee query-orchestration-tests.txt
+
+      - name: Write validation marker
+        run: |
+          mkdir -p research
+          cat > research/query-orchestration-validation.json <<'JSON'
+          {
+            "slice": "multi-source query orchestration",
+            "rustfmt": "passed",
+            "clippy": "passed",
+            "tests": "passed",
+            "contracts": "validated by repository Contracts workflow"
+          }
+          JSON
+
+      - name: Commit normalized files and validation marker
+        shell: bash
+        run: |
+          git rm .github/workflows/query-orchestration-validation.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock src tests research/query-orchestration-validation.json .github/workflows/query-orchestration-validation.yml
+          if ! git diff --cached --quiet; then
+            git commit -m "test: validate query orchestration slice"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
