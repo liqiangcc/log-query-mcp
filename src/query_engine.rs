@@ -12,10 +12,10 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    ConfiguredSource, MAX_RETURNED_CONTENT_BYTES, MAX_SCAN_RESULTS, ScanExecutor, ScanLimits,
-    ScanMatch, ScanPosition, ScanRequest, ScanStopReason, ScanTaskError, SourceFileSnapshot,
-    SourceRegistry, SourceRegistryError, TimeFilterDecision, TimeFilterError, TimeRange,
-    TimestampObservation, TimestampParser,
+    ConfiguredSource, LimitsConfig, MAX_RETURNED_CONTENT_BYTES, MAX_SCAN_RESULTS, ScanExecutor,
+    ScanLimits, ScanMatch, ScanPosition, ScanRequest, ScanStopReason, ScanTaskError,
+    SourceFileSnapshot, SourceRegistry, SourceRegistryError, TimeFilterDecision, TimeFilterError,
+    TimeRange, TimestampObservation, TimestampParser,
 };
 
 const DEFAULT_READ_BUFFER_BYTES: usize = 64 * 1024;
@@ -85,6 +85,94 @@ impl QueryRequest {
     }
 }
 
+/// Canonical query fields that are bound to a cursor.
+///
+/// Deadline and cancellation are intentionally excluded because every page has
+/// its own request lifetime. RFC 3339 bounds are stored as parsed values so
+/// equivalent offsets compare as the same absolute query range.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryDefinition {
+    pub source_ids: Vec<String>,
+    pub keyword: String,
+    pub case_sensitive: bool,
+    pub start_time: Option<DateTime<FixedOffset>>,
+    pub end_time: Option<DateTime<FixedOffset>>,
+    pub max_results: usize,
+}
+
+impl QueryDefinition {
+    fn from_request(
+        request: &QueryRequest,
+        limits: &LimitsConfig,
+    ) -> Result<(Self, TimeRange), QueryError> {
+        let max_results = validate_request(request, limits)?;
+        let time_range =
+            TimeRange::from_rfc3339(request.start_time.as_deref(), request.end_time.as_deref())?;
+        let definition = Self {
+            source_ids: request.source_ids.clone(),
+            keyword: request.keyword.clone(),
+            case_sensitive: request.case_sensitive,
+            start_time: time_range.start,
+            end_time: time_range.end,
+            max_results,
+        };
+        Ok((definition, time_range))
+    }
+}
+
+/// Stable key for v1 `oldest_first` pagination.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuerySortKey {
+    timestamp: Option<DateTime<Utc>>,
+    source_index: usize,
+    file_index: usize,
+    line_number: u64,
+    match_byte_offset: u64,
+}
+
+impl QuerySortKey {
+    #[must_use]
+    pub fn timestamp(&self) -> Option<&DateTime<Utc>> {
+        self.timestamp.as_ref()
+    }
+
+    #[must_use]
+    pub const fn source_index(&self) -> usize {
+        self.source_index
+    }
+
+    #[must_use]
+    pub const fn file_index(&self) -> usize {
+        self.file_index
+    }
+
+    #[must_use]
+    pub const fn line_number(&self) -> u64 {
+        self.line_number
+    }
+
+    #[must_use]
+    pub const fn match_byte_offset(&self) -> u64 {
+        self.match_byte_offset
+    }
+}
+
+impl Ord for QuerySortKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        timestamp_cmp(&self.timestamp, &other.timestamp)
+            .then_with(|| self.source_index.cmp(&other.source_index))
+            .then_with(|| self.file_index.cmp(&other.file_index))
+            .then_with(|| self.line_number.cmp(&other.line_number))
+            .then_with(|| self.match_byte_offset.cmp(&other.match_byte_offset))
+    }
+}
+
+impl PartialOrd for QuerySortKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryMatch {
     pub source_id: String,
@@ -98,12 +186,23 @@ pub struct QueryMatch {
     pub original_line_bytes: u64,
     pub line_start_offset: u64,
     pub match_byte_offset: u64,
+    sort_key: QuerySortKey,
+    snapshot: SourceFileSnapshot,
 }
 
 impl QueryMatch {
     #[must_use]
     pub fn timestamp_rfc3339(&self) -> Option<String> {
         self.timestamp.as_ref().map(DateTime::to_rfc3339)
+    }
+
+    #[must_use]
+    pub fn sort_key(&self) -> &QuerySortKey {
+        &self.sort_key
+    }
+
+    pub(crate) fn snapshot(&self) -> &SourceFileSnapshot {
+        &self.snapshot
     }
 }
 
@@ -123,6 +222,7 @@ pub struct QuerySummary {
     pub lines_scanned: u64,
     pub raw_matches: u64,
     pub filtered_out_matches: u64,
+    pub watermark_skipped_matches: u64,
     pub eligible_matches: u64,
     pub unknown_timestamp_matches: u64,
     pub malformed_timestamp_matches: u64,
@@ -136,6 +236,39 @@ pub struct QueryPage {
     pub truncated: bool,
     pub stop_reason: QueryPageStopReason,
     pub summary: QuerySummary,
+}
+
+impl QueryPage {
+    #[must_use]
+    pub fn continuation_key(&self) -> Option<QuerySortKey> {
+        if matches!(
+            self.stop_reason,
+            QueryPageStopReason::ResultLimit | QueryPageStopReason::ReturnedContentByteLimit
+        ) {
+            self.results.last().map(|result| result.sort_key.clone())
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
+    pub const fn scanned_complete_candidate_set(&self) -> bool {
+        self.stop_reason != QueryPageStopReason::ScanByteLimit
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PreparedQuery {
+    definition: QueryDefinition,
+    time_range: TimeRange,
+    candidates: Vec<FileCandidate>,
+}
+
+impl PreparedQuery {
+    #[must_use]
+    pub(crate) const fn definition(&self) -> &QueryDefinition {
+        &self.definition
+    }
 }
 
 #[derive(Debug)]
@@ -161,26 +294,54 @@ impl QueryEngine {
     }
 
     pub async fn execute(&self, request: QueryRequest) -> Result<QueryPage, QueryError> {
+        let prepared = self.prepare(&request)?;
+        self.execute_prepared(&prepared, request, None).await
+    }
+
+    pub(crate) fn prepare(&self, request: &QueryRequest) -> Result<PreparedQuery, QueryError> {
+        let (definition, time_range) =
+            QueryDefinition::from_request(request, self.registry.limits())?;
+        let selected_sources = self.registry.selected(&definition.source_ids)?;
+        let candidates = build_candidates(
+            &selected_sources,
+            self.registry.limits().max_scan_files_per_query,
+        )?;
+        Ok(PreparedQuery {
+            definition,
+            time_range,
+            candidates,
+        })
+    }
+
+    pub(crate) async fn execute_prepared(
+        &self,
+        prepared: &PreparedQuery,
+        request: QueryRequest,
+        after: Option<&QuerySortKey>,
+    ) -> Result<QueryPage, QueryError> {
+        let (definition, _) = QueryDefinition::from_request(&request, self.registry.limits())?;
+        if definition != prepared.definition {
+            return Err(QueryError::PreparedQueryMismatch);
+        }
+
         let limits = self.registry.limits();
-        let max_results = validate_request(&request, limits)?;
-        let time_range =
-            TimeRange::from_rfc3339(request.start_time.as_deref(), request.end_time.as_deref())?;
         let deadline = effective_deadline(request.deadline, limits.query_timeout_millis)?;
         check_interrupted(&request.cancellation, deadline)?;
 
-        let selected_sources = self.registry.selected(&request.source_ids)?;
-        let candidates = build_candidates(&selected_sources, limits.max_scan_files_per_query)?;
-
         let mut summary = QuerySummary {
-            files_considered: candidates.len(),
+            files_considered: prepared.candidates.len(),
             ..QuerySummary::default()
         };
-        let mut earliest = BinaryHeap::<RankedMatch>::with_capacity(max_results + 1);
+        let keep_results = definition.max_results.saturating_add(1);
+        let mut earliest = BinaryHeap::<RankedMatch>::with_capacity(keep_results);
         let mut page_scan_limited = false;
 
-        'candidate: for candidate in &candidates {
+        'candidate: for candidate in &prepared.candidates {
             check_interrupted(&request.cancellation, deadline)?;
-            summary.files_scanned += 1;
+            summary.files_scanned = summary
+                .files_scanned
+                .checked_add(1)
+                .ok_or(QueryError::ResourceCounterOverflow)?;
             let mut position = ScanPosition::default();
 
             while position.byte_offset < candidate.snapshot.size_at_snapshot() {
@@ -213,16 +374,15 @@ impl QueryEngine {
                 let mut file = safe_file.into_file();
                 seek_to_scan_position(&mut file, position, candidate.snapshot.size_at_snapshot())?;
 
-                let chunk_result_limit = chunk_result_limit(limits.max_line_bytes);
                 let scan_limits = ScanLimits {
                     max_scan_bytes: scan_budget,
-                    max_results: chunk_result_limit,
+                    max_results: chunk_result_limit(limits.max_line_bytes),
                     max_line_bytes: limits.max_line_bytes,
                     max_returned_content_bytes: MAX_RETURNED_CONTENT_BYTES,
                     read_buffer_bytes: DEFAULT_READ_BUFFER_BYTES,
                 };
-                let scan_request = ScanRequest::new(request.keyword.clone())
-                    .with_case_sensitive(request.case_sensitive)
+                let scan_request = ScanRequest::new(definition.keyword.clone())
+                    .with_case_sensitive(definition.case_sensitive)
                     .with_limits(scan_limits)
                     .with_start_position(position)
                     .with_deadline(deadline)
@@ -251,8 +411,9 @@ impl QueryEngine {
                 process_matches(
                     candidate,
                     outcome.results,
-                    &time_range,
-                    max_results,
+                    &prepared.time_range,
+                    after,
+                    keep_results,
                     &mut earliest,
                     &mut summary,
                 )?;
@@ -290,7 +451,7 @@ impl QueryEngine {
 
         finish_page(
             earliest,
-            max_results,
+            definition.max_results,
             limits.max_returned_content_bytes,
             page_scan_limited,
             summary,
@@ -298,7 +459,7 @@ impl QueryEngine {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct FileCandidate {
     source: Arc<ConfiguredSource>,
     snapshot: SourceFileSnapshot,
@@ -340,7 +501,6 @@ fn build_candidates(
                 }),
         );
     }
-
     Ok(candidates)
 }
 
@@ -348,7 +508,8 @@ fn process_matches(
     candidate: &FileCandidate,
     matches: Vec<ScanMatch>,
     time_range: &TimeRange,
-    max_results: usize,
+    after: Option<&QuerySortKey>,
+    keep_results: usize,
     earliest: &mut BinaryHeap<RankedMatch>,
     summary: &mut QuerySummary,
 ) -> Result<(), QueryError> {
@@ -408,23 +569,30 @@ fn process_matches(
             TimeFilterDecision::InRange => {}
         }
 
-        summary.eligible_matches = summary
-            .eligible_matches
-            .checked_add(1)
-            .ok_or(QueryError::ResourceCounterOverflow)?;
-        let timestamp_utc = observation
-            .timestamp
-            .as_ref()
-            .map(|timestamp| timestamp.with_timezone(&Utc));
-        let key = ResultSortKey {
-            timestamp: timestamp_utc,
+        let key = QuerySortKey {
+            timestamp: observation
+                .timestamp
+                .as_ref()
+                .map(|timestamp| timestamp.with_timezone(&Utc)),
             source_index: candidate.source_index,
             file_index: candidate.file_index,
             line_number: scan_match.line_number,
             match_byte_offset: scan_match.match_byte_offset,
         };
+        if after.is_some_and(|watermark| key <= *watermark) {
+            summary.watermark_skipped_matches = summary
+                .watermark_skipped_matches
+                .checked_add(1)
+                .ok_or(QueryError::ResourceCounterOverflow)?;
+            continue;
+        }
+
+        summary.eligible_matches = summary
+            .eligible_matches
+            .checked_add(1)
+            .ok_or(QueryError::ResourceCounterOverflow)?;
         earliest.push(RankedMatch {
-            key,
+            key: key.clone(),
             value: QueryMatch {
                 source_id: candidate.snapshot.source_id().to_owned(),
                 file_id: candidate.snapshot.file_id().to_owned(),
@@ -437,9 +605,11 @@ fn process_matches(
                 original_line_bytes: scan_match.original_line_bytes,
                 line_start_offset: scan_match.line_start_offset,
                 match_byte_offset: scan_match.match_byte_offset,
+                sort_key: key,
+                snapshot: candidate.snapshot.clone(),
             },
         });
-        if earliest.len() > max_results {
+        if earliest.len() > keep_results {
             earliest.pop();
         }
     }
@@ -455,9 +625,11 @@ fn finish_page(
 ) -> Result<QueryPage, QueryError> {
     let mut ranked = earliest.into_vec();
     ranked.sort_by(|left, right| left.key.cmp(&right.key));
+    let result_limited = ranked.len() > max_results
+        || summary.eligible_matches
+            > u64::try_from(max_results).map_err(|_| QueryError::ResourceCounterOverflow)?;
+    ranked.truncate(max_results);
 
-    let result_limited = summary.eligible_matches
-        > u64::try_from(max_results).map_err(|_| QueryError::ResourceCounterOverflow)?;
     let mut content_limited = false;
     let mut returned_content_bytes = 0_usize;
     let mut results = Vec::with_capacity(ranked.len());
@@ -502,10 +674,7 @@ fn finish_page(
     })
 }
 
-fn validate_request(
-    request: &QueryRequest,
-    limits: &crate::LimitsConfig,
-) -> Result<usize, QueryError> {
+fn validate_request(request: &QueryRequest, limits: &LimitsConfig) -> Result<usize, QueryError> {
     if request.source_ids.is_empty() || request.source_ids.len() > limits.max_sources_per_query {
         return Err(QueryError::InvalidArgument(
             "source_ids count is outside the service limit",
@@ -659,31 +828,6 @@ fn truncate_utf8(content: &mut String, maximum_bytes: usize) {
     content.truncate(boundary);
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ResultSortKey {
-    timestamp: Option<DateTime<Utc>>,
-    source_index: usize,
-    file_index: usize,
-    line_number: u64,
-    match_byte_offset: u64,
-}
-
-impl Ord for ResultSortKey {
-    fn cmp(&self, other: &Self) -> Ordering {
-        timestamp_cmp(&self.timestamp, &other.timestamp)
-            .then_with(|| self.source_index.cmp(&other.source_index))
-            .then_with(|| self.file_index.cmp(&other.file_index))
-            .then_with(|| self.line_number.cmp(&other.line_number))
-            .then_with(|| self.match_byte_offset.cmp(&other.match_byte_offset))
-    }
-}
-
-impl PartialOrd for ResultSortKey {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 fn timestamp_cmp(left: &Option<DateTime<Utc>>, right: &Option<DateTime<Utc>>) -> Ordering {
     match (left, right) {
         (Some(left), Some(right)) => left.cmp(right),
@@ -695,7 +839,7 @@ fn timestamp_cmp(left: &Option<DateTime<Utc>>, right: &Option<DateTime<Utc>>) ->
 
 #[derive(Debug)]
 struct RankedMatch {
-    key: ResultSortKey,
+    key: QuerySortKey,
     value: QueryMatch,
 }
 
@@ -723,6 +867,9 @@ impl PartialOrd for RankedMatch {
 pub enum QueryError {
     #[error("invalid query: {0}")]
     InvalidArgument(&'static str),
+
+    #[error("prepared query does not match the supplied request")]
+    PreparedQueryMismatch,
 
     #[error("query deadline cannot be represented")]
     DeadlineOverflow,
@@ -858,40 +1005,100 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn returns_globally_earliest_result_when_page_size_is_one() {
-        let later_root = tempdir().expect("later root should be created");
-        let earlier_root = tempdir().expect("earlier root should be created");
+    async fn resumes_after_stable_watermark_against_same_snapshot() {
+        let root = tempdir().expect("root should be created");
         fs::write(
-            later_root.path().join("application.log"),
-            "2026-06-19T14:10:00+09:00 MATCH later\n",
+            root.path().join("application.log"),
+            concat!(
+                "2026-06-19T14:00:00+09:00 MATCH first\n",
+                "2026-06-19T14:01:00+09:00 MATCH second\n",
+                "2026-06-19T14:02:00+09:00 MATCH third\n"
+            ),
         )
-        .expect("later fixture should be written");
-        fs::write(
-            earlier_root.path().join("application.log"),
-            "2026-06-19T14:00:00+09:00 MATCH earlier\n",
-        )
-        .expect("earlier fixture should be written");
+        .expect("fixture should be written");
         let engine = engine(
-            vec![
-                source(later_root.path(), "later"),
-                source(earlier_root.path(), "earlier"),
-            ],
+            vec![source(root.path(), "payment")],
             LimitsConfig::default(),
         );
+        let request = QueryRequest::new(vec!["payment".to_owned()], "MATCH").with_max_results(1);
+        let prepared = engine.prepare(&request).expect("query should prepare");
 
-        let page = engine
-            .execute(
-                QueryRequest::new(vec!["later".to_owned(), "earlier".to_owned()], "MATCH")
-                    .with_max_results(1),
-            )
+        let first = engine
+            .execute_prepared(&prepared, request.clone(), None)
             .await
-            .expect("query should succeed");
+            .expect("first page should succeed");
+        let watermark = first.continuation_key().expect("watermark should exist");
+        let second = engine
+            .execute_prepared(&prepared, request.clone(), Some(&watermark))
+            .await
+            .expect("second page should succeed");
+        let second_watermark = second
+            .continuation_key()
+            .expect("second watermark should exist");
+        let third = engine
+            .execute_prepared(&prepared, request, Some(&second_watermark))
+            .await
+            .expect("third page should succeed");
+
+        assert!(first.results[0].content.ends_with("first"));
+        assert!(second.results[0].content.ends_with("second"));
+        assert!(third.results[0].content.ends_with("third"));
+        assert_eq!(second.summary.watermark_skipped_matches, 1);
+        assert_eq!(third.stop_reason, QueryPageStopReason::Complete);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn prepared_query_does_not_include_new_rotation_file() {
+        let root = tempdir().expect("root should be created");
+        fs::write(
+            root.path().join("application.log"),
+            "2026-06-19T14:00:00+09:00 MATCH current\n",
+        )
+        .expect("fixture should be written");
+        let mut source = source(root.path(), "payment");
+        source.directories = vec![crate::DirectoryRule {
+            path: PathBuf::from("."),
+            recursive: false,
+            include_suffixes: vec![".log".to_owned(), ".log.1".to_owned()],
+        }];
+        let engine = engine(vec![source], LimitsConfig::default());
+        let request = QueryRequest::new(vec!["payment".to_owned()], "MATCH");
+        let prepared = engine.prepare(&request).expect("query should prepare");
+
+        fs::write(
+            root.path().join("application.log.1"),
+            "2026-06-19T13:00:00+09:00 MATCH new rotation\n",
+        )
+        .expect("rotation fixture should be written");
+        let page = engine
+            .execute_prepared(&prepared, request, None)
+            .await
+            .expect("prepared query should succeed");
 
         assert_eq!(page.results.len(), 1);
-        assert!(page.results[0].content.ends_with("earlier"));
-        assert!(page.truncated);
-        assert_eq!(page.stop_reason, QueryPageStopReason::ResultLimit);
-        assert_eq!(page.summary.eligible_matches, 2);
+        assert!(page.results[0].content.ends_with("current"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn rejects_mismatched_request_for_prepared_query() {
+        let root = tempdir().expect("root should be created");
+        fs::write(root.path().join("application.log"), "MATCH\n")
+            .expect("fixture should be written");
+        let engine = engine(
+            vec![source(root.path(), "payment")],
+            LimitsConfig::default(),
+        );
+        let request = QueryRequest::new(vec!["payment".to_owned()], "MATCH");
+        let prepared = engine.prepare(&request).expect("query should prepare");
+
+        let result = engine
+            .execute_prepared(
+                &prepared,
+                QueryRequest::new(vec!["payment".to_owned()], "different"),
+                None,
+            )
+            .await;
+        assert!(matches!(result, Err(QueryError::PreparedQueryMismatch)));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -916,66 +1123,4 @@ mod tests {
         assert!(page.results.is_empty());
         assert!(page.truncated);
         assert_eq!(page.stop_reason, QueryPageStopReason::ScanByteLimit);
-        assert_eq!(page.summary.bytes_scanned, 10);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn rejects_duplicate_sources_and_pre_cancelled_query() {
-        let root = tempdir().expect("root should be created");
-        fs::write(root.path().join("application.log"), "MATCH\n")
-            .expect("fixture should be written");
-        let engine = engine(
-            vec![source(root.path(), "payment")],
-            LimitsConfig::default(),
-        );
-
-        assert!(matches!(
-            engine
-                .execute(QueryRequest::new(
-                    vec!["payment".to_owned(), "payment".to_owned()],
-                    "MATCH"
-                ))
-                .await,
-            Err(QueryError::InvalidArgument(_))
-        ));
-
-        let cancellation = CancellationToken::new();
-        cancellation.cancel();
-        assert!(matches!(
-            engine
-                .execute(
-                    QueryRequest::new(vec!["payment".to_owned()], "MATCH")
-                        .with_cancellation(cancellation)
-                )
-                .await,
-            Err(QueryError::Cancelled)
-        ));
-    }
-
-    fn engine(sources: Vec<LogSourceConfig>, limits: LimitsConfig) -> QueryEngine {
-        let registry = SourceRegistry::from_config(AppConfig {
-            version: CONFIG_VERSION,
-            sources,
-            limits,
-        })
-        .expect("registry should build");
-        QueryEngine::new(Arc::new(registry)).expect("engine should build")
-    }
-
-    fn source(root: &std::path::Path, source_id: &str) -> LogSourceConfig {
-        LogSourceConfig {
-            source_id: source_id.to_owned(),
-            name: source_id.to_owned(),
-            description: String::new(),
-            service: source_id.to_owned(),
-            environment: "test".to_owned(),
-            tags: Vec::new(),
-            enabled: true,
-            encoding: Encoding::Utf8,
-            root: root.to_path_buf(),
-            files: vec![PathBuf::from("application.log")],
-            directories: Vec::new(),
-            timestamp_rule: Some(TimestampRule::Rfc3339 { prefix_bytes: 64 }),
-        }
-    }
-}
+        assert_eq!(page.summary.bytes_scanned, 
