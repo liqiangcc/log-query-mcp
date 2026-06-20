@@ -6,6 +6,10 @@ mod scanner;
 mod time_filter;
 
 #[cfg(target_os = "linux")]
+mod context_executor;
+#[cfg(target_os = "linux")]
+mod context_reader;
+#[cfg(target_os = "linux")]
 mod query_engine;
 #[cfg(target_os = "linux")]
 mod query_state;
@@ -15,6 +19,8 @@ mod safe_fs;
 mod source_discovery;
 #[cfg(target_os = "linux")]
 mod source_registry;
+#[cfg(target_os = "linux")]
+mod stateful_context;
 #[cfg(target_os = "linux")]
 mod stateful_query;
 
@@ -33,6 +39,14 @@ pub use time_filter::{
     TimeRange, TimestampObservation, TimestampParser,
 };
 
+#[cfg(target_os = "linux")]
+pub use context_executor::{ContextExecution, ContextExecutor, ContextTaskError};
+#[cfg(target_os = "linux")]
+pub use context_reader::{
+    DEFAULT_CONTEXT_SCAN_BYTES, MAX_CONTEXT_READ_BUFFER_BYTES, MAX_CONTEXT_SCAN_BYTES, ContextLine,
+    ContextReadError, ContextReadLimits, ContextReadOutcome, read_context,
+    read_referenced_context,
+};
 #[cfg(target_os = "linux")]
 pub use query_engine::{
     QueryEngine, QueryError, QueryMatch, QueryPage, QueryPageStopReason, QueryRequest, QuerySummary,
@@ -54,6 +68,10 @@ pub use source_discovery::{DirectoryDiscoveryRule, SourceDiscoveryError};
 pub use source_registry::{
     ConfiguredSource, MAX_REGISTERED_FILES_PER_SOURCE, SourceDescriptor, SourceFileSnapshot,
     SourceRegistry, SourceRegistryError,
+};
+#[cfg(target_os = "linux")]
+pub use stateful_context::{
+    StatefulContextError, StatefulContextRequest, StatefulContextResult, StatefulContextService,
 };
 #[cfg(target_os = "linux")]
 pub use stateful_query::{
