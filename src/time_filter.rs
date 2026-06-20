@@ -77,10 +77,10 @@ impl TimeRange {
             .start
             .as_ref()
             .zip(self.end.as_ref())
-            .is_some_and(|(start, end)| start >= end)
+            .is_some_and(|(start, end)| start > end)
         {
             return Err(TimeFilterError::InvalidRange(
-                "start_time must be earlier than end_time",
+                "start_time must not be later than end_time",
             ));
         }
         Ok(())
@@ -292,10 +292,10 @@ mod tests {
     }
 
     #[test]
-    fn rejects_reverse_or_equal_range() {
+    fn rejects_reverse_range() {
         assert!(matches!(
             TimeRange::from_rfc3339(
-                Some("2026-06-19T15:00:00+09:00"),
+                Some("2026-06-19T15:00:01+09:00"),
                 Some("2026-06-19T15:00:00+09:00")
             ),
             Err(TimeFilterError::InvalidRange(_))

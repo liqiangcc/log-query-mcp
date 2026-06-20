@@ -80,10 +80,10 @@ impl QueryBinding {
             .start_time
             .as_ref()
             .zip(self.end_time.as_ref())
-            .is_some_and(|(start, end)| start >= end)
+            .is_some_and(|(start, end)| start > end)
         {
             return Err(QueryStateError::InvalidData(
-                "start_time must be earlier than end_time",
+                "start_time must not be later than end_time",
             ));
         }
         Ok(())
@@ -873,6 +873,16 @@ mod tests {
             },
             usage: usage(),
         }
+    }
+
+    #[test]
+    fn query_binding_accepts_equal_half_open_range() {
+        let timestamp = DateTime::parse_from_rfc3339("2026-06-19T15:00:00+09:00")
+            .expect("timestamp should parse");
+        let mut query = binding();
+        query.start_time = Some(timestamp);
+        query.end_time = Some(timestamp);
+        query.validate().expect("equal range should be valid");
     }
 
     #[test]
