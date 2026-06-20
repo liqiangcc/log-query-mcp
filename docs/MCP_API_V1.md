@@ -1,7 +1,9 @@
 # Log Query MCP API v1
 
 > 状态：M1 冻结草案  
-> 机器可读定义：[`schemas/mcp-tools-v1.schema.json`](../schemas/mcp-tools-v1.schema.json)
+> 成功结果机器定义：[`schemas/mcp-tools-v1.schema.json`](../schemas/mcp-tools-v1.schema.json)  
+> 工具错误机器定义：[`schemas/tool-error-v1.schema.json`](../schemas/tool-error-v1.schema.json)  
+> 错误映射说明：[ERROR_MODEL_V1.md](./ERROR_MODEL_V1.md)
 
 ## 1. 通用约定
 
@@ -204,6 +206,22 @@ max_results
 
 ## 5. 工具错误
 
+进入工具业务处理后的错误使用：
+
+```text
+CallToolResult.isError = true
+```
+
+第一个文本内容块是符合 `tool-error-v1.schema.json` 的紧凑 JSON 字符串：
+
+```json
+{
+  "code": "UNKNOWN_SOURCE",
+  "message": "one or more requested log sources are unavailable",
+  "retryable": false
+}
+```
+
 v1 稳定错误类别：
 
 | 类别 | 典型原因 |
@@ -219,7 +237,7 @@ v1 稳定错误类别：
 | `FILE_CHANGED` | 引用或游标对应文件被轮转、替换或截断 |
 | `INTERNAL_ERROR` | 未预期内部错误 |
 
-错误消息不得包含服务器绝对路径、系统堆栈或凭证。
+客户端依赖 `code`，不能依赖完整 `message` 文本。错误消息不得包含服务器绝对路径、系统堆栈或凭证。
 
 ## 6. 兼容性规则
 
@@ -228,6 +246,7 @@ v1 兼容变更：
 - 增加可选响应字段。
 - 扩展 `order` 枚举以支持新顺序。
 - 增加新的日志时间戳规则。
+- 增加新的错误代码。
 - 调小部署默认限制，但不改变机器 Schema 硬上限。
 
 需要新版本的变更：
@@ -237,3 +256,4 @@ v1 兼容变更：
 - 改变默认大小写语义。
 - 允许客户端提交服务器路径。
 - 将无匹配改为工具错误。
+- 改变错误对象的必填字段。
