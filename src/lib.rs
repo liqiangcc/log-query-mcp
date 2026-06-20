@@ -3,7 +3,10 @@
 pub mod config;
 mod scan_executor;
 mod scanner;
+mod time_filter;
 
+#[cfg(target_os = "linux")]
+mod query_engine;
 #[cfg(target_os = "linux")]
 mod safe_fs;
 #[cfg(target_os = "linux")]
@@ -21,7 +24,15 @@ pub use scanner::{
     MAX_SCAN_KEYWORD_CHARS, MAX_SCAN_RESULTS, ScanError, ScanLimits, ScanMatch, ScanOutcome,
     ScanPosition, ScanRequest, ScanStopReason, scan_reader,
 };
+pub use time_filter::{
+    MAX_TIMESTAMP_FORMAT_CHARS, MAX_TIMESTAMP_PREFIX_BYTES, TimeFilterDecision, TimeFilterError,
+    TimeRange, TimestampObservation, TimestampParser,
+};
 
+#[cfg(target_os = "linux")]
+pub use query_engine::{
+    QueryEngine, QueryError, QueryMatch, QueryPage, QueryPageStopReason, QueryRequest, QuerySummary,
+};
 #[cfg(target_os = "linux")]
 pub use safe_fs::{FileIdentity, SafeFile, SafeOpenError, SafeRoot};
 #[cfg(target_os = "linux")]
