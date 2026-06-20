@@ -20,28 +20,44 @@
 - 启用 `RESOLVE_BENEATH`、`RESOLVE_NO_SYMLINKS`、`RESOLVE_NO_MAGICLINKS` 和 `RESOLVE_NO_XDEV`。
 - 打开后使用 `fstat`，只接受普通文件或目录。
 - 启动时验证显式文件和目录规则。
-- 目录发现按后缀、递归选项、文件数、目录数和目录项数实施硬限制。
-- 软链接、特殊文件和非 UTF-8 发现项不会进入候选集合。
-- 查询可创建带 device、inode 和大小的文件快照。
+- 有界目录发现和查询时文件身份快照。
 - 文件替换或截断后，旧快照安全失效。
-- 内部路径仍必须属于显式文件或目录规则，不能仅依赖 root 边界。
-- Rustfmt、Clippy、单元测试和 Contracts CI 全部通过。
 
 详细说明见 [`M2_SOURCE_REGISTRY.md`](./M2_SOURCE_REGISTRY.md)。
+
+## 已完成切片三：有界扫描器与执行器
+
+- 基于 `Read` 的有界流式字面量扫描器。
+- KMP 匹配支持跨读取缓冲区，不跨日志行。
+- UTF-8 中文、ASCII 大小写折叠、非法 UTF-8 和 CRLF。
+- 超长行围绕首次匹配生成有限预览。
+- 扫描字节、结果数、单行预览、返回内容和读取缓冲区限制。
+- 保存绝对行号、行起点和匹配字节偏移。
+- `ScanPosition` 和仅在完整行边界返回的安全 `next_position`。
+- `spawn_blocking` 隔离同步文件 I/O。
+- Semaphore 限制扫描并发。
+- 排队和运行阶段均观察 CancellationToken 和绝对 deadline。
+- async Future 被丢弃后取消阻塞任务，许可在任务结束后释放。
+- `SourceRegistry → SafeRoot → ScanExecutor → scan_reader` 集成测试。
+- Rustfmt、Clippy、单元/集成测试和 Contracts CI 全部通过。
+
+详细说明见 [`M2_SCANNER_EXECUTOR.md`](./M2_SCANNER_EXECUTOR.md)。
 
 ## 当前不包含
 
 - MCP Server 和工具 Schema 的 Rust 类型实现。
-- 有界日志扫描器。
 - 多文件和多来源查询编排。
+- 时间戳解析和 `[start_time, end_time)` 过滤。
 - `match_ref`、cursor 和上下文读取。
-- 具备 mount 权限环境中的真实 `RESOLVE_NO_XDEV` 跨挂载集成测试。
+- 完整 MCP JSON 响应大小限制。
+- 具备 mount 权限环境中的真实 `RESOLVE_NO_XDEV` 跨挂载测试。
 
 ## 下一切片
 
 ```text
-有界流式扫描器
-+ ScanExecutor
-+ deadline / cancellation
-+ 单文件搜索结果模型
+单/多来源查询编排
++ SourceFileSnapshot seek
++ 时间过滤
++ oldest_first 稳定排序
++ 页面级资源汇总
 ```
