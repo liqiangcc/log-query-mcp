@@ -1,7 +1,6 @@
 use std::{
     collections::HashSet,
-    fmt,
-    fs,
+    fmt, fs,
     path::{Path, PathBuf},
 };
 
@@ -75,9 +74,7 @@ impl AppConfig {
             push_issue(
                 &mut issues,
                 "sources",
-                format!(
-                    "must contain between 1 and {MAX_CONFIGURED_SOURCES} log sources"
-                ),
+                format!("must contain between 1 and {MAX_CONFIGURED_SOURCES} log sources"),
             );
         }
 
@@ -137,12 +134,7 @@ impl LogSourceConfig {
                 "must match [A-Za-z0-9][A-Za-z0-9._-]{0,127}",
             );
         }
-        validate_non_empty_text(
-            &self.name,
-            MAX_NAME_CHARS,
-            format!("{prefix}.name"),
-            issues,
-        );
+        validate_non_empty_text(&self.name, MAX_NAME_CHARS, format!("{prefix}.name"), issues);
         validate_optional_text(
             &self.description,
             MAX_DESCRIPTION_CHARS,
@@ -231,9 +223,7 @@ impl LogSourceConfig {
             push_issue(
                 issues,
                 format!("{prefix}.directories"),
-                format!(
-                    "must not contain more than {MAX_DIRECTORIES_PER_SOURCE} directory rules"
-                ),
+                format!("must not contain more than {MAX_DIRECTORIES_PER_SOURCE} directory rules"),
             );
         }
         let mut directories = HashSet::with_capacity(self.directories.len());
@@ -287,9 +277,7 @@ impl DirectoryRule {
             push_issue(
                 issues,
                 format!("{prefix}.include_suffixes"),
-                format!(
-                    "must contain between 1 and {MAX_SUFFIXES_PER_DIRECTORY} suffixes"
-                ),
+                format!("must contain between 1 and {MAX_SUFFIXES_PER_DIRECTORY} suffixes"),
             );
         }
 
@@ -336,9 +324,7 @@ impl TimestampRule {
             push_issue(
                 issues,
                 format!("{prefix}.prefix_bytes"),
-                format!(
-                    "must be between 1 and {MAX_TIMESTAMP_PREFIX_BYTES} bytes"
-                ),
+                format!("must be between 1 and {MAX_TIMESTAMP_PREFIX_BYTES} bytes"),
             );
         }
 
@@ -354,8 +340,7 @@ impl TimestampRule {
                 format!("{prefix}.format"),
                 issues,
             );
-            if default_offset_seconds
-                .is_some_and(|seconds| !(-86_399..=86_399).contains(&seconds))
+            if default_offset_seconds.is_some_and(|seconds| !(-86_399..=86_399).contains(&seconds))
             {
                 push_issue(
                     issues,
@@ -622,11 +607,7 @@ fn validate_bounded_usize(
     issues: &mut Vec<ValidationIssue>,
 ) {
     if value == 0 || value > maximum {
-        push_issue(
-            issues,
-            field,
-            format!("must be between 1 and {maximum}"),
-        );
+        push_issue(issues, field, format!("must be between 1 and {maximum}"));
     }
 }
 
@@ -637,11 +618,7 @@ fn validate_bounded_u64(
     issues: &mut Vec<ValidationIssue>,
 ) {
     if value == 0 || value > maximum {
-        push_issue(
-            issues,
-            field,
-            format!("must be between 1 and {maximum}"),
-        );
+        push_issue(issues, field, format!("must be between 1 and {maximum}"));
     }
 }
 
@@ -790,12 +767,12 @@ mod tests {
             PathBuf::from("application.log"),
             PathBuf::from("application.log"),
         ];
-        config.sources[0].directories[0].path = PathBuf::from("archive/../secret");
+        config.sources[1].directories[0].path = PathBuf::from("archive/../secret");
 
         let error = config.validate().expect_err("configuration should fail");
         assert!(has_issue(&error, "sources[0].files[0]"));
         assert!(has_issue(&error, "sources[0].files[2]"));
-        assert!(has_issue(&error, "sources[0].directories[0].path"));
+        assert!(has_issue(&error, "sources[1].directories[0].path"));
     }
 
     #[test]
@@ -808,7 +785,9 @@ mod tests {
             include_suffixes: vec![".log".to_owned()],
         }];
 
-        config.validate().expect("dot directory rule should be valid");
+        config
+            .validate()
+            .expect("dot directory rule should be valid");
     }
 
     #[test]
@@ -825,14 +804,14 @@ mod tests {
     fn rejects_duplicate_tags_and_suffixes() {
         let mut config = AppConfig::from_json_str(EXAMPLE).expect("example should parse");
         config.sources[0].tags = vec!["java".to_owned(), "java".to_owned()];
-        config.sources[0].directories[0].include_suffixes =
+        config.sources[1].directories[0].include_suffixes =
             vec![".log".to_owned(), ".log".to_owned()];
 
         let error = config.validate().expect_err("configuration should fail");
         assert!(has_issue(&error, "sources[0].tags[1]"));
         assert!(has_issue(
             &error,
-            "sources[0].directories[0].include_suffixes[1]"
+            "sources[1].directories[0].include_suffixes[1]"
         ));
     }
 
@@ -846,15 +825,9 @@ mod tests {
         config.limits.max_response_bytes = 512;
 
         let error = config.validate().expect_err("configuration should fail");
-        assert!(has_issue(
-            &error,
-            "limits.default_results_per_page"
-        ));
+        assert!(has_issue(&error, "limits.default_results_per_page"));
         assert!(has_issue(&error, "limits.max_line_bytes"));
-        assert!(has_issue(
-            &error,
-            "limits.max_returned_content_bytes"
-        ));
+        assert!(has_issue(&error, "limits.max_returned_content_bytes"));
     }
 
     #[test]
