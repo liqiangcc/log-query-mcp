@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::{Duration, Instant}};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
@@ -193,7 +196,9 @@ fn effective_deadline(
     let service_deadline = Instant::now()
         .checked_add(Duration::from_millis(timeout_millis))
         .ok_or(StatefulContextError::DeadlineOverflow)?;
-    Ok(requested.map_or(service_deadline, |requested| requested.min(service_deadline)))
+    Ok(requested.map_or(service_deadline, |requested| {
+        requested.min(service_deadline)
+    }))
 }
 
 #[derive(Debug, Error)]

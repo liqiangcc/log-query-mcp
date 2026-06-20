@@ -31,10 +31,7 @@ impl ContextExecutor {
         T: Send + 'static,
         F: FnOnce() -> T + Send + 'static,
     {
-        let permit = match self
-            .wait_for_permit(&cancellation, deadline)
-            .await?
-        {
+        let permit = match self.wait_for_permit(&cancellation, deadline).await? {
             PermitWait::Acquired(permit) => permit,
             PermitWait::Cancelled => return Ok(ContextExecution::Cancelled),
             PermitWait::DeadlineExceeded => return Ok(ContextExecution::DeadlineExceeded),

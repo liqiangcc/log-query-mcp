@@ -43,9 +43,9 @@ pub use time_filter::{
 pub use context_executor::{ContextExecution, ContextExecutor, ContextTaskError};
 #[cfg(target_os = "linux")]
 pub use context_reader::{
-    DEFAULT_CONTEXT_SCAN_BYTES, MAX_CONTEXT_READ_BUFFER_BYTES, MAX_CONTEXT_SCAN_BYTES, ContextLine,
-    ContextReadError, ContextReadLimits, ContextReadOutcome, read_context,
-    read_referenced_context,
+    ContextLine, ContextReadError, ContextReadLimits, ContextReadOutcome,
+    DEFAULT_CONTEXT_SCAN_BYTES, MAX_CONTEXT_READ_BUFFER_BYTES, MAX_CONTEXT_SCAN_BYTES,
+    read_context, read_referenced_context,
 };
 #[cfg(target_os = "linux")]
 pub use query_engine::{

@@ -72,9 +72,7 @@ impl ContextReadLimits {
                 "context scan byte limit is outside the service boundary",
             ));
         }
-        if self.read_buffer_bytes == 0
-            || self.read_buffer_bytes > MAX_CONTEXT_READ_BUFFER_BYTES
-        {
+        if self.read_buffer_bytes == 0 || self.read_buffer_bytes > MAX_CONTEXT_READ_BUFFER_BYTES {
             return Err(ContextReadError::InvalidLimits(
                 "context read buffer is outside the service boundary",
             ));
@@ -330,9 +328,7 @@ fn read_before_lines<R: Read + Seek>(
     let actual_lines = ranges.len();
     let first_line_number = reference
         .line_number
-        .checked_sub(
-            u64::try_from(actual_lines).map_err(|_| ContextReadError::CounterOverflow)?,
-        )
+        .checked_sub(u64::try_from(actual_lines).map_err(|_| ContextReadError::CounterOverflow)?)
         .ok_or(ContextReadError::FileChanged)?;
     let mut lines = Vec::with_capacity(actual_lines);
     for (index, (start, end)) in ranges.into_iter().enumerate() {
@@ -350,7 +346,9 @@ fn read_before_lines<R: Read + Seek>(
     Ok(BeforeRead {
         lines,
         bytes_scanned,
-        truncated: actual_lines < requested_lines && window_start > 0 && complete_lines >= actual_lines,
+        truncated: actual_lines < requested_lines
+            && window_start > 0
+            && complete_lines >= actual_lines,
     })
 }
 
@@ -420,8 +418,7 @@ fn read_match_and_after<R: Read + Seek>(
                 let line_number = reference
                     .line_number
                     .checked_add(
-                        u64::try_from(index + 1)
-                            .map_err(|_| ContextReadError::CounterOverflow)?,
+                        u64::try_from(index + 1).map_err(|_| ContextReadError::CounterOverflow)?,
                     )
                     .ok_or(ContextReadError::CounterOverflow)?;
                 after_lines.push(line.into_context_line(
@@ -478,11 +475,8 @@ impl RawLine {
         }
         let content_lossy = std::str::from_utf8(&self.preview).is_err();
         let converted: Cow<'_, str> = String::from_utf8_lossy(&self.preview);
-        let (content, output_truncated) = bounded_text(
-            converted.as_ref(),
-            maximum_output_bytes,
-            keyword,
-        );
+        let (content, output_truncated) =
+            bounded_text(converted.as_ref(), maximum_output_bytes, keyword);
 
         ContextLine {
             line_number,
@@ -512,15 +506,14 @@ fn read_line<B: BufRead>(
 ) -> Result<LineRead, ContextReadError> {
     let (preview_start, preview_end) = match match_spec {
         Some(spec) => {
-            let keyword_len = u64::try_from(spec.keyword.len())
-                .map_err(|_| ContextReadError::CounterOverflow)?;
+            let keyword_len =
+                u64::try_from(spec.keyword.len()).map_err(|_| ContextReadError::CounterOverflow)?;
             let before = u64::try_from(max_line_bytes.saturating_sub(spec.keyword.len()) / 2)
                 .map_err(|_| ContextReadError::CounterOverflow)?;
             let start = spec.relative_offset.saturating_sub(before);
             let end = start
                 .checked_add(
-                    u64::try_from(max_line_bytes)
-                        .map_err(|_| ContextReadError::CounterOverflow)?,
+                    u64::try_from(max_line_bytes).map_err(|_| ContextReadError::CounterOverflow)?,
                 )
                 .ok_or(ContextReadError::CounterOverflow)?;
             if spec.keyword.is_empty() || keyword_len > u64::try_from(max_line_bytes).unwrap_or(0) {
@@ -679,8 +672,12 @@ fn bounded_text(
 
     let (mut start, required_end) = keyword
         .and_then(|(keyword, case_sensitive)| {
-            find_folded_subslice(text.as_bytes(), keyword, case_sensitive)
-                .map(|offset| (offset.saturating_sub(maximum_bytes.saturating_sub(keyword.len()) / 2), offset + keyword.len()))
+            find_folded_subslice(text.as_bytes(), keyword, case_sensitive).map(|offset| {
+                (
+                    offset.saturating_sub(maximum_bytes.saturating_sub(keyword.len()) / 2),
+                    offset + keyword.len(),
+                )
+            })
         })
         .unwrap_or((0, 0));
     if required_end > start.saturating_add(maximum_bytes) {
@@ -885,7 +882,9 @@ mod tests {
 
     #[test]
     fn strips_crlf_and_marks_invalid_utf8() {
-        let data = [b'o', b'n', b'e', b'\r', b'\n', 0xff, b'M', b'A', b'T', b'C', b'H', b'\r', b'\n'];
+        let data = [
+            b'o', b'n', b'e', b'\r', b'\n', 0xff, b'M', b'A', b'T', b'C', b'H', b'\r', b'\n',
+        ];
         let mut reference = reference(2, 5, 6);
         reference.file_size_at_match = data.len() as u64;
         let mut reader = Cursor::new(data);
@@ -928,7 +927,13 @@ mod tests {
         .expect("context should be read");
 
         assert!(outcome.before_truncated);
-        assert!(outcome.lines.last().expect("match line exists").is_match_line);
+        assert!(
+            outcome
+                .lines
+                .last()
+                .expect("match line exists")
+                .is_match_line
+        );
     }
 
     #[test]
