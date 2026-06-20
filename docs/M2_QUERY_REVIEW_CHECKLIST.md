@@ -38,10 +38,10 @@
 
 ## 自动验证
 
-- [ ] Rustfmt。
-- [ ] Clippy `-D warnings`。
-- [ ] 单元测试。
-- [ ] Contracts CI。
+- [x] Rustfmt。
+- [x] Clippy `-D warnings`。
+- [x] 56 个单元测试和 1 个集成测试。
+- [x] Contracts CI。
 
 ## 后续切片
 
