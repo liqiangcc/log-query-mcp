@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, FixedOffset};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 
@@ -16,8 +16,8 @@ use crate::{
     MAX_SCAN_RESULTS, MatchReferenceData, MatchReferenceStore, QueryBinding, QueryMatch,
     QueryPageStopReason, QueryStateError, QuerySummary, ResultWatermark, ScanExecutor, ScanLimits,
     ScanMatch, ScanPosition, ScanRequest, ScanStopReason, ScanTaskError, SearchCursorData,
-    SearchCursorLease, SearchCursorStore, SourceFileSnapshot, SourceRegistry, SourceRegistryError,
-    TimeFilterDecision, TimeFilterError, TimeRange, TimestampObservation, TimestampParser,
+    SearchCursorStore, SourceRegistry, SourceRegistryError, TimeFilterDecision, TimeFilterError,
+    TimeRange, TimestampObservation, TimestampParser,
 };
 
 const DEFAULT_READ_BUFFER_BYTES: usize = 64 * 1024;
