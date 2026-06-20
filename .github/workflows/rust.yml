@@ -20,12 +20,14 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Generate lockfile and format
+      - name: Apply formatting and Clippy fixes
         run: |
           cargo generate-lockfile
           cargo fmt --all
+          cargo clippy --fix --allow-dirty --allow-staged --all-targets --all-features -- -D warnings
+          cargo fmt --all
 
-      - name: Commit generated changes on branch push
+      - name: Commit generated corrections on branch push
         if: github.event_name == 'push'
         shell: bash
         run: |
@@ -33,11 +35,11 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add Cargo.lock src
-            git commit -m "style: normalize source registry implementation"
+            git commit -m "fix: apply Clippy corrections to source registry"
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
 
-      - name: Run Clippy
+      - name: Run strict Clippy
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
       - name: Run tests
