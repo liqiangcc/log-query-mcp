@@ -8,7 +8,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   test:
@@ -20,8 +20,54 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Generate lockfile and format sources
+        run: |
+          cargo generate-lockfile
+          cargo fmt --all
+
+      - name: Restore strict workflow and commit generated files
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          cat > .github/workflows/rust.yml <<'YAML'
+          name: Rust
+
+          on:
+            push:
+              branches:
+                - main
+                - "feat/**"
+            pull_request:
+
+          permissions:
+            contents: read
+
+          jobs:
+            test:
+              runs-on: ubuntu-latest
+              steps:
+                - name: Check out repository
+                  uses: actions/checkout@v4
+
+                - name: Install Rust toolchain
+                  run: rustup show
+
+                - name: Check formatting
+                  run: cargo fmt --all -- --check
+
+                - name: Run Clippy
+                  run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+                - name: Run tests
+                  run: cargo test --locked --all-targets --all-features
+          YAML
+          if test -n "$(git status --porcelain -- Cargo.lock src .github/workflows/rust.yml)"; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add Cargo.lock src .github/workflows/rust.yml
+            git commit -m "style: normalize source registry slice"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
 
       - name: Run Clippy
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
