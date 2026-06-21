@@ -1,0 +1,58 @@
+name: MCP Server Bootstrap
+
+on:
+  push:
+    branches:
+      - feat/mcp-server-v1
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Apply bootstrap source corrections
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/tool_error.rs")
+          text = path.read_text()
+          text = text.replace("use serde::Serialize;", "use serde::{Deserialize, Serialize};")
+          text = text.replace(
+              "#[derive(Debug, Clone, Copy, Serialize, JsonSchema, PartialEq, Eq)]",
+              "#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]",
+          )
+          text = text.replace(
+              "#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]",
+              "#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]",
+          )
+          path.write_text(text)
+          PY
+
+          cargo generate-lockfile
+          cargo fmt --all
+
+      - name: Run strict validation
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked --all-targets --all-features
+
+      - name: Remove bootstrap workflow and commit generated files
+        shell: bash
+        run: |
+          git rm .github/workflows/mcp-server-bootstrap.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock src .github/workflows/mcp-server-bootstrap.yml
+          git commit -m "build: lock and format v1 MCP server"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
