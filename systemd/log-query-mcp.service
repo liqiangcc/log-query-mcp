@@ -1,0 +1,26 @@
+[Unit]
+Description=Log Query MCP
+Documentation=https://github.com/liqiangcc/log-query-mcp
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=log-query-mcp
+Group=log-query-mcp
+Environment=LOG_QUERY_MCP_CONFIG=/etc/log-query-mcp/config.json
+Environment=LOG_QUERY_MCP_BIND=127.0.0.1:8000
+ExecStart=/opt/log-query-mcp/bin/log-query-mcp
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
