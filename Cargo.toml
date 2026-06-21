@@ -5,14 +5,33 @@ edition = "2024"
 publish = false
 
 [dependencies]
+anyhow = "1"
+axum = { version = "0.8", features = ["http1", "tokio"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+rmcp = { version = "1.7.0", features = [
+    "server",
+    "macros",
+    "schemars",
+    "transport-io",
+    "transport-streamable-http-server",
+] }
 rustix = { version = "1.1.4", features = ["fs"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = [
+    "io-std",
+    "macros",
+    "net",
+    "rt-multi-thread",
+    "signal",
+    "sync",
+    "time",
+] }
 tokio-util = { version = "0.7", features = ["rt"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
