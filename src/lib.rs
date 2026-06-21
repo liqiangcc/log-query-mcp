@@ -3,12 +3,19 @@
 pub mod config;
 mod scan_executor;
 mod scanner;
+mod state_store;
 mod time_filter;
 
+#[cfg(target_os = "linux")]
+mod context_reader;
+#[cfg(target_os = "linux")]
+mod match_reference;
 #[cfg(target_os = "linux")]
 mod query_engine;
 #[cfg(target_os = "linux")]
 mod safe_fs;
+#[cfg(target_os = "linux")]
+mod search_cursor;
 #[cfg(target_os = "linux")]
 mod source_discovery;
 #[cfg(target_os = "linux")]
@@ -30,11 +37,26 @@ pub use time_filter::{
 };
 
 #[cfg(target_os = "linux")]
+pub use context_reader::{
+    ContextLimits, ContextLine, ContextOutcome, ContextReadError, ContextReader,
+    MAX_CONTEXT_CONTENT_BYTES, MAX_CONTEXT_LINE_BYTES, MAX_CONTEXT_LINES_PER_SIDE,
+    MAX_CONTEXT_SCAN_BYTES,
+};
+#[cfg(target_os = "linux")]
+pub use match_reference::{
+    MatchReferenceData, MatchReferenceError, MatchReferenceStore,
+};
+#[cfg(target_os = "linux")]
 pub use query_engine::{
     QueryEngine, QueryError, QueryMatch, QueryPage, QueryPageStopReason, QueryRequest, QuerySummary,
 };
 #[cfg(target_os = "linux")]
 pub use safe_fs::{FileIdentity, SafeFile, SafeOpenError, SafeRoot};
+#[cfg(target_os = "linux")]
+pub use search_cursor::{
+    CursorCandidate, CursorQueryBinding, MAX_CURSOR_CANDIDATES, QueryWatermark, SearchCursorData,
+    SearchCursorError, SearchCursorStore,
+};
 #[cfg(target_os = "linux")]
 pub(crate) use source_discovery::discover_regular_files;
 #[cfg(target_os = "linux")]
