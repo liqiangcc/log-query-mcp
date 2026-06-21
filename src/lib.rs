@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod config;
+mod mcp_model;
 mod scan_executor;
 mod scanner;
 mod time_filter;
@@ -9,6 +10,8 @@ mod time_filter;
 mod context_executor;
 #[cfg(target_os = "linux")]
 mod context_reader;
+#[cfg(target_os = "linux")]
+mod mcp_server;
 #[cfg(target_os = "linux")]
 mod query_engine;
 #[cfg(target_os = "linux")]
@@ -23,10 +26,17 @@ mod source_registry;
 mod stateful_context;
 #[cfg(target_os = "linux")]
 mod stateful_query;
+#[cfg(target_os = "linux")]
+mod tool_error;
 
 pub use config::{
     AppConfig, CONFIG_VERSION, ConfigLoadError, ConfigValidationError, DirectoryRule, Encoding,
     LimitsConfig, LogSourceConfig, TimestampRule, ValidationIssue,
+};
+pub use mcp_model::{
+    ContextLineResponse, DEFAULT_SEARCH_RESULTS, GetLogContextRequest, GetLogContextResponse,
+    ListLogSourcesResponse, LogMatch, LogSource, MAX_MCP_CONTEXT_LINES_PER_SIDE, MAX_MCP_RESULTS,
+    MAX_MCP_SOURCE_IDS, MAX_MCP_TOKEN_CHARS, SearchLogsRequest, SearchLogsResponse,
 };
 pub use scan_executor::{MAX_CONCURRENT_SCAN_TASKS, ScanExecutor, ScanTaskError};
 pub use scanner::{
@@ -47,6 +57,8 @@ pub use context_reader::{
     DEFAULT_CONTEXT_SCAN_BYTES, MAX_CONTEXT_READ_BUFFER_BYTES, MAX_CONTEXT_SCAN_BYTES,
     read_context, read_referenced_context,
 };
+#[cfg(target_os = "linux")]
+pub use mcp_server::{LogQueryRuntime, LogQueryServer, RuntimeInitError};
 #[cfg(target_os = "linux")]
 pub use query_engine::{
     QueryEngine, QueryError, QueryMatch, QueryPage, QueryPageStopReason, QueryRequest, QuerySummary,
@@ -78,3 +90,5 @@ pub use stateful_query::{
     RegisteredQueryMatch, StatefulQueryError, StatefulQueryPage, StatefulQueryRequest,
     StatefulQueryService, StatefulQuerySummary,
 };
+#[cfg(target_os = "linux")]
+pub use tool_error::{ToolErrorBody, ToolErrorCode};
