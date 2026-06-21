@@ -1,0 +1,218 @@
+name: Query State Bootstrap
+
+on:
+  push:
+    branches:
+      - feat/query-state
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Wire modules and bounded context reader
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          lib = Path("src/lib.rs")
+          text = lib.read_text()
+          if "mod state_store;" not in text:
+              text = text.replace("mod scanner;\n", "mod scanner;\nmod state_store;\n", 1)
+          for module in ("context_reader", "match_reference", "search_cursor"):
+              declaration = f'#[cfg(target_os = "linux")]\nmod {module};\n'
+              if declaration not in text:
+                  text = text.replace(
+                      '#[cfg(target_os = "linux")]\nmod query_engine;\n',
+                      declaration + '#[cfg(target_os = "linux")]\nmod query_engine;\n',
+                      1,
+                  )
+          export_marker = '#[cfg(target_os = "linux")]\npub use query_engine::'
+          if 'pub use context_reader::' not in text:
+              exports = '''#[cfg(target_os = "linux")]
+pub use context_reader::{
+    ContextLimits, ContextLine, ContextOutcome, ContextReadError, ContextReader,
+    MAX_CONTEXT_CONTENT_BYTES, MAX_CONTEXT_LINE_BYTES, MAX_CONTEXT_LINES_PER_SIDE,
+    MAX_CONTEXT_SCAN_BYTES,
+};
+#[cfg(target_os = "linux")]
+pub use match_reference::{
+    MatchReferenceData, MatchReferenceError, MatchReferenceStore,
+};
+#[cfg(target_os = "linux")]
+pub use search_cursor::{
+    CursorCandidate, CursorQueryBinding, MAX_CURSOR_CANDIDATES, QueryWatermark,
+    SearchCursorData, SearchCursorError, SearchCursorStore,
+};
+'''
+              text = text.replace(export_marker, exports + export_marker, 1)
+          lib.write_text(text)
+
+          source = Path("src/source_registry.rs")
+          source_text = source.read_text()
+          marker = "impl SourceFileSnapshot {\n"
+          if "from_parts_for_state" not in source_text:
+              constructor = '''impl SourceFileSnapshot {
+    pub(crate) fn from_parts_for_state(
+        source_id: String,
+        file_id: String,
+        relative_path: PathBuf,
+        identity: FileIdentity,
+        size_at_snapshot: u64,
+    ) -> Self {
+        Self {
+            source_id,
+            file_id,
+            relative_path,
+            identity,
+            size_at_snapshot,
+        }
+    }
+
+'''
+              source_text = source_text.replace(marker, constructor, 1)
+          source.write_text(source_text)
+
+          context = Path("src/context_reader.rs")
+          context_text = context.read_text()
+          context_text = context_text.replace(
+              "use std::{io::{Read, Seek, SeekFrom}, sync::Arc};",
+              "use std::{io::{BufRead, BufReader, Read, Seek, SeekFrom}, sync::Arc};",
+          )
+          start = context_text.index("#[allow(clippy::too_many_arguments)]\nfn read_streamed_line")
+          end = context_text.index("fn context_line_from_bytes", start)
+          replacement = '''#[allow(clippy::too_many_arguments)]
+fn read_streamed_line<R: BufRead>(
+    reader: &mut R,
+    line_number: u64,
+    match_relative: Option<u64>,
+    keyword_len: usize,
+    max_line_bytes: usize,
+    remaining: &mut u64,
+    is_match_line: bool,
+) -> Result<Option<StreamedLine>, ContextReadError> {
+    if *remaining == 0 {
+        return Ok(None);
+    }
+    let before = max_line_bytes.saturating_sub(keyword_len) / 2;
+    let window_start = match_relative
+        .map(|offset| offset.saturating_sub(u64::try_from(before).unwrap_or(0)))
+        .unwrap_or(0);
+    let window_end = window_start.saturating_add(
+        u64::try_from(max_line_bytes).map_err(|_| ContextReadError::PositionOverflow)?,
+    );
+    let mut preview = Vec::with_capacity(max_line_bytes);
+    let mut line_bytes = 0_u64;
+    let mut saw_anything = false;
+    let mut complete = false;
+
+    while *remaining > 0 {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            complete = true;
+            break;
+        }
+        let allowed = available
+            .len()
+            .min(usize::try_from(*remaining).unwrap_or(usize::MAX));
+        let available = &available[..allowed];
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(available.len(), |index| index + 1);
+        let content_len = newline.map_or(consumed, |_| consumed - 1);
+        saw_anything = true;
+
+        for byte in &available[..content_len] {
+            if line_bytes >= window_start && line_bytes < window_end {
+                preview.push(*byte);
+            }
+            line_bytes = line_bytes
+                .checked_add(1)
+                .ok_or(ContextReadError::PositionOverflow)?;
+        }
+        reader.consume(consumed);
+        *remaining = remaining.saturating_sub(
+            u64::try_from(consumed).map_err(|_| ContextReadError::PositionOverflow)?,
+        );
+        if newline.is_some() {
+            complete = true;
+            break;
+        }
+    }
+
+    if !saw_anything {
+        return Ok(None);
+    }
+    if complete && window_start == 0 && preview.last() == Some(&b'\r') {
+        preview.pop();
+    }
+    let preview_len = u64::try_from(preview.len()).unwrap_or(u64::MAX);
+    let content_truncated = window_start > 0 || preview_len < line_bytes;
+    let (content, content_lossy) = bytes_to_string(preview);
+    Ok(Some(StreamedLine {
+        line: ContextLine {
+            line_number,
+            content,
+            content_truncated,
+            content_lossy,
+            original_line_bytes: line_bytes,
+            is_match_line,
+        },
+        complete,
+    }))
+}
+
+'''
+          context_text = context_text[:start] + replacement + context_text[end:]
+          context_text = context_text.replace(
+              "file.seek(SeekFrom::Start(reference.line_start_offset()))?;\n    let mut remaining",
+              "file.seek(SeekFrom::Start(reference.line_start_offset()))?;\n    let mut reader = BufReader::with_capacity(limits.read_buffer_bytes, file);\n    let mut remaining",
+          )
+          context_text = context_text.replace(
+              "read_streamed_line(\n        file,",
+              "read_streamed_line(\n        &mut reader,",
+          )
+          context_text = context_text.replace(
+              "limits.max_line_bytes,\n        limits.read_buffer_bytes,\n        &mut remaining,",
+              "limits.max_line_bytes,\n        &mut remaining,",
+          )
+          context_text = context_text.replace(
+              "read_streamed_line(\n            file,",
+              "read_streamed_line(\n            &mut reader,",
+          )
+          context_text = context_text.replace(
+              "limits.max_line_bytes,\n            limits.read_buffer_bytes,\n            &mut remaining,",
+              "limits.max_line_bytes,\n            &mut remaining,",
+          )
+          context.write_text(context_text)
+          PY
+
+          cargo fmt --all
+          cargo generate-lockfile
+
+      - name: Apply machine-fixable Clippy suggestions
+        run: cargo clippy --fix --allow-dirty --allow-staged --locked --all-targets --all-features -- -D warnings
+
+      - name: Run strict validation
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked --all-targets --all-features
+
+      - name: Remove bootstrap workflow and commit
+        shell: bash
+        run: |
+          git rm .github/workflows/query-state-bootstrap.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock src .github/workflows/query-state-bootstrap.yml
+          git commit -m "feat: wire query state and context modules"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
