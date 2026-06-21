@@ -26,7 +26,7 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 
 rm -f "${unit_path}"
-rm -f "${install_root}/bin/log-query-mcp" "${install_root}/bin/log-query-mcp-stdio"
+rm -f "${install_root}/bin/log-query-mcp" "${install_root}/bin/log-query-mcp-stdio" "${install_root}/BUILDINFO"
 rmdir "${install_root}/bin" "${install_root}" >/dev/null 2>&1 || true
 
 if [[ "${purge_config}" -eq 1 ]]; then
