@@ -1,9 +1,11 @@
 #![forbid(unsafe_code)]
 
 pub mod config;
+pub mod response_limit;
 mod scan_executor;
 mod scanner;
 mod time_filter;
+pub mod tool_error;
 
 #[cfg(target_os = "linux")]
 mod context_executor;
@@ -28,6 +30,7 @@ pub use config::{
     AppConfig, CONFIG_VERSION, ConfigLoadError, ConfigValidationError, DirectoryRule, Encoding,
     LimitsConfig, LogSourceConfig, TimestampRule, ValidationIssue,
 };
+pub use response_limit::serialize_with_limit;
 pub use scan_executor::{MAX_CONCURRENT_SCAN_TASKS, ScanExecutor, ScanTaskError};
 pub use scanner::{
     MAX_LINE_PREVIEW_BYTES, MAX_READ_BUFFER_BYTES, MAX_RETURNED_CONTENT_BYTES, MAX_SCAN_BYTES,
@@ -38,6 +41,7 @@ pub use time_filter::{
     MAX_TIMESTAMP_FORMAT_CHARS, MAX_TIMESTAMP_PREFIX_BYTES, TimeFilterDecision, TimeFilterError,
     TimeRange, TimestampObservation, TimestampParser,
 };
+pub use tool_error::{ToolError, ToolErrorCode};
 
 #[cfg(target_os = "linux")]
 pub use context_executor::{ContextExecution, ContextExecutor, ContextTaskError};

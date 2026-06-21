@@ -1,8 +1,8 @@
 # Log Query MCP 生产发布迭代计划
 
-> 状态：Plan PR 草案  
+> 状态：PR A 进行中
 > 最近更新：2026-06-21  
-> 当前基线：`main` 已合并 PR #14，最新提交 `732a36a`  
+> 当前基线：`main` 已合并 PR #15，最新提交 `02b8f4a`
 > 工作方式：一次一个 PR；每个 PR 从最新 `main` 创建，CI 全绿后再进入下一项
 
 本文是项目级开发状态和后续恢复上下文的唯一计划文档。`docs/CODEX_HANDOFF.md` 保留为 Codex 执行约束和交接提示；具体发布路线、阶段状态、验收命令和生产包定义以本文为准。
@@ -21,7 +21,7 @@
 
 当前已知远程状态：
 
-- `main` 最新提交：`732a36a`。
+- `main` 最新提交：`02b8f4a`。
 - 无 open issue。
 - open PR #1 是 spike 预研参考，不作为实现基线。
 
@@ -29,8 +29,8 @@
 
 | 阶段 | 分支 | 目标 | 状态 | 合并条件 |
 |---|---|---|---|---|
-| Plan | `docs/iteration-plan` | 新增本文档，README 增加入口链接 | In Progress | 文档描述完整路线、状态、发布目标 |
-| PR A | `feat/mcp-error-response-boundary` | 工具错误 wire format、错误映射、完整响应大小限制 | Todo | Rust/Contracts CI 全绿 |
+| Plan | `docs/iteration-plan` | 新增本文档，README 增加入口链接 | Merged | PR #15，merge commit `02b8f4a` |
+| PR A | `feat/mcp-error-response-boundary` | 工具错误 wire format、错误映射、完整响应大小限制 | In Progress | Rust/Contracts CI 全绿 |
 | PR B | `feat/mcp-server-tools` | rmcp Server 与三个 MCP 工具 | Todo | 工具层集成测试和 schema 验证通过 |
 | PR C | `feat/mcp-transports-validation` | stdio、Streamable HTTP、协议级 smoke test | Todo | release build、stdio/http smoke 通过 |
 | PR D | `feat/production-release-package` | CI 发布 tar.gz + systemd 生产包 | Todo | tag release workflow 可生成 GitHub Release artifact |
