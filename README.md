@@ -56,6 +56,7 @@ get_log_context
 
 ## 正式化文档
 
+- [生产发布迭代计划](./docs/ITERATION_PLAN.md)
 - [v1 实现基线](./docs/IMPLEMENTATION_BASELINE_V1.md)
 - [v1 MCP API](./docs/MCP_API_V1.md)
 - [v1 错误模型](./docs/ERROR_MODEL_V1.md)
