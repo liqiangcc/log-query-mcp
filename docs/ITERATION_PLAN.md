@@ -1,8 +1,8 @@
 # Log Query MCP 生产发布迭代计划
 
-> 状态：PR E 进行中
+> 状态：迭代实现完成，等待目标环境人工验收和发布 tag
 > 最近更新：2026-06-21
-> 当前基线：`main` 已合并 PR #19，最新提交 `eb9db4c`
+> 当前基线：`main` 已合并 PR #20，最新提交 `2b7e3ad`
 > 工作方式：一次一个 PR；每个 PR 从最新 `main` 创建，CI 全绿后再进入下一项
 
 本文是项目级开发状态和后续恢复上下文的唯一计划文档。`docs/CODEX_HANDOFF.md` 保留为 Codex 执行约束和交接提示；具体发布路线、阶段状态、验收命令和生产包定义以本文为准。
@@ -21,7 +21,8 @@
 
 当前已知远程状态：
 
-- `main` 最新提交：`eb9db4c`。
+- `main` 最新提交：`2b7e3ad`。
+- 尚未创建 `v*` release tag；正式发布需在人工验收后推送与 `Cargo.toml` `package.version` 匹配的 tag。
 - 无 open issue。
 - open PR #1 是 spike 预研参考，不作为实现基线。
 
@@ -34,7 +35,7 @@
 | PR B | `feat/mcp-server-tools` | rmcp Server 与三个 MCP 工具 | Merged | PR #17，merge commit `4dbc8f3` |
 | PR C | `feat/mcp-transports-validation` | stdio、Streamable HTTP、协议级 smoke test | Merged | PR #18，merge commit `bb44e64` |
 | PR D | `feat/production-release-package` | CI 发布 tar.gz + systemd 生产包 | Merged | PR #19，merge commit `eb9db4c` |
-| PR E | `docs/production-operations` | 生产安装、运维、升级、回滚、验收文档 | In Progress | 文档可按步骤完成部署和验证 |
+| PR E | `docs/production-operations` | 生产安装、运维、升级、回滚、验收文档 | Merged | PR #20，merge commit `2b7e3ad` |
 
 状态取值：
 
