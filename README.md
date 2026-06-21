@@ -2,29 +2,89 @@
 
 面向 AI 问题排查的只读日志搜索 MCP 服务。
 
-Log Query MCP 部署在能够访问日志文件的 Linux 服务器上。管理员配置允许查询的日志来源，本地 AI 通过 MCP 搜索运行日志，并结合本地代码仓库定位开发环境或测试环境问题。
+Log Query MCP 部署在能够访问日志文件的 Linux 服务器上。管理员配置允许查询的日志来源，本地或内网 AI 客户端通过 MCP 搜索运行日志，并结合代码仓库定位开发、测试或生产环境问题。
 
-> 项目处于正式实现阶段。v1 契约已经冻结，当前已完成配置、安全文件访问、查询编排、cursor、`match_ref` 和有限上下文读取，尚未形成生产发布版本。
+当前生产入口：
 
-## 工作方式
+- 正式服务：`log-query-mcp`，Streamable HTTP，默认 `http://127.0.0.1:8000/mcp`。
+- 调试入口：`log-query-mcp-stdio`，stdout 仅输出 MCP stdio 协议，诊断写 stderr。
+- 发布包：`log-query-mcp-v{version}-x86_64-unknown-linux-gnu.tar.gz`。
+- 安装形态：`tar.gz + systemd`。
 
-```text
-用户描述问题
-      ↓
-本地 AI 读取代码仓库
-      ↓
-AI 调用 Log Query MCP
-      ↓
-MCP 搜索白名单日志文件
-      ↓
-AI 结合代码与日志诊断问题
+## 快速安装
+
+```bash
+VERSION=0.1.0
+TARGET=x86_64-unknown-linux-gnu
+BASE_URL="https://github.com/liqiangcc/log-query-mcp/releases/download/v${VERSION}"
+
+curl -fL -O "${BASE_URL}/log-query-mcp-v${VERSION}-${TARGET}.tar.gz"
+curl -fL -O "${BASE_URL}/SHA256SUMS"
+sha256sum -c SHA256SUMS
+
+tar -xzf "log-query-mcp-v${VERSION}-${TARGET}.tar.gz"
+cd "log-query-mcp-v${VERSION}-${TARGET}"
+sudo scripts/install.sh
 ```
 
-职责划分：
+安装脚本会写入：
 
-- **本地 AI**：读取代码、分析日志、诊断问题。
-- **Log Query MCP**：安全搜索服务器日志，返回匹配位置和有限上下文。
-- **管理员**：配置允许查询的日志来源和只读权限。
+| 类型 | 路径 |
+|---|---|
+| binary | `/opt/log-query-mcp/bin` |
+| config | `/etc/log-query-mcp/config.json` |
+| systemd unit | `/etc/systemd/system/log-query-mcp.service` |
+| service user | `log-query-mcp` |
+
+安装后先编辑 `/etc/log-query-mcp/config.json`，确认日志来源白名单、文件权限和限制参数，再启动服务：
+
+```bash
+sudo systemctl enable --now log-query-mcp.service
+sudo systemctl status --no-pager log-query-mcp.service
+```
+
+完整步骤见 [生产安装指南](./docs/INSTALL.md)。
+
+## 快速验证
+
+确认服务监听 loopback：
+
+```bash
+ss -ltn | grep '127.0.0.1:8000'
+```
+
+执行 MCP 初始化请求：
+
+```bash
+curl -sS http://127.0.0.1:8000/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":1,
+    "method":"initialize",
+    "params":{
+      "protocolVersion":"2025-06-18",
+      "capabilities":{},
+      "clientInfo":{"name":"manual-smoke","version":"0.1.0"}
+    }
+  }'
+```
+
+AI 客户端使用 Streamable HTTP 配置：
+
+```json
+{
+  "mcpServers": {
+    "log-query-mcp": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:8000/mcp"
+    }
+  }
+}
+```
+
+MCP Inspector 可用于人工验收工具列表和调用结果。参考 <https://modelcontextprotocol.io/docs/tools/inspector> 和 <https://github.com/modelcontextprotocol/inspector>。
 
 ## v1 工具
 
@@ -42,20 +102,20 @@ get_log_context
 - 限制扫描字节、结果数量、响应大小、上下文和并发任务。
 - 不接受客户端服务器路径，不执行 Shell，不修改日志。
 
-## v1 已冻结决策
+## 生产约束
 
-- 目标平台：Linux kernel `>= 5.6`。
-- 正式传输：Streamable HTTP；stdio 用于本机调试。
+- 目标平台：Linux kernel `>= 5.6`，首批发布目标为 `x86_64-unknown-linux-gnu` glibc 动态链接二进制。
+- v1 不内置认证和 TLS。默认只监听 `127.0.0.1:8000`；暴露到非 loopback 时必须由内网 ACL、反向代理或上层网关负责认证、TLS 和访问控制。
 - 文件访问：来源白名单 + `openat2()` + `RESOLVE_NO_XDEV` + 普通文件校验。
-- 搜索：字面量子串；不区分大小写仅保证 ASCII。
-- 时间区间：`[start_time, end_time)`。
 - 排序：v1 只支持 `oldest_first`。
 - `match_ref` 和 cursor：单实例、服务端有状态、短期随机 token，重启后失效。
-- 错误：稳定错误代码 + 去敏消息 + `retryable`。
-- 内网使用：v1 不内置认证和 TLS。
+- 错误：稳定错误代码 + 去敏消息 + `retryable`，不暴露绝对路径、inode、offset、backtrace 或底层系统调用文本。
 
-## 正式化文档
+## 文档索引
 
+- [生产安装指南](./docs/INSTALL.md)
+- [生产运维指南](./docs/OPERATIONS.md)
+- [生产验收清单](./docs/PRODUCTION_CHECKLIST.md)
 - [生产发布迭代计划](./docs/ITERATION_PLAN.md)
 - [v1 实现基线](./docs/IMPLEMENTATION_BASELINE_V1.md)
 - [v1 MCP API](./docs/MCP_API_V1.md)
@@ -68,24 +128,22 @@ get_log_context
 - [服务配置机器 Schema](./schemas/log-query-mcp-config-v1.schema.json)
 - [完整需求文档](./REQUIREMENTS.md)
 
-## 当前实现进度
+## 开发验证
 
-- [x] M1 v1 契约冻结
-- [x] Rust 正式工程和版本化配置模型
-- [x] `SafeRoot` 与 Linux `openat2()` 文件边界
-- [x] 有界目录发现和 `SourceRegistry`
-- [x] device/inode/size 文件快照
-- [x] 有界流式字面量扫描器
-- [x] `spawn_blocking`、Semaphore、deadline 和协作取消
-- [x] 多文件和多来源查询编排
-- [x] `[start_time, end_time)` 时间过滤和稳定排序
-- [x] 服务端 cursor、累计配额和排序水位线
-- [x] `match_ref` 注册和有限上下文读取
-- [ ] MCP Server 与三个工具接线
-- [ ] 完整序列化响应大小限制和工具错误映射
-- [ ] 目标 Linux 环境验收
+```bash
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets --all-features
+cargo build --release --locked --bins
+python3 scripts/validate_contracts.py
+```
 
-详细状态见 [M2_STATUS.md](./docs/M2_STATUS.md)。
+发布包 dry-run：
+
+```bash
+cargo build --release --locked --bins --target x86_64-unknown-linux-gnu
+scripts/package_release.sh --target x86_64-unknown-linux-gnu --out-dir dist --require-docs
+```
 
 ## 首期不包含
 

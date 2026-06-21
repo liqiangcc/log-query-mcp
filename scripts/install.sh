@@ -39,6 +39,9 @@ fi
 install -d -m 0755 "${bin_dir}"
 install -m 0755 "${package_root}/bin/log-query-mcp" "${bin_dir}/log-query-mcp"
 install -m 0755 "${package_root}/bin/log-query-mcp-stdio" "${bin_dir}/log-query-mcp-stdio"
+if [[ -f "${package_root}/BUILDINFO" ]]; then
+  install -m 0644 "${package_root}/BUILDINFO" "${install_root}/BUILDINFO"
+fi
 
 install -d -m 0750 -o root -g "${service_group}" "${config_dir}"
 if [[ ! -e "${config_path}" ]]; then
