@@ -61,6 +61,7 @@ get_log_context
 - [v1 错误模型](./docs/ERROR_MODEL_V1.md)
 - [v1 配置 Schema 说明](./docs/CONFIG_SCHEMA_V1.md)
 - [架构决策记录](./docs/adr/README.md)
+- [Codex 交接说明](./docs/CODEX_HANDOFF.md)
 - [MCP 工具机器 Schema](./schemas/mcp-tools-v1.schema.json)
 - [工具错误机器 Schema](./schemas/tool-error-v1.schema.json)
 - [服务配置机器 Schema](./schemas/log-query-mcp-config-v1.schema.json)
