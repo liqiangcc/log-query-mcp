@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+    tags:
+      - "v*"
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    env:
+      TARGET: x86_64-unknown-linux-gnu
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Install release target
+        run: rustup target add "${TARGET}"
+
+      - name: Validate release tag
+        if: github.ref_type == 'tag'
+        run: scripts/check_release_tag.sh "${GITHUB_REF_NAME}"
+
+      - name: Build release binaries
+        run: cargo build --release --locked --bins --target "${TARGET}"
+
+      - name: Run transport smoke tests
+        run: cargo test --locked --test mcp_transport_smoke -- --nocapture
+
+      - name: Assemble release package
+        run: |
+          args=(--target "${TARGET}" --out-dir dist)
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            args+=(--tag "${GITHUB_REF_NAME}" --require-docs)
+          fi
+          scripts/package_release.sh "${args[@]}"
+
+      - name: Upload dry-run artifact
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-query-mcp-release-dry-run
+          path: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          archive="dist/log-query-mcp-v${version}-${TARGET}.tar.gz"
+          gh release create "${GITHUB_REF_NAME}" "${archive}" dist/SHA256SUMS \
+            --verify-tag \
+            --title "log-query-mcp ${GITHUB_REF_NAME}" \
+            --notes "Release ${GITHUB_REF_NAME}"
