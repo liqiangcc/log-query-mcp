@@ -25,40 +25,56 @@
 
 详细说明见 [`M2_SCANNER_EXECUTOR.md`](./M2_SCANNER_EXECUTOR.md)。
 
-## 当前切片四：多来源查询编排
-
-已实现：
+## 已完成切片四：多来源查询编排
 
 - 查询参数、来源数量、关键字、时间范围和页面结果校验。
 - 查询开始时刷新多来源候选文件快照。
 - 查询级文件数、扫描字节、deadline 和取消限制。
 - `SourceFileSnapshot` seek 与非零位置行边界复核。
-- 只扫描查询开始时的文件大小。
 - RFC 3339 与自定义固定前缀时间解析。
 - `[start_time, end_time)` 过滤。
 - 无时间和畸形时间保守返回。
-- 固定容量最大堆保留全局最早结果。
+- 固定容量结果集合保留全局最早结果。
 - 时间、来源、文件、行号和偏移稳定排序。
-- 页面结果和内容预算。
-- 多来源、时间边界、全局 top-N、扫描字节和取消测试。
 
 详细说明见 [`M2_QUERY_ORCHESTRATION.md`](./M2_QUERY_ORCHESTRATION.md)。
 
+## 已完成切片五：服务端 cursor 与 match_ref
+
+- 有界 TTL 内存状态存储。
+- cursor 绑定规范化查询、候选文件快照、排序水位线和累计资源。
+- cursor 单次消费与查询条件校验。
+- 跨页扫描文件、字节、页数和结果总数限制。
+- 每条返回匹配注册短期不透明 `match_ref`。
+- 文件身份、关键字语义和匹配位置保存在服务端。
+
+## 已完成切片六：有限上下文读取
+
+- `match_ref` 解析后重新经过 `SourceRegistry` 和 `SafeRoot`。
+- 复核来源、配置范围、device/inode、文件大小、行边界和原关键字。
+- 有界反向读取前置行。
+- 有界向前读取匹配行和后续行。
+- 超长匹配行围绕关键字生成有限预览。
+- 上下文 I/O 运行在受限阻塞执行器中。
+- 文件轮转、截断或原地改写后引用安全失效。
+
 ## 当前不包含
 
-- cursor 和跨页面状态。
-- match_ref 和上下文读取。
-- MCP Server 与工具类型。
-- 完整序列化 JSON 响应大小限制。
-- 查询内并行文件扫描。
-- 目标 Linux 挂载和性能验收。
+- MCP Server 与三个工具的正式接线。
+- v1 工具错误 wire format 映射。
+- 完整序列化 MCP JSON 响应大小限制。
+- stdio 与 Streamable HTTP 正式二进制入口。
+- MCP Inspector 和目标 AI 客户端验收。
+- 目标 Linux 挂载、压力和性能验收。
 
 ## 下一切片
 
 ```text
-cursor Store
-+ 排序溢出结果
-+ 未完成候选位置
-+ 累计查询资源
-+ match_ref 注册
+rmcp Server
++ list_log_sources
++ search_logs
++ get_log_context
++ 稳定工具错误映射
++ 完整响应大小限制
++ stdio / Streamable HTTP 入口
 ```
