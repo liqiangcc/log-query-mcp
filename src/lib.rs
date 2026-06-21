@@ -20,6 +20,8 @@ mod query_engine;
 #[cfg(target_os = "linux")]
 mod query_state;
 #[cfg(target_os = "linux")]
+pub mod runtime;
+#[cfg(target_os = "linux")]
 mod safe_fs;
 #[cfg(target_os = "linux")]
 mod source_discovery;
