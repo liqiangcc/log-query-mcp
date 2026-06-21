@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+rmcp = { version = "=1.7.0", default-features = false, features = ["macros", "schemars", "server"] }
 rustix = { version = "1.1.4", features = ["fs"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }

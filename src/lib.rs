@@ -12,6 +12,10 @@ mod context_executor;
 #[cfg(target_os = "linux")]
 mod context_reader;
 #[cfg(target_os = "linux")]
+pub mod mcp_model;
+#[cfg(target_os = "linux")]
+pub mod mcp_server;
+#[cfg(target_os = "linux")]
 mod query_engine;
 #[cfg(target_os = "linux")]
 mod query_state;
@@ -51,6 +55,14 @@ pub use context_reader::{
     DEFAULT_CONTEXT_SCAN_BYTES, MAX_CONTEXT_READ_BUFFER_BYTES, MAX_CONTEXT_SCAN_BYTES,
     read_context, read_referenced_context,
 };
+#[cfg(target_os = "linux")]
+pub use mcp_model::{
+    ContextLine as McpContextLine, GetLogContextRequest, GetLogContextResponse,
+    ListLogSourcesRequest, ListLogSourcesResponse, LogMatch, LogSource, SearchLogsRequest,
+    SearchLogsResponse, SearchOrder,
+};
+#[cfg(target_os = "linux")]
+pub use mcp_server::LogQueryMcpServer;
 #[cfg(target_os = "linux")]
 pub use query_engine::{
     QueryEngine, QueryError, QueryMatch, QueryPage, QueryPageStopReason, QueryRequest, QuerySummary,
