@@ -1,0 +1,50 @@
+{
+  "version": 2,
+  "connections": [
+    {
+      "connection_id": "prod-reader",
+      "type": "ssh",
+      "host": "logs.internal.example",
+      "username": "log-reader",
+      "auth": {
+        "type": "private_key",
+        "key_file": "/etc/log-query-mcp/keys/prod-reader",
+        "passphrase_secret_ref": "PROD_READER_KEY_PASSPHRASE"
+      },
+      "host_key": {
+        "known_hosts_file": "/etc/log-query-mcp/known_hosts"
+      }
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "remote-gateway-prod",
+      "name": "Remote gateway production logs",
+      "service": "gateway",
+      "environment": "prod",
+      "backend": {
+        "type": "ssh",
+        "connection_id": "prod-reader"
+      },
+      "root": "/srv/log/gateway",
+      "directories": [
+        {
+          "path": ".",
+          "recursive": false,
+          "include_suffixes": [".log", ".log.1"]
+        }
+      ],
+      "sync": {
+        "freshness": "on_query",
+        "bootstrap": { "type": "full" }
+      }
+    }
+  ],
+  "cache": {
+    "root": "/var/cache/log-query-mcp",
+    "max_bytes": 21474836480,
+    "max_bytes_per_source": 10737418240,
+    "retention_hours": 168,
+    "max_generations_per_file": 4
+  }
+}
