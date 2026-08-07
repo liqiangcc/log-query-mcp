@@ -41,10 +41,11 @@ mod stateful_context;
 mod stateful_query;
 
 pub use cache::{
-    ByteRange, CACHE_CATALOG_VERSION, CACHE_MANIFEST_VERSION, CacheCoverage, CacheFileId,
-    CacheManifest, CacheSourceId, CacheStore, CacheStoreError, CacheStoreLimits, GcReport,
-    GenerationId, GenerationKey, GenerationMetadata, GenerationRecord, ManifestValidationError,
-    PinnedGeneration, RecoveryReport, StagedAppend, StagedGeneration,
+    ByteRange, CACHE_CATALOG_VERSION, CACHE_MANIFEST_VERSION, CONTINUITY_FINGERPRINT_WINDOW_BYTES,
+    CacheCoverage, CacheFileId, CacheManifest, CacheSourceId, CacheStore, CacheStoreError,
+    CacheStoreLimits, GcReport, GenerationId, GenerationKey, GenerationMetadata, GenerationRecord,
+    ManifestValidationError, PinnedGeneration, RecoveryReport, RemoteSyncTarget, StagedAppend,
+    StagedGeneration, SyncAction, SyncEngine, SyncError, SyncGenerationReason, SyncOutcome,
 };
 pub use config::{
     AppConfig, CONFIG_VERSION, ConfigLoadError, ConfigValidationError, DirectoryRule, Encoding,

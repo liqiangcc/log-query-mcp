@@ -55,17 +55,9 @@ impl SyncEngine {
     }
 
     pub async fn sync(&self, target: &RemoteSyncTarget) -> Result<SyncOutcome, SyncError> {
-        let reader = self
-            .connections
-            .open_reader(target.connection_id())
-            .await?;
-        let result = sync_with_reader(
-            &self.cache,
-            target,
-            self.max_sync_bytes_per_query,
-            &reader,
-        )
-        .await;
+        let reader = self.connections.open_reader(target.connection_id()).await?;
+        let result =
+            sync_with_reader(&self.cache, target, self.max_sync_bytes_per_query, &reader).await;
         let _ = reader.close().await;
         result
     }
@@ -196,8 +188,12 @@ pub enum SyncError {
 
 trait RemoteSyncReader {
     async fn lstat(&self, path: &str) -> Result<RemoteFileMetadata, SyncError>;
-    async fn read_range(&self, path: &str, offset: u64, length: usize)
-    -> Result<Vec<u8>, SyncError>;
+    async fn read_range(
+        &self,
+        path: &str,
+        offset: u64,
+        length: usize,
+    ) -> Result<Vec<u8>, SyncError>;
 }
 
 impl RemoteSyncReader for SshReadTransport {
@@ -224,7 +220,11 @@ async fn sync_with_reader<R: RemoteSyncReader + Sync>(
     let mut budget = SyncBudget::new(max_sync_bytes_per_query)?;
     let remote = inspect_regular_file(reader, &target.remote_path).await?;
     let manifest = cache.load_manifest(target.source_identifier(), target.remote_identifier())?;
-    let Some(current) = manifest.as_ref().and_then(|manifest| manifest.current()).cloned() else {
+    let Some(current) = manifest
+        .as_ref()
+        .and_then(|manifest| manifest.current())
+        .cloned()
+    else {
         return bootstrap_generation(
             cache,
             target,
@@ -341,7 +341,8 @@ async fn bootstrap_generation<R: RemoteSyncReader + Sync>(
     let (cached_range, coverage) = bootstrap_range(&target.bootstrap, remote.size)?;
     ensure_candidate_fits(cache, cached_range)?;
 
-    let mut staged = cache.begin_generation(target.source_identifier(), target.remote_identifier())?;
+    let mut staged =
+        cache.begin_generation(target.source_identifier(), target.remote_identifier())?;
     let mut tail = TailWindow::default();
     let cached_bytes_written = copy_remote_range(
         reader,
@@ -408,13 +409,15 @@ async fn append_generation<R: RemoteSyncReader + Sync>(
     current: &GenerationRecord,
     budget: &mut SyncBudget,
 ) -> Result<SyncOutcome, SyncError> {
-    let new_range = ByteRange::new(current.cached_range.start, remote.size)
-        .map_err(CacheStoreError::from)?;
+    let new_range =
+        ByteRange::new(current.cached_range.start, remote.size).map_err(CacheStoreError::from)?;
     ensure_candidate_fits(cache, new_range)?;
 
-    let desired_fingerprint_start = new_range
-        .start
-        .max(remote.size.saturating_sub(CONTINUITY_FINGERPRINT_WINDOW_BYTES));
+    let desired_fingerprint_start = new_range.start.max(
+        remote
+            .size
+            .saturating_sub(CONTINUITY_FINGERPRINT_WINDOW_BYTES),
+    );
     let mut tail = TailWindow::default();
     let mut pinned = cache.pin_generation(
         target.source_identifier(),
@@ -426,8 +429,8 @@ async fn append_generation<R: RemoteSyncReader + Sync>(
             .checked_sub(current.cached_range.start)
             .ok_or(SyncError::RemoteChangedDuringSync)?;
         let local_len_u64 = current.remote_size - desired_fingerprint_start;
-        let local_len = usize::try_from(local_len_u64)
-            .map_err(|_| SyncError::RemoteChangedDuringSync)?;
+        let local_len =
+            usize::try_from(local_len_u64).map_err(|_| SyncError::RemoteChangedDuringSync)?;
         let mut buffer = vec![0_u8; local_len];
         pinned.seek(SeekFrom::Start(local_offset))?;
         pinned.read_exact(&mut buffer)?;
@@ -438,8 +441,8 @@ async fn append_generation<R: RemoteSyncReader + Sync>(
     if staged.generation_id() != &current.generation {
         return Err(CacheStoreError::ConcurrentGenerationChanged.into());
     }
-    let append_range = ByteRange::new(current.remote_size, remote.size)
-        .map_err(CacheStoreError::from)?;
+    let append_range =
+        ByteRange::new(current.remote_size, remote.size).map_err(CacheStoreError::from)?;
     let cached_bytes_written = copy_remote_range(
         reader,
         &target.remote_path,
@@ -737,10 +740,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::{
-        CacheStoreLimits, FreshnessPolicy, RemoteSyncPolicy, SourceBackendConfig,
-        config_v2::SourceBackendConfig as _,
-    };
+    use crate::CacheStoreLimits;
 
     struct FakeReader {
         bytes: Vec<u8>,
@@ -878,10 +878,7 @@ mod tests {
 
         let outcome = run(&cache, &target, &reader, 1024).await.expect("sync");
         assert_eq!(outcome.cached_range, ByteRange::new(3, 6).expect("range"));
-        assert_eq!(
-            outcome.coverage,
-            CacheCoverage::Tail { start_offset: 3 }
-        );
+        assert_eq!(outcome.coverage, CacheCoverage::Tail { start_offset: 3 });
         let mut pinned = cache
             .pin_current_generation("service-a", "logs/application.log")
             .expect("pin");
@@ -946,7 +943,12 @@ mod tests {
         assert_eq!(outcome.action, SyncAction::Appended);
         assert_eq!(outcome.generation, first.generation);
         assert_eq!(outcome.cached_bytes_written, 3);
-        assert!(reader.reads().iter().any(|(offset, length)| *offset == 6 && *length == 3));
+        assert!(
+            reader
+                .reads()
+                .iter()
+                .any(|(offset, length)| *offset == 6 && *length == 3)
+        );
     }
 
     #[tokio::test]
@@ -970,8 +972,18 @@ mod tests {
             .load_manifest("service-a", "logs/application.log")
             .expect("manifest")
             .expect("present");
-        assert!(manifest.generations.iter().any(|record| record.generation == first.generation));
-        assert!(manifest.generations.iter().any(|record| record.generation == second.generation));
+        assert!(
+            manifest
+                .generations
+                .iter()
+                .any(|record| record.generation == first.generation)
+        );
+        assert!(
+            manifest
+                .generations
+                .iter()
+                .any(|record| record.generation == second.generation)
+        );
     }
 
     #[tokio::test]

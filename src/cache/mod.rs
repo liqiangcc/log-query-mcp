@@ -2,6 +2,7 @@ mod gc;
 mod generation;
 mod manifest;
 mod store;
+mod sync;
 
 pub use generation::{CacheFileId, CacheSourceId, GenerationId, GenerationKey};
 pub use manifest::{
@@ -11,4 +12,8 @@ pub use manifest::{
 pub use store::{
     CacheStore, CacheStoreError, CacheStoreLimits, GcReport, PinnedGeneration, RecoveryReport,
     StagedAppend, StagedGeneration,
+};
+pub use sync::{
+    CONTINUITY_FINGERPRINT_WINDOW_BYTES, RemoteSyncTarget, SyncAction, SyncEngine, SyncError,
+    SyncGenerationReason, SyncOutcome,
 };
