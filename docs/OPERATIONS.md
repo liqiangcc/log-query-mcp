@@ -24,7 +24,7 @@ LOG_QUERY_MCP_CONFIG=/etc/log-query-mcp/config.json
 LOG_QUERY_MCP_BIND=127.0.0.1:8000
 ```
 
-HTTP endpoint 固定为 `/mcp`。当前没有单独 health endpoint，健康检查使用 systemd 状态、端口监听和 MCP initialize/tools 调用。
+HTTP endpoint 固定为 `/mcp`。当前没有独立 `/health` endpoint；发布包使用 `scripts/healthcheck.sh` 同时验证 systemd 状态和 MCP `initialize` 协议响应。
 
 ## 2. 常用命令
 
@@ -36,6 +36,12 @@ sudo systemctl start log-query-mcp.service
 journalctl -u log-query-mcp.service -f
 journalctl -u log-query-mcp.service -n 200 --no-pager
 ss -ltnp | grep ':8000'
+```
+
+标准健康检查：
+
+```bash
+sudo scripts/healthcheck.sh
 ```
 
 确认构建信息：
@@ -53,11 +59,11 @@ sha256sum /opt/log-query-mcp/bin/log-query-mcp /opt/log-query-mcp/bin/log-query-
 sudoedit /etc/log-query-mcp/config.json
 ```
 
-变更后重启：
+变更后重启并验证：
 
 ```bash
 sudo systemctl restart log-query-mcp.service
-sudo systemctl status --no-pager log-query-mcp.service
+sudo scripts/healthcheck.sh
 ```
 
 每次配置变更至少记录：变更人、时间、source/connection 变化、Secret/known_hosts 变化、权限变化、cache limit 变化、验证结果和回滚方案。
@@ -157,19 +163,35 @@ Tail/FromNow 覆盖不足时返回 `CACHE_SCOPE_EXCEEDED`；这不是“没有�
 
 ## 8. 运行健康检查
 
-```bash
-sudo systemctl is-active log-query-mcp.service
-ss -ltn | grep '127.0.0.1:8000'
-```
-
-协议初始化：
+标准命令：
 
 ```bash
-curl -sS http://127.0.0.1:8000/mcp \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ops-smoke","version":"0.1.0"}}}'
+sudo scripts/healthcheck.sh
 ```
+
+它要求：
+
+```text
+systemd active
+    +
+POST /mcp initialize 成功
+    +
+jsonrpc=2.0
+    +
+serverInfo.name = log-query-mcp
+    +
+无 JSON-RPC error
+```
+
+因此“进程仍在运行”不能单独证明服务健康。
+
+如 endpoint 不是默认值：
+
+```bash
+sudo LOG_QUERY_MCP_URL=http://127.0.0.1:9000/mcp scripts/healthcheck.sh
+```
+
+`LOG_QUERY_MCP_HEALTHCHECK_SKIP_SYSTEMD=1` 仅用于明确的容器/测试场景，不作为普通 systemd 生产部署的绕过方式。
 
 功能验证：
 
@@ -183,6 +205,7 @@ curl -sS http://127.0.0.1:8000/mcp \
 最低监控项：
 
 - systemd 服务/端口状态。
+- 周期性 MCP protocol initialize 外部探测。
 - 启动和配置失败。
 - `REMOTE_UNAVAILABLE` / auth / host-key / timeout 频率。
 - `CACHE_SCOPE_EXCEEDED` / cache quota 频率。
@@ -213,8 +236,8 @@ sudo scripts/upgrade.sh /path/to/log-query-mcp-vX.Y.Z-x86_64-unknown-linux-gnu.t
 3. 保留现有生产 config；
 4. 使用同目录 temporary file + fsync best-effort + rename 原子替换运行文件；
 5. daemon-reload/restart；
-6. 执行 health check；
-7. post-mutation 失败时自动调用 rollback。
+6. 执行标准 service + MCP protocol health check；
+7. post-mutation/restart/protocol health 失败时自动调用 rollback。
 
 升级前仍应保留上一版本 release artifact，并记录 backup path。
 
@@ -226,11 +249,11 @@ sudo scripts/upgrade.sh /path/to/log-query-mcp-vX.Y.Z-x86_64-unknown-linux-gnu.t
 sudo scripts/rollback.sh /var/lib/log-query-mcp/backups/<backup-dir>
 ```
 
-Rollback 恢复 upgrade 前的 binaries、BUILDINFO、config 和 systemd unit，然后 restart + health check。
+Rollback 恢复 upgrade 前的 binaries、BUILDINFO、config 和 systemd unit，然后 restart，并要求恢复后的 MCP protocol health check 成功。
 
 如果自动 rollback 也失败，**不要继续反复执行 upgrade**。保留 backup，检查磁盘、权限、systemd 和 config，再人工恢复。
 
-## 12. 发布包验证
+## 12. 发布包验证与 RC 检查
 
 ```bash
 sha256sum -c SHA256SUMS
@@ -240,7 +263,17 @@ bash scripts/validate_release_package.sh \
   SHA256SUMS
 ```
 
-Release workflow 在 tag 上验证 tag/version，构建 release binaries，运行 transport smoke、upgrade/rollback 演练，组装并验证 tarball。普通 branch/PR package job 只有 `contents: read`；只有 tag publish job 获得 `contents: write`。
+本地仓库 Final Candidate 检查：
+
+```bash
+bash scripts/rc_check.sh
+```
+
+它覆盖所有非 live-SSH 的仓库 Gate。真实 SSH/SFTP、双服务器 concurrency 和目标生产验收仍需单独执行。
+
+Release workflow 在 tag 上验证 tag/version，构建 release binaries，运行 transport smoke、protocol health 负向矩阵、upgrade/rollback 演练，组装并验证 tarball。普通 branch/PR package job 只有 `contents: read`；只有 tag publish job 获得 `contents: write`。
+
+Rust、Contracts、SSH Transport、Release 均支持手动 rerun。当前最新 candidate 的 Actions runner 启动被 GitHub Billing/Spending Limit 外部阻塞，跟踪于 Issue #23。
 
 ## 13. Remote 故障排查
 
@@ -253,6 +286,7 @@ Release workflow 在 tag 上验证 tag/version，构建 release binaries，运�
 | cache limit | global/per-source quota 或 pinned generation 占用 | 检查 retention/active refs/磁盘，再调整容量 |
 | rotation 后结果变化 | 新 generation 已创建 | 新查询读新 generation；旧 match_ref 在 TTL 内仍读旧 snapshot |
 | Remote 一台失败 | 单 connection 故障 | 其他独立 server/source 应保持可用；按 source 缩小排查 |
+| systemd active 但 healthcheck 失败 | MCP endpoint/协议初始化异常 | 查 journal、配置、bind；不得把仅进程存活当成健康 |
 
 通用错误仍遵守稳定 code + 去敏 message + retryable，不应返回绝对 remote/cache path、Secret、backtrace 或底层系统调用详情。
 
@@ -266,6 +300,7 @@ Release workflow 在 tag 上验证 tag/version，构建 release binaries，运�
 - unchanged probe：64 KiB。
 - local cache scan：0 remote bytes。
 - 300 次连续 range read：已验证 SFTP handle 确定关闭。
+- single/dual-server concurrency harness 已实现并接入真实 SSH Gate；最新 elapsed metrics 等待 Issue #23 解锁 runner 后记录。
 
 这些数字只用于回归对比，不是 SLA。详见 `M6_PERFORMANCE_BASELINE_V2.md`。
 
