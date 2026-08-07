@@ -9,6 +9,7 @@ MCP 主机要求：
 - Linux kernel `>= 5.6`。
 - 首批发布目标为 `x86_64-unknown-linux-gnu` glibc 环境。
 - systemd。
+- `curl`，用于标准 MCP protocol health check。
 - root 或 sudo 权限用于安装。
 - 默认只需要本机 loopback 访问 MCP endpoint。
 - Remote 模式需要到目标 SSH Server 的网络连通性和足够的本地 cache 空间。
@@ -39,7 +40,7 @@ sha256sum -c SHA256SUMS
 可进一步执行完整 package validator：
 
 ```bash
-# validate_release_package.sh 可从同版本源码仓库或已解包 release scripts 中取得。
+# validate_release_package.sh 可从同版本源码仓库取得。
 bash scripts/validate_release_package.sh \
   "log-query-mcp-v${VERSION}-${TARGET}.tar.gz" \
   SHA256SUMS
@@ -64,12 +65,14 @@ examples/log-query-mcp.v2.remote.json
 systemd/log-query-mcp.service
 scripts/install.sh
 scripts/uninstall.sh
+scripts/healthcheck.sh
 scripts/upgrade.sh
 scripts/rollback.sh
 docs/INSTALL.md
 docs/OPERATIONS.md
 docs/PRODUCTION_CHECKLIST.md
 docs/M6_PERFORMANCE_BASELINE_V2.md
+docs/M6_FINAL_BASELINE_V2.md
 docs/RELEASE_READINESS_V2.md
 BUILDINFO
 SHA256SUMS
@@ -229,6 +232,16 @@ sudo systemctl restart log-query-mcp.service
 
 ## 9. MCP 基础验证
 
+发布包标准健康检查：
+
+```bash
+sudo scripts/healthcheck.sh
+```
+
+它要求 systemd 服务 active，并向 `/mcp` 发送 MCP `initialize`，验证 `jsonrpc=2.0`、`serverInfo` 和 `log-query-mcp` 服务身份。如果进程存活但协议返回错误，健康检查会失败。
+
+人工协议验证：
+
 ```bash
 curl -sS http://127.0.0.1:8000/mcp \
   -H 'Content-Type: application/json' \
@@ -298,9 +311,12 @@ sudo scripts/upgrade.sh /path/to/log-query-mcp-vNEW-x86_64-unknown-linux-gnu.tar
 4. 正常升级保持现有 production config，不用示例覆盖；
 5. 使用同目录 temporary file + rename 原子替换 binaries/BUILDINFO/unit；
 6. daemon-reload + restart；
-7. health check 失败时自动 rollback。
+7. 执行 `healthcheck.sh`，同时验证 systemd 和 MCP protocol；
+8. restart 或 protocol health 失败时自动 rollback。
 
-升级完成后执行 MCP initialize、Local/Remote smoke query 和 `get_log_context`。
+如使用非默认 endpoint，可通过 `LOG_QUERY_MCP_URL` 调整 health-check URL。生产环境不建议关闭 systemd 检查；`LOG_QUERY_MCP_HEALTHCHECK_SKIP_SYSTEMD=1` 只用于明确的容器/测试场景。
+
+升级完成后还应执行 Local/Remote smoke query 和 `get_log_context`。
 
 ## 13. 回滚
 
@@ -310,7 +326,7 @@ sudo scripts/upgrade.sh /path/to/log-query-mcp-vNEW-x86_64-unknown-linux-gnu.tar
 sudo scripts/rollback.sh /var/lib/log-query-mcp/backups/<backup-dir>
 ```
 
-Rollback 恢复 upgrade 前的 binaries、BUILDINFO、config、systemd unit，然后 restart/health check。
+Rollback 恢复 upgrade 前的 binaries、BUILDINFO、config、systemd unit，然后 restart，并要求恢复后的服务通过相同的 MCP protocol health check。
 
 若自动 rollback 也失败，停止继续升级，保留 backup，人工检查磁盘、权限、systemd、配置和 Secret。
 
@@ -320,7 +336,17 @@ Host key rotation：先独立核对新 fingerprint，再替换 known_hosts，随
 
 Secret rotation：更新 Secret 来源后重启服务，使用一个已知 Remote query 验证。不要在诊断输出中打印 Secret 值。
 
-## 15. 卸载
+## 15. Release Candidate 本地检查
+
+当需要在 GitHub Actions 之外执行全部仓库本地 Gate：
+
+```bash
+bash scripts/rc_check.sh
+```
+
+该脚本执行 Contracts、rustfmt、Clippy、全量测试、release build、protocol health-check 负向矩阵、upgrade/rollback 演练、release package 生成与 validator。它不替代真实双 SSH live Gate或目标生产环境验收。
+
+## 16. 卸载
 
 保留配置：
 
