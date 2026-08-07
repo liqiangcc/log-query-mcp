@@ -46,6 +46,7 @@ for path in \
   docs/OPERATIONS.md \
   docs/PRODUCTION_CHECKLIST.md \
   docs/M6_PERFORMANCE_BASELINE_V2.md \
+  docs/M6_FINAL_BASELINE_V2.md \
   docs/RELEASE_READINESS_V2.md \
   BUILDINFO \
   SHA256SUMS; do
