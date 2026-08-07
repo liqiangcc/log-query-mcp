@@ -303,7 +303,7 @@ impl CacheStore {
     }
 
     pub fn collect_garbage(&self) -> Result<GcReport, CacheStoreError> {
-        let mut state = self.lock_state()?;
+        let state = self.lock_state()?;
         let now = now_unix_millis()?;
         let mut manifests = HashMap::new();
         let mut entries = Vec::new();
