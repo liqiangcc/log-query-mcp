@@ -124,9 +124,9 @@ async fn real_sftp_symlinks_cannot_escape_the_admin_log_boundary() {
         .expect_err("explicit remote symlink must be rejected");
     assert!(matches!(
         error,
-        StatefulQueryError::SourceRegistry(SourceRegistryError::RemoteExplicitFileNotRegular {
-            ..
-        })
+        StatefulQueryError::SourceRegistry(
+            SourceRegistryError::RemoteExplicitFileNotRegular { .. }
+        )
     ));
     assert_eq!(ToolError::from(error).code, ToolErrorCode::SyncFailed);
 
