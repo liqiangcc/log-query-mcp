@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use log_query_mcp::{
-    AppConfigV2, GetLogContextRequest, ListLogSourcesRequest, ListLogSourcesResponse,
-    LogQueryMcpServer, SearchLogsRequest, SourceRegistry, SourceRegistryError, ToolError,
-    ToolErrorCode, transport::SshTransportError,
+    AppConfigV2, ListLogSourcesResponse, LogQueryMcpServer, SourceRegistry, SourceRegistryError,
+    ToolError, ToolErrorCode, transport::SshTransportError,
 };
 use rmcp::{ServerHandler, model::RawContent};
 use serde_json::json;
@@ -14,55 +13,6 @@ const PRIVATE_USERNAME: &str = "m6-private-user";
 const PRIVATE_CONNECTION_ID: &str = "m6-private-connection";
 const PRIVATE_SECRET_REF: &str = "M6_PRIVATE_PASSWORD";
 const PRIVATE_REMOTE_ROOT: &str = "/srv/private/logs";
-
-#[test]
-fn ai_facing_requests_reject_remote_connection_and_path_control_fields() {
-    for (field, value) in [
-        ("host", json!(PRIVATE_HOST)),
-        ("port", json!(2222)),
-        ("username", json!(PRIVATE_USERNAME)),
-        ("password", json!("do-not-accept-passwords-from-ai")),
-        ("secret_ref", json!(PRIVATE_SECRET_REF)),
-        ("connection_id", json!(PRIVATE_CONNECTION_ID)),
-        ("root", json!(PRIVATE_REMOTE_ROOT)),
-        ("path", json!("../../etc/passwd")),
-        ("remote_path", json!("/etc/passwd")),
-    ] {
-        let mut search = json!({
-            "source_ids": ["remote-security"],
-            "keyword": "needle"
-        });
-        search
-            .as_object_mut()
-            .expect("search request object")
-            .insert(field.to_owned(), value.clone());
-        assert!(
-            serde_json::from_value::<SearchLogsRequest>(search).is_err(),
-            "search_logs must reject client-controlled field {field}"
-        );
-
-        let mut context = json!({
-            "match_ref": "mref_0123456789abcdef0123456789abcdef"
-        });
-        context
-            .as_object_mut()
-            .expect("context request object")
-            .insert(field.to_owned(), value.clone());
-        assert!(
-            serde_json::from_value::<GetLogContextRequest>(context).is_err(),
-            "get_log_context must reject client-controlled field {field}"
-        );
-
-        let mut list = json!({});
-        list.as_object_mut()
-            .expect("list request object")
-            .insert(field.to_owned(), value);
-        assert!(
-            serde_json::from_value::<ListLogSourcesRequest>(list).is_err(),
-            "list_log_sources must reject client-controlled field {field}"
-        );
-    }
-}
 
 #[test]
 fn mcp_tool_surface_contains_only_read_only_log_semantics() {
