@@ -22,9 +22,10 @@ fn externally_deleted_active_generation_fails_closed_and_recovery_rejects_store(
     let generation_path = only_generation_file(temp.path());
     fs::remove_file(&generation_path).expect("delete active generation externally");
 
-    let error = store
-        .pin_current_generation(SOURCE_ID, REMOTE_ID)
-        .expect_err("missing active generation must not be treated as a cache miss");
+    let error = match store.pin_current_generation(SOURCE_ID, REMOTE_ID) {
+        Ok(_) => panic!("missing active generation must not be treated as a cache miss"),
+        Err(error) => error,
+    };
     assert!(matches!(error, CacheStoreError::Io(_)));
     assert_cache_corrupted_wire_error(error, temp.path());
 
@@ -34,14 +35,13 @@ fn externally_deleted_active_generation_fails_closed_and_recovery_rejects_store(
         .expect("manifest remains published");
     assert!(manifest.current_generation.is_some());
 
-    let restart_error = CacheStore::open(temp.path(), limits())
-        .expect_err("restart recovery must reject a manifest that references missing data");
+    let restart_error = match CacheStore::open(temp.path(), limits()) {
+        Ok(_) => panic!("restart recovery must reject a manifest that references missing data"),
+        Err(error) => error,
+    };
     assert!(matches!(restart_error, CacheStoreError::Io(_)));
-    assert!(
-        !restart_error
-            .to_string()
-            .contains(&temp.path().to_string_lossy().into_owned())
-    );
+    let cache_root = temp.path().to_string_lossy();
+    assert!(!restart_error.to_string().contains(cache_root.as_ref()));
 }
 
 #[test]
@@ -58,17 +58,20 @@ fn externally_truncated_active_generation_fails_closed_as_cache_corruption() {
         .set_len(1)
         .expect("truncate active generation externally");
 
-    let error = store
-        .pin_current_generation(SOURCE_ID, REMOTE_ID)
-        .expect_err("truncated active generation must not be served");
+    let error = match store.pin_current_generation(SOURCE_ID, REMOTE_ID) {
+        Ok(_) => panic!("truncated active generation must not be served"),
+        Err(error) => error,
+    };
     assert!(matches!(
         error,
         CacheStoreError::GenerationLengthMismatch { .. }
     ));
     assert_cache_corrupted_wire_error(error, temp.path());
 
-    let restart_error = CacheStore::open(temp.path(), limits())
-        .expect_err("restart recovery must reject truncated generation data");
+    let restart_error = match CacheStore::open(temp.path(), limits()) {
+        Ok(_) => panic!("restart recovery must reject truncated generation data"),
+        Err(error) => error,
+    };
     assert!(matches!(
         restart_error,
         CacheStoreError::GenerationLengthMismatch { .. }
@@ -148,6 +151,7 @@ fn assert_cache_corrupted_wire_error(error: CacheStoreError, root: &Path) {
     assert!(!json.contains(internal_source));
     assert!(!json.contains(internal_file));
     assert!(!json.contains(REMOTE_ID));
-    assert!(!json.contains(&root.to_string_lossy().into_owned()));
+    let cache_root = root.to_string_lossy();
+    assert!(!json.contains(cache_root.as_ref()));
     assert!(!json.contains("backtrace"));
 }
