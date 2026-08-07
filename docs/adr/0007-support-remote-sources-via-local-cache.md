@@ -1,6 +1,6 @@
 # ADR-0007：Remote Source 通过本地缓存接入统一查询引擎
 
-- 状态：Proposed for v2
+- 状态：Accepted for v2
 - 日期：2026-08-07
 
 ## 决策
