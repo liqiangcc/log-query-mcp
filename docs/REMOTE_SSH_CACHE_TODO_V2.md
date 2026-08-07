@@ -1,9 +1,10 @@
 # Log Query MCP v2 Remote SSH/Cache 实施 TODO
 
 > 状态：Repository implementation complete / Final RC CI blocked by GitHub Actions Billing  
-> 日期：2026-08-07  
+> 日期：2026-08-08  
 > 总方案：[`REMOTE_SSH_CACHE_DESIGN_V2.md`](./REMOTE_SSH_CACHE_DESIGN_V2.md)  
-> 最终基线：[`M6_FINAL_BASELINE_V2.md`](./M6_FINAL_BASELINE_V2.md)
+> 最终基线：[`M6_FINAL_BASELINE_V2.md`](./M6_FINAL_BASELINE_V2.md)  
+> Draft PR：#25
 
 ## 0. 冻结原则
 
@@ -165,8 +166,10 @@ Concurrency：
 - [x] restart / health check。
 - [x] automatic rollback after post-mutation failure。
 - [x] explicit `rollback.sh`。
+- [x] rollback preserves backed-up owner/group so `root:log-query-mcp` config ownership is not lost。
 - [x] isolated test covers success / explicit rollback / restart failure / corrupt package / tar input。
-- [x] isolated upgrade/rollback test executed locally and passed。
+- [x] isolated test validates config `0640` and unit `0644` metadata restoration。
+- [x] isolated upgrade/rollback test executed locally after final hardening and passed。
 - [x] package validator valid/corrupt cases executed locally and behaved fail-closed。
 
 Release contract：[`RELEASE_READINESS_V2.md`](./RELEASE_READINESS_V2.md)
@@ -175,7 +178,7 @@ Release contract：[`RELEASE_READINESS_V2.md`](./RELEASE_READINESS_V2.md)
 
 历史 M1～M6 relevant Rust / Contracts / SSH / Performance Gates 已经有成功证据。
 
-最新 candidate 重新验证时，GitHub Actions 在 runner 启动前返回：
+2026-08-08 再次重跑 candidate Gate，GitHub Actions 仍在 runner 启动前返回：
 
 ```text
 The job was not started because recent account payments have failed
@@ -187,6 +190,7 @@ or your spending limit needs to be increased.
 ```text
 repository implementation       COMPLETE
 local release-script validation PASS
+Draft PR                        OPEN (#25)
 latest candidate Actions        BLOCKED by GitHub Billing
 RC Ready                        NO
 ```
@@ -200,16 +204,14 @@ Billing 恢复后只剩验证动作，不再需要设计/实现新的 v2 功能�
 - [ ] 如相关性能代码未变化，可引用 large-file run；否则重跑 M6 Performance。
 - [ ] 确认没有 unexplained critical failure。
 
-## 11. 不属于“仓库剩余实现”的后续动作
+## 11. 发布/环境动作
 
-以下是独立发布/环境动作，不应在本 TODO 中被自动执行：
-
-- [ ] 创建 PR（需单独授权）。
-- [ ] 合并 main（需单独授权）。
-- [ ] 创建 `v{version}` tag（需单独授权，且 Final Gate 必须先绿）。
-- [ ] 发布 GitHub Release（tag workflow，需 Final Gate）。
-- [ ] 目标生产服务器 INSTALL/Remote/AI-client/upgrade/rollback 人工验收。
+- [x] 创建 Draft PR #25。
+- [ ] 将 PR 标记 Ready / 合并 main — **BLOCKED until Final Gate green**。
+- [ ] 创建 `v{version}` tag — **BLOCKED until Final Gate green**。
+- [ ] 发布 GitHub Release — 由 tag workflow 执行，**BLOCKED until Final Gate green**。
+- [ ] 目标生产服务器 INSTALL/Remote/AI-client/upgrade/rollback 人工验收 — 需要实际目标环境。
 
 ## 12. 最终判断
 
-v2 的仓库实现工作已经完成。当前唯一阻止“RC Ready / 正式 Release”的事项是 **GitHub Actions Billing 导致最新 candidate 无法执行 Final Gate**，以及随后需要明确授权的 PR/merge/tag/release/生产部署动作。
+v2 的仓库实现工作已经完成，并已进入 Draft PR 审阅状态。当前唯一阻止 `RC Ready → merge → tag → Release` 的仓库外事项是 **GitHub Actions Billing 导致最新 candidate 无法执行 Final Gate**。目标生产服务器验收则天然需要实际部署环境，不能由仓库内测试替代。
