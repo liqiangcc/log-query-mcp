@@ -88,8 +88,9 @@ fi
 [[ -f examples/log-query-mcp.v1.json ]] || die "missing v1 example config"
 [[ -f examples/log-query-mcp.v2.remote.json ]] || die "missing v2 remote example config"
 [[ -f systemd/log-query-mcp.service ]] || die "missing systemd unit"
-[[ -f scripts/install.sh ]] || die "missing install script"
-[[ -f scripts/uninstall.sh ]] || die "missing uninstall script"
+for script in install.sh uninstall.sh upgrade.sh rollback.sh; do
+  [[ -f "scripts/${script}" ]] || die "missing ${script}"
+done
 
 rm -rf "${out_dir:?}/${package_name}"
 mkdir -p "${out_dir}/${package_name}/bin"
@@ -99,16 +100,23 @@ install -m 0755 "${bin_dir}/log-query-mcp-stdio" "${out_dir}/${package_name}/bin
 install -D -m 0644 examples/log-query-mcp.v1.json "${out_dir}/${package_name}/examples/log-query-mcp.v1.json"
 install -D -m 0644 examples/log-query-mcp.v2.remote.json "${out_dir}/${package_name}/examples/log-query-mcp.v2.remote.json"
 install -D -m 0644 systemd/log-query-mcp.service "${out_dir}/${package_name}/systemd/log-query-mcp.service"
-install -D -m 0755 scripts/install.sh "${out_dir}/${package_name}/scripts/install.sh"
-install -D -m 0755 scripts/uninstall.sh "${out_dir}/${package_name}/scripts/uninstall.sh"
+for script in install.sh uninstall.sh upgrade.sh rollback.sh; do
+  install -D -m 0755 "scripts/${script}" "${out_dir}/${package_name}/scripts/${script}"
+done
+install -D -m 0644 README.md "${out_dir}/${package_name}/README.md"
 
-for doc in docs/INSTALL.md docs/OPERATIONS.md docs/PRODUCTION_CHECKLIST.md; do
+for doc in \
+  docs/INSTALL.md \
+  docs/OPERATIONS.md \
+  docs/PRODUCTION_CHECKLIST.md \
+  docs/M6_PERFORMANCE_BASELINE_V2.md \
+  docs/RELEASE_READINESS_V2.md; do
   if [[ -f "${doc}" ]]; then
     install -D -m 0644 "${doc}" "${out_dir}/${package_name}/${doc}"
   elif [[ "${require_docs}" -eq 1 ]]; then
     die "missing required production doc ${doc}"
   else
-    echo "package_release: warning: ${doc} not present; PR E will add production docs" >&2
+    echo "package_release: warning: ${doc} not present" >&2
   fi
 done
 
