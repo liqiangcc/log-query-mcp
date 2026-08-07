@@ -1,0 +1,40 @@
+name: M4 Target Harden Once
+
+on:
+  push:
+    branches:
+      - "feat/v2-m1-backend-config"
+    paths:
+      - ".github/workflows/m4-target-harden-once.yml"
+      - ".github/scripts/m4_target_harden.py"
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-commit:
+    if: github.ref == 'refs/heads/feat/v2-m1-backend-config'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out current branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/v2-m1-backend-config
+
+      - name: Harden target construction and verify
+        run: |
+          python .github/scripts/m4_target_harden.py
+          cargo fmt --all
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked cache::sync::
+          git diff --check
+          test "$(git diff --name-only)" = "src/cache/sync.rs"
+
+      - name: Commit verified target hardening
+        run: |
+          git add -- src/cache/sync.rs
+          test "$(git diff --cached --name-only)" = "src/cache/sync.rs"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(cache): derive remote sync paths from configured root'
+          git push origin HEAD:feat/v2-m1-backend-config
