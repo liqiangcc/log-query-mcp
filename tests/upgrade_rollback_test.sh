@@ -54,8 +54,11 @@ reset_old_install() {
   write_binary "${install_root}/bin/log-query-mcp" old
   write_binary "${install_root}/bin/log-query-mcp-stdio" old-stdio
   printf 'version=old\n' >"${install_root}/BUILDINFO"
+  chmod 0644 "${install_root}/BUILDINFO"
   printf '{"sentinel":"keep-me"}\n' >"${config_path}"
+  chmod 0640 "${config_path}"
   printf 'old-unit\n' >"${unit_path}"
+  chmod 0644 "${unit_path}"
   echo active >"${state_file}"
   rm -f "${fail_next_restart}"
 }
@@ -101,16 +104,19 @@ make_package "${package_root}"
 bash "${repo_root}/scripts/upgrade.sh" "${package_root}"
 [[ "$("${install_root}/bin/log-query-mcp")" == new ]]
 [[ "$(cat "${config_path}")" == '{"sentinel":"keep-me"}' ]]
+[[ "$(stat -c '%a' "${config_path}")" == 640 ]]
 [[ "$(cat "${unit_path}")" == new-unit ]]
 [[ "$(cat "${state_file}")" == active ]]
 mapfile -t backups < <(find "${backup_root}" -mindepth 1 -maxdepth 1 -type d | sort)
 [[ "${#backups[@]}" -eq 1 ]]
 
-# 2. Explicit rollback restores the exact pre-upgrade binary/config/unit state.
+# 2. Explicit rollback restores the exact pre-upgrade binary/config/unit state and file modes.
 bash "${repo_root}/scripts/rollback.sh" "${backups[0]}"
 [[ "$("${install_root}/bin/log-query-mcp")" == old ]]
 [[ "$(cat "${config_path}")" == '{"sentinel":"keep-me"}' ]]
+[[ "$(stat -c '%a' "${config_path}")" == 640 ]]
 [[ "$(cat "${unit_path}")" == old-unit ]]
+[[ "$(stat -c '%a' "${unit_path}")" == 644 ]]
 [[ "$(cat "${state_file}")" == active ]]
 
 # 3. A failed post-upgrade restart triggers automatic rollback.
@@ -123,6 +129,7 @@ if bash "${repo_root}/scripts/upgrade.sh" "${package_root}"; then
 fi
 [[ "$("${install_root}/bin/log-query-mcp")" == old ]]
 [[ "$(cat "${config_path}")" == '{"sentinel":"keep-me"}' ]]
+[[ "$(stat -c '%a' "${config_path}")" == 640 ]]
 [[ "$(cat "${unit_path}")" == old-unit ]]
 [[ "$(cat "${state_file}")" == active ]]
 
@@ -146,5 +153,6 @@ tar -C "${tmp}" -czf "${archive}" "$(basename "${package_root}")"
 bash "${repo_root}/scripts/upgrade.sh" "${archive}"
 [[ "$("${install_root}/bin/log-query-mcp")" == new ]]
 [[ "$(cat "${config_path}")" == '{"sentinel":"keep-me"}' ]]
+[[ "$(stat -c '%a' "${config_path}")" == 640 ]]
 
 echo "upgrade_rollback_test: all scenarios passed"
