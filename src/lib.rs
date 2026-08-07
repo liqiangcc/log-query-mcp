@@ -7,6 +7,7 @@ pub mod config_v2;
 pub mod response_limit;
 mod scan_executor;
 mod scanner;
+pub mod secret;
 mod time_filter;
 pub mod tool_error;
 
@@ -56,6 +57,7 @@ pub use scanner::{
     MAX_SCAN_KEYWORD_CHARS, MAX_SCAN_RESULTS, ScanError, ScanLimits, ScanMatch, ScanOutcome,
     ScanPosition, ScanRequest, ScanStopReason, scan_reader,
 };
+pub use secret::{EnvSecretResolver, SecretResolveError, SecretResolver, SecretValue};
 pub use time_filter::{
     MAX_TIMESTAMP_FORMAT_CHARS, MAX_TIMESTAMP_PREFIX_BYTES, TimeFilterDecision, TimeFilterError,
     TimeRange, TimestampObservation, TimestampParser,
