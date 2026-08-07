@@ -39,15 +39,17 @@ jobs:
           sudo mkdir -p /home/logreader/.ssh /home/logreader/logs
           echo 'hello world from log-query-mcp ssh transport' | sudo tee /home/logreader/logs/application.log >/dev/null
           echo 'denied' | sudo tee /home/logreader/logs/denied.log >/dev/null
+          sudo dd if=/dev/zero of=/home/logreader/logs/large.log bs=1M count=8 status=none
           sudo mkfifo /home/logreader/logs/blocking.pipe
           sudo chown -R logreader:logreader /home/logreader/.ssh
           sudo chown -R logreader:logreader /home/logreader/logs
           sudo chown root:root /home/logreader/logs/denied.log
           sudo chmod 700 /home/logreader/.ssh
-          sudo chmod 444 /home/logreader/logs/application.log
+          sudo chmod 444 /home/logreader/logs/application.log /home/logreader/logs/large.log
           sudo chmod 000 /home/logreader/logs/denied.log
 
           ssh-keygen -q -t ed25519 -N 'test-passphrase' -f /tmp/log-query-mcp-ssh-poc/client_key
+          ssh-keygen -q -t ed25519 -N 'test-passphrase' -f /tmp/log-query-mcp-ssh-poc/wrong_client_key
           sudo cp /tmp/log-query-mcp-ssh-poc/client_key.pub /home/logreader/.ssh/authorized_keys
           sudo chown logreader:logreader /home/logreader/.ssh/authorized_keys
           sudo chmod 600 /home/logreader/.ssh/authorized_keys
@@ -78,6 +80,9 @@ jobs:
           WRONG_KEY=$(cut -d' ' -f1,2 /tmp/log-query-mcp-ssh-poc/wrong_host_key.pub)
           printf '[127.0.0.1]:2222 %s\n' "$WRONG_KEY" > /tmp/log-query-mcp-ssh-poc/bad_known_hosts
 
+          SERVER_KEY=$(sudo cut -d' ' -f1,2 /tmp/log-query-mcp-ssh-poc/ssh_host_ed25519_key.pub)
+          printf '[127.0.0.1]:2224 %s\n' "$SERVER_KEY" > /tmp/log-query-mcp-ssh-poc/proxy_known_hosts
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -94,16 +99,21 @@ jobs:
 
       - name: Verify production SSH/SFTP transport
         env:
+          M2_FIXTURE_DIR: /tmp/log-query-mcp-ssh-poc
           M2_SSH_PORT: "2222"
           M2_STALL_PORT: "2223"
+          M2_DROP_PORT: "2224"
           M2_SSH_PASSWORD: test-password
           M2_WRONG_PASSWORD: definitely-wrong
           M2_KEY_PASSPHRASE: test-passphrase
           M2_SSH_KEY_FILE: /tmp/log-query-mcp-ssh-poc/client_key
+          M2_WRONG_SSH_KEY_FILE: /tmp/log-query-mcp-ssh-poc/wrong_client_key
           M2_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
           M2_BAD_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/bad_known_hosts
+          M2_PROXY_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/proxy_known_hosts
           M2_REMOTE_DIR: /home/logreader/logs
           M2_REMOTE_FILE: /home/logreader/logs/application.log
+          M2_LARGE_FILE: /home/logreader/logs/large.log
           M2_DENIED_FILE: /home/logreader/logs/denied.log
           M2_FIFO_FILE: /home/logreader/logs/blocking.pipe
         run: |
