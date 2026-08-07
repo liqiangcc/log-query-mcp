@@ -1,11 +1,16 @@
-use std::{collections::HashSet, fmt, path::PathBuf};
+use std::{
+    collections::HashSet,
+    fmt,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    AppConfig, CONFIG_VERSION, ConfigValidationError, DirectoryRule, Encoding, LimitsConfig,
+    AppConfig, CONFIG_VERSION, ConfigValidationError, DirectoryRule, Encoding, LimitsConfigV2,
     LogSourceConfig, TimestampRule,
+    config_limits_v2::LimitsConfigV2ValidationError,
 };
 
 pub const CONFIG_VERSION_V2: u32 = 2;
@@ -29,7 +34,7 @@ pub struct AppConfigV2 {
     #[serde(default)]
     pub cache: Option<CacheConfig>,
     #[serde(default)]
-    pub limits: LimitsConfig,
+    pub limits: LimitsConfigV2,
 }
 
 impl AppConfigV2 {
@@ -52,6 +57,23 @@ impl AppConfigV2 {
 
         if let Err(error) = self.as_v1_shape().validate() {
             append_v1_issues(&mut issues, &error);
+        }
+        if let Err(error) = self.limits.validate_remote() {
+            let (field, message) = match error {
+                LimitsConfigV2ValidationError::ConcurrentSshConnections => (
+                    "limits.max_concurrent_ssh_connections",
+                    "must be between 1 and 64",
+                ),
+                LimitsConfigV2ValidationError::SyncBytesPerQuery => (
+                    "limits.max_sync_bytes_per_query",
+                    "must be between 1 and 64 GiB",
+                ),
+                LimitsConfigV2ValidationError::RemoteFilesPerSource => (
+                    "limits.max_remote_files_per_source",
+                    "must be between 1 and 10000",
+                ),
+            };
+            push_issue(&mut issues, field, message);
         }
 
         if self.connections.len() > MAX_CONNECTIONS {
@@ -159,7 +181,7 @@ impl AppConfigV2 {
                 .iter()
                 .map(LogSourceConfigV2::to_v1_config)
                 .collect(),
-            limits: self.limits.clone(),
+            limits: self.limits.local_limits(),
         }
     }
 }
@@ -202,6 +224,13 @@ impl SshConnectionConfig {
                 issues,
                 format!("{prefix}.host"),
                 "must be a non-empty host name or address without whitespace or '/'",
+            );
+        }
+        if self.port == 0 {
+            push_issue(
+                issues,
+                format!("{prefix}.port"),
+                "must be between 1 and 65535",
             );
         }
         if self.username.is_empty()
@@ -626,7 +655,7 @@ fn validate_secret_ref(
     }
 }
 
-fn valid_local_path(path: &PathBuf) -> bool {
+fn valid_local_path(path: &Path) -> bool {
     let rendered = path.to_string_lossy();
     !rendered.is_empty() && rendered.len() <= MAX_PATH_CHARS && !rendered.contains('\0')
 }
@@ -649,4 +678,56 @@ const fn default_keepalive_seconds() -> Option<u64> {
 
 const fn default_true() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const VALID_LOCAL: &str = include_str!("../tests/contracts/v2/valid/local-only.json");
+    const VALID_SSH_PASSWORD: &str =
+        include_str!("../tests/contracts/v2/valid/ssh-password-tail.json");
+    const INVALID_UNKNOWN_CONNECTION: &str =
+        include_str!("../tests/contracts/v2/invalid/unknown-connection.json");
+
+    #[test]
+    fn parses_contract_local_fixture() {
+        assert!(AppConfigV2::from_json_str(VALID_LOCAL).is_ok());
+    }
+
+    #[test]
+    fn parses_contract_ssh_fixture() {
+        assert!(AppConfigV2::from_json_str(VALID_SSH_PASSWORD).is_ok());
+    }
+
+    #[test]
+    fn rejects_contract_unknown_connection_fixture() {
+        assert!(AppConfigV2::from_json_str(INVALID_UNKNOWN_CONNECTION).is_err());
+    }
+
+    #[test]
+    fn parses_remote_specific_limits() {
+        let input = r#"{
+            "version": 2,
+            "sources": [{
+                "source_id": "local",
+                "name": "local",
+                "service": "local",
+                "environment": "test",
+                "backend": {"type": "local"},
+                "root": "/var/log/local",
+                "files": ["application.log"]
+            }],
+            "limits": {
+                "max_concurrent_ssh_connections": 8,
+                "max_sync_bytes_per_query": 1048576,
+                "max_remote_files_per_source": 100
+            }
+        }"#;
+
+        let config = AppConfigV2::from_json_str(input).expect("v2 limits should parse");
+        assert_eq!(config.limits.max_concurrent_ssh_connections, 8);
+        assert_eq!(config.limits.max_sync_bytes_per_query, 1_048_576);
+        assert_eq!(config.limits.max_remote_files_per_source, 100);
+    }
 }
