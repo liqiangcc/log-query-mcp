@@ -1,9 +1,10 @@
 # Log Query MCP v2 Remote SSH/Cache 实施 TODO
 
-> 状态：Ready for implementation planning  
+> 状态：M0 complete / Ready for M1  
 > 日期：2026-08-07  
 > 总方案：[`REMOTE_SSH_CACHE_DESIGN_V2.md`](./REMOTE_SSH_CACHE_DESIGN_V2.md)  
-> 配置契约：[`CONFIG_SCHEMA_V2.md`](./CONFIG_SCHEMA_V2.md)
+> 配置契约：[`CONFIG_SCHEMA_V2.md`](./CONFIG_SCHEMA_V2.md)  
+> SSH/SFTP 预研：[`SSH_SFTP_TECHNICAL_RESEARCH_V2.md`](./SSH_SFTP_TECHNICAL_RESEARCH_V2.md)
 
 ## 0. 实施原则
 
@@ -28,43 +29,48 @@
 - [x] ADR-0008：只使用 SSH/SFTP，不提供 Remote Exec。
 - [x] ADR-0009：Cache Generation + Query Snapshot。
 - [x] ADR-0010：On-query Sync + 显式 Bootstrap/Coverage。
-- [ ] ADR 评审后将状态从 `Proposed for v2` 更新为 `Accepted for v2`。
+- [x] ADR-0011：Remote Transport 使用 `russh` + `russh-sftp`。
+- [x] ADR-0007～0011 状态冻结为 `Accepted for v2`。
 
 ## M0.2 Schema
 
 - [x] 增加 `schemas/log-query-mcp-config-v2.schema.json`。
 - [x] 增加 `schemas/tool-error-v2.schema.json`。
 - [x] 增加 `docs/CONFIG_SCHEMA_V2.md`。
-- [ ] 为 v2 Schema 增加合法/非法 fixture。
-- [ ] 扩展 `scripts/validate_contracts.py` 验证 v1 + v2。
-- [ ] Contracts CI 同时验证 v1/v2 Schema。
+- [x] 为 v2 Schema 增加合法/非法 fixture。
+- [x] 扩展 `scripts/validate_contracts.py` 验证 v1 + v2。
+- [x] Contracts CI 同时验证 v1/v2 Schema。
+- [x] Contracts CI 实际运行通过。
 
 ## M0.3 SSH 技术预研
 
 在写业务代码前完成并记录：
 
-- [ ] Rust SSH/SFTP 客户端库选型。
-- [ ] 验证 Password Authentication。
-- [ ] 验证 Private Key Authentication。
-- [ ] 验证 encrypted private key + passphrase。
-- [ ] 验证 `known_hosts` / Host Key Verification。
-- [ ] 验证 SFTP `stat/lstat/readdir/open/seek/read`。
-- [ ] 验证连接超时、读超时、断线取消行为。
-- [ ] 验证 Tokio async 集成方式，确认是否存在 blocking API。
-- [ ] 验证服务器断开后资源能可靠释放。
-- [ ] 记录依赖 License、维护状态、平台兼容性和 unsafe 边界。
+- [x] Rust SSH/SFTP 客户端库选型：`russh` + `russh-sftp`。
+- [x] 验证 Password Authentication。
+- [x] 验证 Private Key Authentication。
+- [x] 验证 encrypted private key + passphrase。
+- [x] 验证 `known_hosts` / Host Key Verification fail-closed。
+- [x] 验证 SFTP `stat/lstat/readdir/open/seek/read`。
+- [x] 验证 SSH connect/handshake timeout；operation timeout 统一采用应用层 `tokio::time::timeout`。
+- [x] 验证 Tokio async 集成方式，并识别本地 key/known_hosts 文件 I/O 的 blocking 边界。
+- [x] 记录依赖 License、维护状态、平台兼容性和 unsafe 边界。
+- [x] 建立隔离的 `research/ssh-sftp-poc` 和 `SSH Research` GitHub Actions 实机测试。
+- [ ] 验证 read 中途断线、operation cancellation 和服务器断开后的资源释放；该项属于 M2 Transport 故障注入验收，不阻塞 M1。
 
 ### M0 Gate
 
-只有以下条件全部满足才能进入 M1：
-
 ```text
-ADR 决策无冲突
-v2 Schema 可机器验证
-SSH 技术路径可行
-不需要 Remote Exec
-不破坏 unsafe_code = forbid 的项目原则
+ADR 决策无冲突                    PASS
+v2 Schema 可机器验证              PASS
+SSH 技术路径可行                  PASS
+不需要 Remote Exec                PASS
+项目自身 unsafe_code = forbid     PASS
 ```
+
+**M0 Gate 已通过，可以进入 M1。**
+
+说明：M1 不接入 Remote/SSH 生产代码，只先完成配置版本路由与 Local Backend/Snapshot 抽象。read 中途断线、取消传播和连接资源释放继续作为 M2 的强制验收项。
 
 ---
 
@@ -193,6 +199,8 @@ scp upload
 - [ ] 网络断开。
 - [ ] 超时。
 - [ ] 大文件 range read。
+- [ ] read 中途断线后连接标记为 Broken，不进入复用池。
+- [ ] operation timeout/cancellation 后资源可靠释放。
 
 ### M2 Gate
 
@@ -529,9 +537,9 @@ v2 不得发布，除非全部满足：
 严格按照：
 
 ```text
-M0 Contract
+M0 Contract                  DONE
  ↓
-M1 Backend abstraction
+M1 Backend abstraction       NEXT
  ↓
 M2 SSH Transport
  ↓
