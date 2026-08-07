@@ -196,7 +196,7 @@ async fn remote_query_end_to_end_preserves_snapshots_and_context() {
     let second = query_service
         .search(
             StatefulQueryRequest::new(vec!["remote-query".to_owned()], "MATCH")
-                .with_max_results(10)
+                .with_max_results(1)
                 .with_cursor(cursor),
         )
         .await
