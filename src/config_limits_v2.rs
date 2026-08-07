@@ -116,8 +116,10 @@ mod tests {
 
     #[test]
     fn rejects_remote_limit_above_hard_cap() {
-        let mut limits = LimitsConfigV2::default();
-        limits.max_concurrent_ssh_connections = HARD_MAX_CONCURRENT_SSH_CONNECTIONS + 1;
+        let limits = LimitsConfigV2 {
+            max_concurrent_ssh_connections: HARD_MAX_CONCURRENT_SSH_CONNECTIONS + 1,
+            ..LimitsConfigV2::default()
+        };
         assert_eq!(
             limits.validate_remote(),
             Err(LimitsConfigV2ValidationError::ConcurrentSshConnections)
