@@ -258,11 +258,12 @@ async fn permission_and_missing_file_fail_without_exposing_paths() {
         .await
         .expect_err("permission denied file must fail");
     assert!(!error.to_string().contains(&denied));
+    drop(reader);
 
     let reader = manager
         .open_reader("good")
         .await
-        .expect("new reader should connect");
+        .expect("new reader should connect after broken reader is dropped");
     let missing = format!("{}/missing.log", required("M2_REMOTE_DIR"));
     let error = reader
         .stat(&missing)
