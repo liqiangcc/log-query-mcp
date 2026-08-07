@@ -160,11 +160,8 @@ async fn one_local_mcp_queries_two_independent_servers_and_local_source() {
 
     let dual = query
         .search(
-            StatefulQueryRequest::new(
-                vec!["remote-a".to_owned(), "remote-b".to_owned()],
-                "DUAL",
-            )
-            .with_max_results(10),
+            StatefulQueryRequest::new(vec!["remote-a".to_owned(), "remote-b".to_owned()], "DUAL")
+                .with_max_results(10),
         )
         .await
         .expect("two-server query");
@@ -177,8 +174,16 @@ async fn one_local_mcp_queries_two_independent_servers_and_local_source() {
         BTreeSet::from(["remote-a", "remote-b"])
     );
     assert_ne!(dual.results[0].file_id, dual.results[1].file_id);
-    assert!(dual.results.iter().any(|result| result.content == "DUAL server-a"));
-    assert!(dual.results.iter().any(|result| result.content == "DUAL server-b"));
+    assert!(
+        dual.results
+            .iter()
+            .any(|result| result.content == "DUAL server-a")
+    );
+    assert!(
+        dual.results
+            .iter()
+            .any(|result| result.content == "DUAL server-b")
+    );
 
     let mixed = query
         .search(
@@ -231,11 +236,7 @@ async fn global_ssh_semaphore_is_shared_across_independent_connections() {
         .await
         .expect("Server B should connect after the global permit is released");
     let bytes = reader_b
-        .read_range(
-            &format!("{}/multi.log", required("M6_REMOTE_B_DIR")),
-            0,
-            4,
-        )
+        .read_range(&format!("{}/multi.log", required("M6_REMOTE_B_DIR")), 0, 4)
         .await
         .expect("read Server B after permit release");
     assert_eq!(&bytes, b"DUAL");
@@ -276,7 +277,10 @@ async fn unavailable_server_a_does_not_prevent_server_b_from_remaining_queryable
         ))
         .await
         .expect_err("unavailable Server A must fail explicitly");
-    assert_eq!(ToolError::from(error).code, ToolErrorCode::RemoteUnavailable);
+    assert_eq!(
+        ToolError::from(error).code,
+        ToolErrorCode::RemoteUnavailable
+    );
 
     let server_b = query
         .search(StatefulQueryRequest::new(
