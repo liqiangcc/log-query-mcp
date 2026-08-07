@@ -1,0 +1,14 @@
+[package]
+name = "ssh-sftp-poc"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "1"
+russh = "0.62"
+russh-sftp = "2"
+tokio = { version = "1", features = ["io-util", "macros", "rt-multi-thread", "time"] }
+
+[lints.rust]
+unsafe_code = "forbid"
