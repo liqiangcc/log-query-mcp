@@ -4,7 +4,8 @@
 > 日期：2026-08-08  
 > 总方案：[`REMOTE_SSH_CACHE_DESIGN_V2.md`](./REMOTE_SSH_CACHE_DESIGN_V2.md)  
 > 最终基线：[`M6_FINAL_BASELINE_V2.md`](./M6_FINAL_BASELINE_V2.md)  
-> Draft PR：#25
+> Draft PR：#25  
+> External blocker：Issue #23
 
 ## 0. 冻结原则
 
@@ -149,28 +150,40 @@ Concurrency：
 ### Release package
 
 - [x] Package contains binaries / v1+v2 examples / systemd / production docs。
+- [x] Package contains install / uninstall / protocol health / upgrade / rollback helpers。
 - [x] `BUILDINFO`。
 - [x] internal `SHA256SUMS`。
 - [x] outer archive `SHA256SUMS`。
-- [x] `validate_release_package.sh` verifies package shape + inner/outer checksums + BUILDINFO/version consistency。
+- [x] `validate_release_package.sh` verifies package shape + executable helpers + inner/outer checksums + BUILDINFO/version consistency。
 - [x] Release workflow package job defaults to `contents: read`。
 - [x] only tag publish job receives `contents: write`。
 - [x] publish depends on verified package job。
 
-### Upgrade / rollback
+### Protocol health / Upgrade / rollback
 
+- [x] standard `healthcheck.sh` validates systemd active + MCP `initialize` protocol health。
+- [x] health test matrix covers inactive service / JSON-RPC error / wrong server / transport failure。
 - [x] `upgrade.sh` verifies checksum before mutation。
 - [x] backup binaries / BUILDINFO / config / unit。
 - [x] normal upgrade preserves production config。
 - [x] same-directory temporary + rename replacement。
-- [x] restart / health check。
+- [x] restart + MCP protocol health check。
 - [x] automatic rollback after post-mutation failure。
-- [x] explicit `rollback.sh`。
+- [x] explicit `rollback.sh` + protocol health check after restore。
 - [x] rollback preserves backed-up owner/group so `root:log-query-mcp` config ownership is not lost。
 - [x] isolated test covers success / explicit rollback / restart failure / corrupt package / tar input。
 - [x] isolated test validates config `0640` and unit `0644` metadata restoration。
 - [x] isolated upgrade/rollback test executed locally after final hardening and passed。
 - [x] package validator valid/corrupt cases executed locally and behaved fail-closed。
+- [x] lifecycle shell helpers/test entry points normalized to executable Git modes (`ddb87133183c44af6164e30efca01115e708e610`)。
+
+### Final Candidate helper
+
+- [x] `scripts/rc_check.sh` added as one-command repository-local Final Candidate Gate。
+- [x] checks shell syntax / Contracts / rustfmt / Clippy / full tests / release build。
+- [x] checks protocol-health failure matrix + upgrade/rollback failure matrix。
+- [x] assembles and validates release package。
+- [x] explicitly documents that real SSH/SFTP live evidence and target-production acceptance remain separate gates。
 
 Release contract：[`RELEASE_READINESS_V2.md`](./RELEASE_READINESS_V2.md)
 
@@ -178,7 +191,7 @@ Release contract：[`RELEASE_READINESS_V2.md`](./RELEASE_READINESS_V2.md)
 
 历史 M1～M6 relevant Rust / Contracts / SSH / Performance Gates 已经有成功证据。
 
-2026-08-08 再次重跑 candidate Gate，GitHub Actions 仍在 runner 启动前返回：
+Latest observed candidate `5926aa48f312d5875dd0650990aa4238676d0a9d` again reached GitHub Actions but was rejected before any runner step. Rust run `31200587991` / job `92939348162` reported：
 
 ```text
 The job was not started because recent account payments have failed
@@ -189,7 +202,8 @@ or your spending limit needs to be increased.
 
 ```text
 repository implementation       COMPLETE
-local release-script validation PASS
+repository-local RC helper      COMPLETE
+local release-script validation PASS (recorded isolated evidence)
 Draft PR                        OPEN (#25)
 latest candidate Actions        BLOCKED by GitHub Billing
 RC Ready                        NO
@@ -207,11 +221,18 @@ Billing 恢复后只剩验证动作，不再需要设计/实现新的 v2 功能�
 ## 11. 发布/环境动作
 
 - [x] 创建 Draft PR #25。
-- [ ] 将 PR 标记 Ready / 合并 main — **BLOCKED until Final Gate green**。
-- [ ] 创建 `v{version}` tag — **BLOCKED until Final Gate green**。
-- [ ] 发布 GitHub Release — 由 tag workflow 执行，**BLOCKED until Final Gate green**。
+- [ ] 将 PR 标记 Ready / 合并 main — **BLOCKED until Final Gate green and requires explicit publication authorization**。
+- [ ] 创建 `v{version}` tag — **BLOCKED until Final Gate green and requires explicit publication authorization**。
+- [ ] 发布 GitHub Release — 由 tag workflow执行，**BLOCKED until Final Gate green**。
 - [ ] 目标生产服务器 INSTALL/Remote/AI-client/upgrade/rollback 人工验收 — 需要实际目标环境。
 
 ## 12. 最终判断
 
-v2 的仓库实现工作已经完成，并已进入 Draft PR 审阅状态。当前唯一阻止 `RC Ready → merge → tag → Release` 的仓库外事项是 **GitHub Actions Billing 导致最新 candidate 无法执行 Final Gate**。目标生产服务器验收则天然需要实际部署环境，不能由仓库内测试替代。
+v2 的仓库设计与实现工作已经全部完成。当前没有剩余的已知仓库功能/安全/发布工具实现任务。
+
+当前未完成项全部属于以下两类，而不是继续开发：
+
+1. **外部验证阻塞**：GitHub Actions Billing 导致最新 candidate Final Gate 无法获得 runner；
+2. **发布/环境动作**：Ready/merge/tag/Release 需要 Final Gate 全绿及显式发布授权，生产目标验收必须在真实目标环境执行。
+
+在 Billing 恢复前继续修改业务代码只会制造新的 candidate，而不会解决当前阻塞。
