@@ -222,8 +222,18 @@ fn exported_ssh_transport_surface_remains_read_only() {
         })
         .collect::<BTreeSet<_>>();
 
-    for required in ["open_reader", "stat", "lstat", "read_dir", "read_range", "close"] {
-        assert!(methods.contains(required), "missing expected read-only API {required}");
+    for required in [
+        "open_reader",
+        "stat",
+        "lstat",
+        "read_dir",
+        "read_range",
+        "close",
+    ] {
+        assert!(
+            methods.contains(required),
+            "missing expected read-only API {required}"
+        );
     }
     for forbidden in [
         "exec",
