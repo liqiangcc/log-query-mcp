@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 pub mod config;
+pub mod config_document;
+pub mod config_v2;
 pub mod response_limit;
 mod scan_executor;
 mod scanner;
@@ -37,6 +39,13 @@ mod stateful_query;
 pub use config::{
     AppConfig, CONFIG_VERSION, ConfigLoadError, ConfigValidationError, DirectoryRule, Encoding,
     LimitsConfig, LogSourceConfig, TimestampRule, ValidationIssue,
+};
+pub use config_document::{ConfigDocument, ConfigDocumentLoadError};
+pub use config_v2::{
+    AppConfigV2, BackendType, BootstrapPolicy, BootstrapType, CacheConfig, CONFIG_VERSION_V2,
+    ConfigV2LoadError, ConfigV2ValidationError, ConfigV2ValidationIssue, ConnectionType,
+    FreshnessPolicy, HostKeyConfig, LogSourceConfigV2, RemoteSyncPolicy, SourceBackendConfig,
+    SshAuthConfig, SshAuthType, SshConnectionConfig,
 };
 pub use response_limit::serialize_with_limit;
 pub use scan_executor::{MAX_CONCURRENT_SCAN_TASKS, ScanExecutor, ScanTaskError};
