@@ -1,7 +1,7 @@
 name: SSH Transport
 
 # This read-only workflow is the live gate for M2 transport, M4 sync, M5 remote query,
-# M6 remote security boundaries, and M6 multi-server acceptance.
+# M6 remote security boundaries, multi-server acceptance, and restart recovery faults.
 on:
   push:
     branches:
@@ -25,6 +25,7 @@ on:
       - "tests/m5_remote_query_live.rs"
       - "tests/m6_remote_security_live.rs"
       - "tests/m6_multi_server_live.rs"
+      - "tests/m6_server_restart_live.rs"
       - "research/ssh-sftp-poc/**"
       - ".github/workflows/ssh-research.yml"
   workflow_dispatch:
@@ -58,6 +59,7 @@ jobs:
           printf 'DIRMATCH included\nMIXED remote\n' | sudo tee /home/logreader/logs/query-dir/included.log >/dev/null
           printf 'DIRMATCH ignored\n' | sudo tee /home/logreader/logs/query-dir/ignored.txt >/dev/null
           printf 'DUAL server-a\nMIXED3 server-a\n' | sudo tee /home/logreader/logs/multi.log >/dev/null
+          printf 'RESTART_BASE before-restart\n' | sudo tee /home/logreader/logs/restart-live.log >/dev/null
           echo 'denied' | sudo tee /home/logreader/logs/denied.log >/dev/null
           sudo dd if=/dev/zero of=/home/logreader/logs/large.log bs=1M count=8 status=none
           sudo mkfifo /home/logreader/logs/blocking.pipe
@@ -66,7 +68,7 @@ jobs:
           sudo chown root:root /home/logreader/logs/denied.log
           sudo chmod 700 /home/logreader/.ssh
           sudo chmod 444 /home/logreader/logs/application.log /home/logreader/logs/large.log /home/logreader/logs/multi.log
-          sudo chmod 666 /home/logreader/logs/sync-live.log /home/logreader/logs/query-live.log /home/logreader/logs/partial-live.log
+          sudo chmod 666 /home/logreader/logs/sync-live.log /home/logreader/logs/query-live.log /home/logreader/logs/partial-live.log /home/logreader/logs/restart-live.log
           sudo chmod 444 /home/logreader/logs/query-dir/included.log /home/logreader/logs/query-dir/ignored.txt
           sudo chmod 000 /home/logreader/logs/denied.log
           sudo ln -s /etc/passwd /home/logreader/logs/escape.log
@@ -214,6 +216,47 @@ jobs:
           M6_REMOTE_B_DIR: /home/logreader_b/logs
           M6_UNUSED_SSH_PORT: "2299"
         run: cargo test --test m6_multi_server_live -- --ignored --test-threads=1
+
+      - name: Verify M6 server restart recovery and fail-closed behavior
+        env:
+          M2_SSH_PORT: "2222"
+          M2_SSH_PASSWORD: test-password
+          M2_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
+          M2_REMOTE_DIR: /home/logreader/logs
+          M6_RESTART_CACHE_ROOT: /tmp/log-query-mcp-ssh-poc/m6-restart-cache
+        run: |
+          rm -rf "$M6_RESTART_CACHE_ROOT"
+          cargo test --test m6_server_restart_live bootstrap_cache_before_server_restart -- --ignored --exact --test-threads=1
+
+          SSHD_PID=$(sudo cat /tmp/log-query-mcp-ssh-poc/sshd.pid)
+          sudo kill "$SSHD_PID"
+          for _ in $(seq 1 50); do
+            if ! nc -z 127.0.0.1 2222; then
+              break
+            fi
+            sleep 0.1
+          done
+          if nc -z 127.0.0.1 2222; then
+            echo "Server A did not stop"
+            exit 1
+          fi
+
+          printf 'RESTART_AFTER after-restart\n' | sudo tee -a /home/logreader/logs/restart-live.log >/dev/null
+          cargo test --test m6_server_restart_live server_outage_fails_closed_without_destroying_last_valid_cache -- --ignored --exact --test-threads=1
+
+          sudo /usr/sbin/sshd -f /tmp/log-query-mcp-ssh-poc/sshd_config -E /tmp/log-query-mcp-ssh-poc/sshd.log
+          for _ in $(seq 1 50); do
+            if nc -z 127.0.0.1 2222; then
+              break
+            fi
+            sleep 0.1
+          done
+          if ! nc -z 127.0.0.1 2222; then
+            echo "Server A did not restart"
+            exit 1
+          fi
+
+          cargo test --test m6_server_restart_live query_recovers_after_server_restart_and_incremental_append -- --ignored --exact --test-threads=1
 
       - name: Check research POC remains compatible
         run: cargo check --manifest-path research/ssh-sftp-poc/Cargo.toml
