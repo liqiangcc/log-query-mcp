@@ -229,8 +229,7 @@ async fn sync_and_scan_profile() {
         assert_eq!(appended.action, SyncAction::Appended);
         assert_eq!(appended.cached_bytes_written, append_bytes);
         assert!(
-            appended.remote_bytes_read
-                <= append_bytes + 2 * CONTINUITY_FINGERPRINT_WINDOW_BYTES
+            appended.remote_bytes_read <= append_bytes + 2 * CONTINUITY_FINGERPRINT_WINDOW_BYTES
         );
         emit_metric(
             &profile,
