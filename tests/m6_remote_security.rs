@@ -164,7 +164,8 @@ fn remote_server() -> (TempDir, LogQueryMcpServer) {
 
     let config = AppConfigV2::from_json_str(&config.to_string()).expect("valid v2 security config");
     let registry = SourceRegistry::from_config_v2(config).expect("remote registry should build");
-    let server = LogQueryMcpServer::from_registry(Arc::new(registry)).expect("MCP server should build");
+    let server =
+        LogQueryMcpServer::from_registry(Arc::new(registry)).expect("MCP server should build");
     (fixture, server)
 }
 
