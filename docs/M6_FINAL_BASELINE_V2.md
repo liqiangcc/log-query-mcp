@@ -156,9 +156,9 @@ A running process with a broken MCP protocol therefore fails health validation.
 
 `scripts/rollback.sh` restores the exact pre-upgrade runtime state and requires the restored service to pass the same protocol-level health check.
 
-A final static review found that ordinary restore copies could lose backed-up group ownership for service-readable files such as `root:log-query-mcp` config. This was fixed by preserving backup ownership during atomic restore. The isolated upgrade/rollback test also verifies config `0640` and unit `0644` metadata restoration.
+A static review found that ordinary restore copies could lose backed-up group ownership for service-readable files such as `root:log-query-mcp` config. This was fixed by preserving backup ownership during atomic restore. The isolated upgrade/rollback test also verifies config `0640` and unit `0644` metadata restoration.
 
-The isolated release lifecycle tests previously passed these scenarios outside GitHub Actions:
+The isolated release lifecycle tests passed these scenarios outside GitHub Actions:
 
 - successful upgrade；
 - config preservation；
@@ -168,9 +168,9 @@ The isolated release lifecycle tests previously passed these scenarios outside G
 - tar.gz upgrade input；
 - package validator valid/corrupt behavior。
 
-Protocol health now also has an isolated failure matrix covering healthy response, inactive service, JSON-RPC error, unexpected server identity, transport failure and protocol-only test mode.
+Protocol health also has an isolated failure matrix covering healthy response, inactive service, JSON-RPC error, unexpected server identity, transport failure and protocol-only test mode.
 
-The source tree lifecycle helpers and their shell test entry points were additionally normalized to executable Git modes in commit `ddb87133183c44af6164e30efca01115e708e610`, so source-tree execution and release-package executable expectations are consistent.
+The source tree lifecycle helpers and their shell test entry points were normalized to executable Git modes in commit `ddb87133183c44af6164e30efca01115e708e610`, so source-tree execution and release-package executable expectations are consistent.
 
 ## 7. Documentation / Review Readiness
 
@@ -185,20 +185,36 @@ Production docs are aligned with v2:
 - `M6_SECURITY_FAULT_MATRIX_V2.md`；
 - this final baseline。
 
-Draft PR `#25` (`feat: add v2 remote SSH/SFTP log query backend`) is open against `main` and intentionally remains Draft while the candidate CI cannot run.
+Draft PR `#25` (`feat: add v2 remote SSH/SFTP log query backend`) is open against `main` and intentionally remains Draft while the candidate CI cannot run. Its description includes the protocol-health, safe lifecycle and repository-local RC validation work.
 
 ## 8. Final Candidate Gate and external blocker
 
-Rust, Contracts, SSH Transport and Release workflows support a rerun path for the same candidate. The repository-local `rc_check.sh` exists specifically so ordinary non-live checks can also be run without manufacturing a source change.
+Rust, Contracts, SSH Transport and Release workflows expose rerun paths for the same candidate. The repository-local `rc_check.sh` exists so ordinary non-live checks can also be run without manufacturing a source change.
 
-The latest observed PR candidate `5926aa48f312d5875dd0650990aa4238676d0a9d` again failed **before any runner step**. Rust run `31200587991`, job `92939348162`, reported:
+Latest repository head before this baseline update was:
+
+```text
+d38337b855d59649cb0143f515238510b992b2e4
+```
+
+On that exact head, the newest PR-triggered candidate runs were:
+
+```text
+Rust      31200874586  failure-before-runner
+Contracts 31200875744  failure-before-runner
+Release   31200875028  package failure-before-runner; publish correctly skipped
+```
+
+The Rust job had `steps=[]`, `runner_id=0`, and its GitHub annotation reported:
 
 ```text
 The job was not started because recent account payments have failed
 or your spending limit needs to be increased.
 ```
 
-This is **not a code/test failure**, but it also means the newest candidate has **not** received a valid final CI pass.
+Contracts likewise had `steps=[]`; Release package had `steps=[]` and the dependent publish job was skipped. Therefore this remains an **external CI availability failure**, not evidence of a source/test failure, but it is also not a PASS.
+
+Issue #23 is the canonical blocker tracker.
 
 Required external action:
 
@@ -219,7 +235,7 @@ tag / GitHub Release           BLOCKED by Final Gate
 production deployment          requires target environment acceptance
 ```
 
-No merge, tag or release must be forced while the final candidate gate cannot execute. Creating/merging the PR and creating a release tag remain separate publication actions requiring explicit authorization.
+No merge, tag or release must be forced while the final candidate gate cannot execute. Marking the PR ready, merging, creating a release tag and production deployment are separate publication/environment actions requiring their own authorization and prerequisites.
 
 ## 10. Final state
 
