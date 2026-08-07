@@ -159,7 +159,7 @@ impl RemoteBackend {
                 source,
             })?;
         Ok(SnapshotFile::Remote {
-            reader,
+            reader: Box::new(reader),
             identity,
             size: size_at_snapshot,
         })
@@ -194,7 +194,7 @@ impl RemoteBackend {
         }
         let size = reader.record().data_len;
         Ok(SnapshotFile::Remote {
-            reader,
+            reader: Box::new(reader),
             identity,
             size,
         })

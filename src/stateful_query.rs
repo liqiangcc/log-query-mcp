@@ -11,12 +11,12 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    ConfiguredSource, CumulativeQueryUsage, CursorCandidate, MAX_RETURNED_CONTENT_BYTES,
-    MAX_SCAN_RESULTS, MatchReferenceData, MatchReferenceStore, QueryBinding, QueryMatch,
-    QueryPageStopReason, QueryStateError, QuerySummary, ResultWatermark, ScanExecutor, ScanLimits,
-    ScanMatch, ScanPosition, ScanRequest, ScanStopReason, ScanTaskError, SearchCursorData,
-    SearchCursorStore, SourceRegistry, SourceRegistryError, TimeFilterDecision, TimeFilterError,
-    TimeRange, TimestampObservation, TimestampParser,
+    ConfiguredSource, CumulativeQueryUsage, CursorCandidate, GenerationPin,
+    MAX_RETURNED_CONTENT_BYTES, MAX_SCAN_RESULTS, MatchReferenceData, MatchReferenceStore,
+    QueryBinding, QueryMatch, QueryPageStopReason, QueryStateError, QuerySummary, ResultWatermark,
+    ScanExecutor, ScanLimits, ScanMatch, ScanPosition, ScanRequest, ScanStopReason, ScanTaskError,
+    SearchCursorData, SearchCursorStore, SourceRegistry, SourceRegistryError, TimeFilterDecision,
+    TimeFilterError, TimeRange, TimestampObservation, TimestampParser,
 };
 
 const DEFAULT_READ_BUFFER_BYTES: usize = 64 * 1024;
@@ -232,9 +232,10 @@ impl StatefulQueryService {
 
         let mut registered = Vec::with_capacity(scanned.results.len());
         for result in &scanned.results {
-            let match_ref = self
-                .match_references
-                .insert(result.match_reference.clone())?;
+            let match_ref = self.match_references.insert_with_pin(
+                result.match_reference.clone(),
+                result.generation_pin.clone(),
+            )?;
             registered.push(RegisteredQueryMatch {
                 match_ref,
                 source_id: result.value.source_id.clone(),
@@ -434,6 +435,7 @@ struct RankedRegisteredMatch {
     key: ResultWatermark,
     value: QueryMatch,
     match_reference: MatchReferenceData,
+    generation_pin: Option<GenerationPin>,
 }
 
 impl PartialEq for RankedRegisteredMatch {
@@ -646,6 +648,7 @@ fn process_matches(
                 match_byte_offset: scan_match.match_byte_offset,
             },
             match_reference,
+            generation_pin: candidate.snapshot.generation_pin().cloned(),
         });
         if earliest.len() > binding.max_results {
             earliest.pop();

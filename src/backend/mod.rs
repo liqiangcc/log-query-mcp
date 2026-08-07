@@ -23,7 +23,7 @@ pub(crate) struct BackendFileSnapshot {
 pub enum SnapshotFile {
     Local(SafeFile),
     Remote {
-        reader: PinnedGeneration,
+        reader: Box<PinnedGeneration>,
         identity: FileIdentity,
         size: u64,
     },
@@ -90,7 +90,7 @@ impl Seek for SnapshotFile {
 #[derive(Debug)]
 pub(crate) enum SourceBackend {
     Local(LocalBackend),
-    Remote(RemoteBackend),
+    Remote(Box<RemoteBackend>),
 }
 
 impl SourceBackend {

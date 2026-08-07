@@ -261,13 +261,13 @@ impl SourceRegistry {
                     let (cache, connections, sync) = remote_runtime
                         .as_ref()
                         .ok_or(SourceRegistryError::RemoteConfigurationInvalid)?;
-                    SourceBackend::Remote(RemoteBackend::new(
+                    SourceBackend::Remote(Box::new(RemoteBackend::new(
                         source_config.clone(),
                         cache.clone(),
                         sync.clone(),
                         connections.clone(),
                         config.limits.max_remote_files_per_source,
-                    )?)
+                    )?))
                 }
             };
             let configured = Arc::new(ConfiguredSource {

@@ -120,7 +120,8 @@ impl StatefulContextService {
             return Err(StatefulContextError::DeadlineExceeded);
         }
 
-        let reference = self.match_references.resolve(&request.match_ref)?;
+        let (reference, generation_pin) =
+            self.match_references.resolve_with_pin(&request.match_ref)?;
         let source = self
             .registry
             .get(&reference.source_id)
@@ -136,6 +137,7 @@ impl StatefulContextService {
         let execution = self
             .executor
             .execute(cancellation, Some(deadline), move || {
+                let _generation_pin = generation_pin;
                 read_referenced_context(
                     &worker_source,
                     &worker_reference,
