@@ -8,8 +8,9 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    AppConfig, ConfigValidationError, FileIdentity, LimitsConfig, SafeFile, SafeOpenError,
-    SourceDiscoveryError, TimestampRule,
+    AppConfig, AppConfigV2, BackendType, ConfigDocument, ConfigV2ValidationError,
+    ConfigValidationError, FileIdentity, LimitsConfig, SafeFile, SafeOpenError, SourceDiscoveryError,
+    TimestampRule,
     backend::{LocalBackend, SourceBackend},
 };
 
@@ -151,6 +152,28 @@ pub struct SourceRegistry {
 }
 
 impl SourceRegistry {
+    pub fn from_document(config: ConfigDocument) -> Result<Self, SourceRegistryError> {
+        match config {
+            ConfigDocument::V1(config) => Self::from_config(config),
+            ConfigDocument::V2(config) => Self::from_config_v2(config),
+        }
+    }
+
+    pub fn from_config_v2(config: AppConfigV2) -> Result<Self, SourceRegistryError> {
+        config.validate()?;
+        if let Some(source) = config
+            .sources
+            .iter()
+            .find(|source| source.enabled && source.backend.backend_type == BackendType::Ssh)
+        {
+            return Err(SourceRegistryError::BackendUnavailable {
+                source_id: source.source_id.clone(),
+                backend: "ssh",
+            });
+        }
+        Self::from_config(config.as_v1_shape())
+    }
+
     pub fn from_config(config: AppConfig) -> Result<Self, SourceRegistryError> {
         config.validate()?;
         let limits = config.limits.clone();
@@ -258,6 +281,15 @@ fn stable_file_id(source_id: &str, relative_path: &Path, index: usize) -> String
 pub enum SourceRegistryError {
     #[error(transparent)]
     InvalidConfiguration(#[from] ConfigValidationError),
+
+    #[error(transparent)]
+    InvalidV2Configuration(#[from] ConfigV2ValidationError),
+
+    #[error("configured source backend is not available yet: {source_id}/{backend}")]
+    BackendUnavailable {
+        source_id: String,
+        backend: &'static str,
+    },
 
     #[error("configured log source root is unavailable: {source_id}")]
     RootUnavailable {
