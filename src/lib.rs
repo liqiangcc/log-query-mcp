@@ -8,6 +8,8 @@ mod time_filter;
 pub mod tool_error;
 
 #[cfg(target_os = "linux")]
+mod backend;
+#[cfg(target_os = "linux")]
 mod context_executor;
 #[cfg(target_os = "linux")]
 mod context_reader;
