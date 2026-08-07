@@ -17,6 +17,8 @@ install_root="/opt/log-query-mcp"
 bin_dir="${install_root}/bin"
 config_dir="/etc/log-query-mcp"
 config_path="${config_dir}/config.json"
+data_dir="/var/lib/log-query-mcp"
+cache_dir="${data_dir}/cache"
 unit_path="/etc/systemd/system/log-query-mcp.service"
 
 [[ -x "${package_root}/bin/log-query-mcp" ]] || die "missing ${package_root}/bin/log-query-mcp"
@@ -44,6 +46,7 @@ if [[ -f "${package_root}/BUILDINFO" ]]; then
 fi
 
 install -d -m 0750 -o root -g "${service_group}" "${config_dir}"
+install -d -m 0700 -o "${service_user}" -g "${service_group}" "${data_dir}" "${cache_dir}"
 if [[ ! -e "${config_path}" ]]; then
   install -m 0640 -o root -g "${service_group}" "${package_root}/examples/log-query-mcp.v1.json" "${config_path}"
   echo "install: wrote example config to ${config_path}" >&2
