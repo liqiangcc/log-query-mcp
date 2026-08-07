@@ -1,14 +1,15 @@
 # Log Query MCP v2 Remote SSH/Cache 实施 TODO
 
-> 状态：M0 complete / Ready for M1  
+> 状态：M5 complete / Ready for M6  
 > 日期：2026-08-07  
 > 总方案：[`REMOTE_SSH_CACHE_DESIGN_V2.md`](./REMOTE_SSH_CACHE_DESIGN_V2.md)  
 > 配置契约：[`CONFIG_SCHEMA_V2.md`](./CONFIG_SCHEMA_V2.md)  
-> SSH/SFTP 预研：[`SSH_SFTP_TECHNICAL_RESEARCH_V2.md`](./SSH_SFTP_TECHNICAL_RESEARCH_V2.md)
+> SSH/SFTP 预研：[`SSH_SFTP_TECHNICAL_RESEARCH_V2.md`](./SSH_SFTP_TECHNICAL_RESEARCH_V2.md)  
+> 当前代码 Gate 基线：`53b15786510ebca63f30343f8f34b0c43fbb4edc`
 
 ## 0. 实施原则
 
-所有实现必须遵守以下冻结边界：
+所有实现继续遵守以下冻结边界：
 
 - 不新增 `ssh_exec` / Shell / 任意文件读取 MCP 工具。
 - MCP 工具继续保持 `list_log_sources`、`search_logs`、`get_log_context`。
@@ -17,444 +18,214 @@
 - Remote Source 必须先形成稳定本地 Snapshot，再进入查询引擎。
 - 默认不静默使用 stale cache。
 - 缓存覆盖不完整时不得返回假阴性的空结果。
-- v1 配置必须继续可用。
+- v1 配置和契约必须继续可用。
+- SSH 是内部 Transport，不是业务 API。
+- Cache generation 是 Remote Query 的稳定数据边界。
 
 ---
 
-# M0：契约与技术预研
+# 已完成里程碑
 
-## M0.1 ADR
+关闭的详细 checklist 不再在总 TODO 中重复维护；每个里程碑的实现语义、测试矩阵和 Gate 证据以对应 baseline 文档为准。
 
-- [x] ADR-0007：Remote Source 通过本地 Cache 接入查询引擎。
-- [x] ADR-0008：只使用 SSH/SFTP，不提供 Remote Exec。
-- [x] ADR-0009：Cache Generation + Query Snapshot。
-- [x] ADR-0010：On-query Sync + 显式 Bootstrap/Coverage。
-- [x] ADR-0011：Remote Transport 使用 `russh` + `russh-sftp`。
-- [x] ADR-0007～0011 状态冻结为 `Accepted for v2`。
+## M0：契约与技术预研 — DONE
 
-## M0.2 Schema
+- [x] ADR-0007～0011 冻结。
+- [x] v2 config / error schema。
+- [x] v1 + v2 Contracts Gate。
+- [x] `russh` + `russh-sftp` 技术预研与真实 OpenSSH fixture。
+- [x] 明确不需要 Remote Exec。
 
-- [x] 增加 `schemas/log-query-mcp-config-v2.schema.json`。
-- [x] 增加 `schemas/tool-error-v2.schema.json`。
-- [x] 增加 `docs/CONFIG_SCHEMA_V2.md`。
-- [x] 为 v2 Schema 增加合法/非法 fixture。
-- [x] 扩展 `scripts/validate_contracts.py` 验证 v1 + v2。
-- [x] Contracts CI 同时验证 v1/v2 Schema。
-- [x] Contracts CI 实际运行通过。
+主要文档：
 
-## M0.3 SSH 技术预研
+- [`REMOTE_SSH_CACHE_DESIGN_V2.md`](./REMOTE_SSH_CACHE_DESIGN_V2.md)
+- [`CONFIG_SCHEMA_V2.md`](./CONFIG_SCHEMA_V2.md)
+- [`SSH_SFTP_TECHNICAL_RESEARCH_V2.md`](./SSH_SFTP_TECHNICAL_RESEARCH_V2.md)
 
-在写业务代码前完成并记录：
+## M1：配置模型与 Source Backend 抽象 — DONE
 
-- [x] Rust SSH/SFTP 客户端库选型：`russh` + `russh-sftp`。
-- [x] 验证 Password Authentication。
-- [x] 验证 Private Key Authentication。
-- [x] 验证 encrypted private key + passphrase。
-- [x] 验证 `known_hosts` / Host Key Verification fail-closed。
-- [x] 验证 SFTP `stat/lstat/readdir/open/seek/read`。
-- [x] 验证 SSH connect/handshake timeout；operation timeout 统一采用应用层 `tokio::time::timeout`。
-- [x] 验证 Tokio async 集成方式，并识别本地 key/known_hosts 文件 I/O 的 blocking 边界。
-- [x] 记录依赖 License、维护状态、平台兼容性和 unsafe 边界。
-- [x] 建立隔离的 `research/ssh-sftp-poc` 和 `SSH Research` GitHub Actions 实机测试。
-- [ ] 验证 read 中途断线、operation cancellation 和服务器断开后的资源释放；该项属于 M2 Transport 故障注入验收，不阻塞 M1。
+- [x] v1/v2 配置版本路由。
+- [x] LocalBackend / Snapshot 抽象。
+- [x] Query Engine 不直接读取 backend type。
+- [x] Local v1 `openat2()` 安全边界保持不变。
+- [x] 全量回归 Gate 通过。
 
-### M0 Gate
+基线：[`M1_IMPLEMENTATION_BASELINE_V2.md`](./M1_IMPLEMENTATION_BASELINE_V2.md)
 
-```text
-ADR 决策无冲突                    PASS
-v2 Schema 可机器验证              PASS
-SSH 技术路径可行                  PASS
-不需要 Remote Exec                PASS
-项目自身 unsafe_code = forbid     PASS
-```
+## M2：SSH Transport — DONE
 
-**M0 Gate 已通过，可以进入 M1。**
+- [x] `SecretResolver`。
+- [x] Password auth。
+- [x] Private key / encrypted key auth。
+- [x] 强制 Host Key Verification。
+- [x] connect / operation timeout。
+- [x] 全局连接并发限制。
+- [x] 只读 SFTP `stat/lstat/read_dir/read_range`。
+- [x] 网络断开、错误凭据、host-key mismatch、权限、超时、大文件 range read 实机测试。
+- [x] 不存在 exec / shell / write / upload。
 
-说明：M1 不接入 Remote/SSH 生产代码，只先完成配置版本路由与 Local Backend/Snapshot 抽象。read 中途断线、取消传播和连接资源释放继续作为 M2 的强制验收项。
+基线：[`M2_IMPLEMENTATION_BASELINE_V2.md`](./M2_IMPLEMENTATION_BASELINE_V2.md)
 
----
+## M3：CacheStore — DONE
 
-# M1：配置模型与 Source Backend 抽象
+- [x] 内部 ID 驱动的 cache layout。
+- [x] 0700 directory / 0600 file。
+- [x] versioned manifest/catalog。
+- [x] staging + atomic commit。
+- [x] restart recovery。
+- [x] multi-generation。
+- [x] global/per-source quota。
+- [x] retention / max generations / pin-aware GC。
+- [x] corruption / orphan staging / partial append recovery tests。
 
-目标：**不接 SSH，先让现有 Local Source 通过新的抽象工作。**
+基线：[`M3_IMPLEMENTATION_BASELINE_V2.md`](./M3_IMPLEMENTATION_BASELINE_V2.md)
 
-## M1.1 配置版本路由
+## M4：SyncEngine — DONE
 
-- [ ] `config.rs` 增加严格的 v1 / v2 配置解析入口。
-- [ ] `version=1` 继续解析现有结构。
-- [ ] `version=2` 解析 `connections/backend/cache/sync`。
-- [ ] 未知 version 拒绝启动。
-- [ ] 未知字段继续拒绝。
-- [ ] 增加 connection/source 跨引用运行时校验。
-- [ ] 增加 `max_bytes_per_source <= max_bytes` 等关系校验。
+- [x] `full` / `tail(bytes)` / `from_now` bootstrap。
+- [x] incremental append。
+- [x] 64 KiB SHA-256 continuity fingerprint。
+- [x] truncate / replacement / continuity mismatch 新 generation。
+- [x] sync byte budget。
+- [x] 同步失败不破坏最后有效 cache。
+- [x] 真实 SFTP → SyncEngine → CacheStore Gate。
 
-## M1.2 Backend 抽象
+基线：[`M4_IMPLEMENTATION_BASELINE_V2.md`](./M4_IMPLEMENTATION_BASELINE_V2.md)
 
-建议引入：
+## M5：Remote Source Query Integration — DONE
 
-```text
-src/backend/
-├── mod.rs
-└── local.rs
-```
+- [x] Remote explicit files。
+- [x] Remote non-recursive directory discovery。
+- [x] suffix filter / regular-file validation / stable ordering。
+- [x] Remote on-query refresh。
+- [x] Remote → Cache → existing Scanner / Query Engine。
+- [x] Local + Remote mixed query。
+- [x] 受控并发 refresh。
+- [x] Cursor 固定 generation + snapshot length。
+- [x] Cursor continuation 不重新 refresh Remote。
+- [x] `match_ref` 持有 generation pin。
+- [x] `get_log_context` Remote 正常路径 0 SSH。
+- [x] rotation 后旧 `match_ref` TTL 内仍可读取旧 generation。
+- [x] Tail / FromNow incomplete coverage 返回 `CACHE_SCOPE_EXCEEDED`。
+- [x] 不完整 cache 不允许制造假阴性。
+- [x] v2 Remote / Sync / Cache error contract 接入运行时。
+- [x] 真实 OpenSSH/SFTP Query end-to-end Gate。
 
-职责：
+基线：[`M5_IMPLEMENTATION_BASELINE_V2.md`](./M5_IMPLEMENTATION_BASELINE_V2.md)
 
-- [ ] 定义查询所需的 Source/Snapshot 抽象，而不是定义通用 FileSystem API。
-- [ ] LocalBackend 封装现有 `safe_fs` / `source_discovery`。
-- [ ] Query Engine 不直接读取 `backend.type`。
-- [ ] Scanner 继续只处理稳定本地文件。
-
-## M1.3 回归
-
-- [ ] v1 全量单元测试通过。
-- [ ] v1 contract fixture 结果不变。
-- [ ] Local Source 性能没有显著回退。
-- [ ] `cargo fmt --all -- --check`。
-- [ ] `cargo clippy --locked --all-targets --all-features -- -D warnings`。
-- [ ] `cargo test --locked --all-targets --all-features`。
-
-### M1 Gate
+M5 最终正式 Gate：
 
 ```text
-Local Source 已完全通过 Backend 抽象
-Remote 代码仍为 0
-所有 v1 测试通过
-```
-
----
-
-# M2：SSH Transport
-
-目标：实现一个**只提供日志读取所需能力**的内部 SSH/SFTP Transport。
-
-建议结构：
-
-```text
-src/transport/
-├── mod.rs
-└── ssh.rs
-```
-
-## M2.1 SecretResolver
-
-- [ ] 定义 `SecretResolver` trait / 等价抽象。
-- [ ] MVP 支持 `secret_ref -> environment variable`。
-- [ ] Secret 不进入 Debug / Display 输出。
-- [ ] Secret 不进入 MCP 错误。
-- [ ] Secret 不写入 cache manifest。
-- [ ] 增加 missing secret / invalid secret 测试。
-
-## M2.2 ConnectionManager
-
-- [ ] SSH connect。
-- [ ] Password auth。
-- [ ] Private key auth。
-- [ ] Host Key Verification。
-- [ ] `known_hosts` 不存在时拒绝连接。
-- [ ] host key changed 时返回 `HOST_KEY_VERIFICATION_FAILED`。
-- [ ] connect timeout。
-- [ ] operation timeout。
-- [ ] keepalive。
-- [ ] idle connection cleanup。
-- [ ] 全局最大连接数限制。
-
-## M2.3 SFTP 最小能力
-
-只实现：
-
-```text
-stat/lstat
-readdir
-open read-only
-seek/read range
-```
-
-明确不实现：
-
-```text
-write
-create
-truncate
-rename
-remove
-mkdir
-exec
-shell
-scp upload
-```
-
-## M2.4 Transport 测试
-
-建立测试 SSH/SFTP 环境，覆盖：
-
-- [ ] 正确 Password。
-- [ ] 错误 Password。
-- [ ] 正确 Private Key。
-- [ ] 错误 Private Key。
-- [ ] Host Key 正确。
-- [ ] Host Key 改变。
-- [ ] 无权限文件。
-- [ ] 不存在文件。
-- [ ] 网络断开。
-- [ ] 超时。
-- [ ] 大文件 range read。
-- [ ] read 中途断线后连接标记为 Broken，不进入复用池。
-- [ ] operation timeout/cancellation 后资源可靠释放。
-
-### M2 Gate
-
-```text
-SSH/SFTP 可稳定读取受控文件范围
-不存在远程命令执行能力
-Host Key 验证不能绕过
+Rust          run 31186919582  PASS
+Contracts     run 31186920077  PASS
+SSH Transport run 31186920027  PASS
 ```
 
 ---
 
-# M3：CacheStore
+# M6：安全、性能与生产验收 — NEXT
 
-目标：建立可恢复、有界、支持多 generation 的本地缓存。
-
-建议结构：
-
-```text
-src/cache/
-├── mod.rs
-├── store.rs
-├── manifest.rs
-├── generation.rs
-└── gc.rs
-```
-
-## M3.1 Cache Layout
-
-- [ ] Cache 路径只由内部 ID 生成。
-- [ ] 不把远程绝对路径直接拼接为本地路径。
-- [ ] directory 权限 `0700`。
-- [ ] file 权限 `0600`。
-- [ ] source/file/generation 使用稳定不透明 ID。
-
-## M3.2 Manifest
-
-至少保存：
-
-```text
-source_id
-file_id
-remote relative identifier
-generation
-remote size
-cached range
-remote mtime / available metadata
-last_sync_at
-continuity fingerprint
-coverage
-```
-
-- [ ] Manifest schema/version。
-- [ ] 原子写临时文件。
-- [ ] fsync/rename 策略评估。
-- [ ] 损坏 manifest 可检测。
-- [ ] MCP 重启后可恢复有效缓存。
-
-## M3.3 Generation
-
-- [ ] append 继续当前 generation。
-- [ ] truncate 创建新 generation。
-- [ ] replacement 创建新 generation。
-- [ ] continuity mismatch 创建新 generation。
-- [ ] generation 不直接覆盖旧数据。
-
-## M3.4 Quota / GC
-
-- [ ] global cache quota。
-- [ ] per-source quota。
-- [ ] retention。
-- [ ] max generations/file。
-- [ ] 活动 Snapshot 不得删除。
-- [ ] 活动 cursor 不得删除。
-- [ ] 活动 `match_ref` 不得删除。
-- [ ] 达到 quota 且无法安全 GC 时返回 `CACHE_LIMIT_EXCEEDED`。
-
-### M3 Gate
-
-```text
-缓存可重启恢复
-缓存写入原子
-旧 generation 不会被活动 token 错误删除
-```
-
----
-
-# M4：SyncEngine
-
-目标：把远程不断变化的日志安全转换为本地稳定 generation。
-
-建议：
-
-```text
-src/cache/sync.rs
-```
-
-## M4.1 Bootstrap
-
-- [ ] `full`。
-- [ ] `tail(bytes)`。
-- [ ] `from_now`。
-- [ ] Manifest 记录缓存 coverage。
-- [ ] Bootstrap 中断不能污染有效 generation。
-- [ ] Bootstrap 超过 `max_sync_bytes_per_query` 时稳定失败。
-
-## M4.2 Incremental Append
-
-- [ ] 远程 metadata 比较。
-- [ ] 无变化不下载。
-- [ ] append 只下载新增 range。
-- [ ] 下载到 staging file。
-- [ ] continuity 验证成功后 commit。
-- [ ] 更新 manifest。
-
-## M4.3 Continuity Fingerprint
-
-- [ ] 确定 fingerprint window 大小。
-- [ ] 保存旧 offset 附近 fingerprint。
-- [ ] 下一次 sync 读取远程对应窗口复核。
-- [ ] mismatch 不允许 append 到旧 generation。
-- [ ] fingerprint 不能依赖完整日志 hash。
-
-## M4.4 Rotation / Replacement
-
-覆盖：
-
-```text
-size 变小
-同名文件替换
-truncate 后快速增长
-application.log -> application.log.1
-新的 application.log 创建
-文件删除
-```
-
-- [ ] 能保留旧 generation。
-- [ ] 能建立新 generation。
-- [ ] 不把两个不同物理日志错误拼接。
-
-## M4.5 Failure Recovery
-
-- [ ] SSH 中断。
-- [ ] SFTP read 中断。
-- [ ] 本地磁盘满。
-- [ ] 进程在 staging 阶段崩溃。
-- [ ] 进程在 manifest commit 前崩溃。
-- [ ] 重启后清理 orphan staging files。
-
-### M4 Gate
-
-```text
-正常查询路径只同步增量
-rotation 不会错误拼接日志
-任何同步失败都不破坏最后有效 cache
-```
-
----
-
-# M5：Remote Source 查询集成
-
-目标：让现有 MCP 工具无感支持 Remote Source。
-
-## M5.1 Source Discovery
-
-- [ ] Remote explicit files。
-- [ ] Remote directory discovery。
-- [ ] suffix filter。
-- [ ] recursive=false MVP 语义与 v1 一致。
-- [ ] SFTP `lstat` 检查。
-- [ ] 仅普通文件。
-- [ ] 文件数量限制。
-- [ ] 稳定 file_id / stable ordering。
-
-## M5.2 `search_logs`
-
-实现流程：
-
-```text
-validate
-→ resolve source
-→ ensure fresh
-→ freeze cache snapshot
-→ existing scanner
-→ query engine
-```
-
-- [ ] Local + Remote 混合查询。
-- [ ] 多个 Remote Server 查询。
-- [ ] 受控并发 refresh。
-- [ ] Snapshot 固定 generation + length。
-- [ ] 新增日志不改变已有 cursor 结果。
-
-## M5.3 Coverage
-
-- [ ] full coverage 可正常查询历史。
-- [ ] tail coverage 能判断查询超出范围。
-- [ ] from_now coverage 能判断历史缺失。
-- [ ] 不完整时返回 `CACHE_SCOPE_EXCEEDED`。
-- [ ] 不允许以空结果代替 coverage error。
-
-## M5.4 `match_ref`
-
-- [ ] 绑定 source/file/generation/offset。
-- [ ] 不包含远程路径。
-- [ ] `get_log_context` 正常情况下 0 次 SSH 请求。
-- [ ] 远程文件轮转后旧 `match_ref` 在 TTL 内仍能读取旧 generation。
-
-## M5.5 cursor
-
-- [ ] 绑定完整 Query Snapshot。
-- [ ] 后续页不重新刷新远程源。
-- [ ] 后续页不看到 Snapshot 之后新增的日志。
-- [ ] generation 被非法删除时稳定返回错误，不读错误文件。
-
-### M5 Gate
-
-同一固定日志数据集：
-
-```text
-LocalBackend 查询结果
-==
-SSH Remote → Cache 查询结果
-```
-
-在搜索、排序、分页和上下文语义上保持一致。
-
----
-
-# M6：安全、性能与生产验收
+M6 原则：**不重写 M1～M5 核心架构，只补生产证据、故障矩阵、性能基线和运维文档。**
 
 ## M6.1 Security Tests
 
-必须证明 AI 无法：
+必须证明 AI / MCP 客户端无法：
 
 - [ ] 提交任意 host。
 - [ ] 提交 SSH username/password。
+- [ ] 提交 `secret_ref` 或覆盖管理员 connection。
 - [ ] 提交远程绝对路径。
-- [ ] 路径 `..` 逃逸。
+- [ ] 使用 `..`、`.`、空 component、反斜杠或控制字符逃逸 source root。
 - [ ] 通过 symlink 访问未授权位置。
-- [ ] 调用 Shell。
-- [ ] 上传/修改/删除服务器文件。
-- [ ] 从错误消息获得 secret。
-- [ ] 从 `list_log_sources` 获得连接敏感信息。
+- [ ] 调用 Shell / Remote Exec。
+- [ ] 上传、修改、删除服务器文件。
+- [ ] 从错误消息获得 secret / key material / password。
+- [ ] 从 `list_log_sources` 获得 connection host、username、secret_ref 或 cache path。
+- [ ] 通过 cursor / `match_ref` 获取 remote absolute path / cache absolute path / generation UUID。
+
+### M6.1 Exit
+
+```text
+AI-facing input surface contains no SSH credential/path control
+remote transport remains read-only
+negative security matrix PASS
+public errors/results contain no sensitive infrastructure data
+```
 
 ## M6.2 Cache Security
 
-- [ ] Cache 目录权限测试。
-- [ ] Manifest 不含 Secret。
-- [ ] Cache 文件名不泄露不必要的远程绝对路径。
-- [ ] Log redaction 测试。
+- [ ] Cache root / source / file / generation directory 权限测试。
+- [ ] Cache data file 权限测试。
+- [ ] Manifest / catalog 不含 Secret。
+- [ ] Manifest 不保存不必要的 remote absolute path。
+- [ ] Cache 文件名不泄露 remote path。
+- [ ] 错误 / Debug / Display 不泄露 cache absolute path。
+- [ ] recovery / corruption error redaction 测试。
+- [ ] 外部非法删除 active generation 时稳定 fail-closed，不读取错误文件。
 
-## M6.3 Performance Benchmarks
+### M6.2 Exit
 
-至少测试：
+```text
+cache permission boundary PASS
+manifest/catalog secret scan PASS
+active generation external-deletion fault PASS
+```
+
+## M6.3 Multi-Server Acceptance
+
+M5 架构已支持多个 `connection_id`，M6 增加至少两个独立 OpenSSH fixture：
+
+- [ ] Server A + Server B 同一查询。
+- [ ] 两台服务器不同日志同时返回。
+- [ ] 全局 SSH semaphore 对两台服务器共同生效。
+- [ ] Server A 不可用时不会污染 Server B cache。
+- [ ] 不同 connection 的 source/file identity 不冲突。
+- [ ] Local + Server A + Server B 混合查询。
+- [ ] Password 与 Private Key 可分别用于不同服务器。
+
+### M6.3 Exit
+
+```text
+one local MCP
+→ two independent SSH servers
+→ stable mixed query semantics
+```
+
+## M6.4 Fault Injection
+
+已有 M2～M5 测试先纳入统一 failure matrix，再只补缺口：
+
+- [ ] SSH handshake 中断。
+- [ ] auth failure。
+- [ ] host key mismatch / missing known_hosts。
+- [ ] auth 后立即断线。
+- [ ] SFTP read 中途断线。
+- [ ] operation timeout / cancellation。
+- [ ] server restart。
+- [ ] remote file rotation during sync。
+- [ ] remote file truncate during sync。
+- [ ] same-size replacement during sync。
+- [ ] cache manifest corruption。
+- [ ] cache generation data corruption / deletion。
+- [ ] cache quota exhausted。
+- [ ] staging write interrupted。
+- [ ] MCP kill / restart with orphan staging fixture。
+- [ ] Tail / FromNow incomplete-query behavior。
+
+要求：
+
+- [ ] 无 silent success。
+- [ ] 无 false empty result。
+- [ ] 最后有效 generation 不被失败 sync 破坏。
+- [ ] staging/recovery 可重复执行。
+- [ ] retryable 分类准确。
+- [ ] 公共错误不泄露 secret/path/backtrace。
+
+## M6.5 Performance Benchmarks
+
+建立**可重复 benchmark harness**，不把 benchmark 机器绝对耗时写成产品 SLA。
+
+至少覆盖数据规模：
 
 ```text
 100MB
@@ -467,46 +238,69 @@ SSH Remote → Cache 查询结果
 - [ ] cold full bootstrap。
 - [ ] tail bootstrap。
 - [ ] cache hit。
+- [ ] unchanged continuity probe。
 - [ ] 1MB append sync。
 - [ ] 100MB append sync。
+- [ ] 本地 cache scan。
 - [ ] 单服务器并发查询。
-- [ ] 多服务器并发查询。
+- [ ] 双服务器并发查询。
 
 记录：
 
 ```text
-首次查询耗时
-增量同步耗时
-下载 bytes
-cache hit latency
-search latency
+fixture size
+bootstrap/sync bytes transferred
+wall time
+search time
 CPU
-memory
+peak RSS
 cache disk usage
+result count
+runner / filesystem / Rust version
 ```
 
-## M6.4 Fault Injection
+Benchmark 必须验证的工程性质：
 
-- [ ] SSH handshake 中断。
-- [ ] auth 后立即断线。
-- [ ] SFTP 中途断线。
-- [ ] server restart。
-- [ ] remote file rotation during sync。
-- [ ] remote file truncate during sync。
-- [ ] cache disk full。
-- [ ] MCP kill -9 during sync。
+- [ ] 第二次 unchanged query 不重复下载完整日志。
+- [ ] append 只传输新增 payload + bounded fingerprint probes。
+- [ ] cache hit 查询不走 SSH。
+- [ ] 10GB 场景不会要求把完整日志加载进内存。
+- [ ] 并发受配置上限约束，不产生无界 SSH session。
 
-## M6.5 Production Docs
+## M6.6 Production Docs
 
-- [ ] 更新 README。
-- [ ] 更新 INSTALL。
-- [ ] 更新 OPERATIONS。
-- [ ] 增加 Remote Source 配置示例。
+- [ ] 更新 `README.md`：Local + Remote 两种部署模式。
+- [ ] 更新 `docs/INSTALL.md`：Remote prerequisites / secret_ref / known_hosts。
+- [ ] 更新/新增 `docs/OPERATIONS.md`：cache、错误、恢复、容量、升级。
+- [ ] 增加 Remote Source 完整配置示例。
 - [ ] 增加创建 `log-reader` 只读账号建议。
 - [ ] 增加 SFTP-only / chroot hardening 示例。
-- [ ] 增加 known_hosts 初始化说明。
+- [ ] 增加 known_hosts 初始化与 host-key rotation 说明。
 - [ ] 增加 Cache 容量规划。
 - [ ] 增加 Remote 错误排查表。
+- [ ] 增加“不支持 Remote Exec/Deploy”的边界说明。
+
+---
+
+# M6 推荐执行顺序
+
+```text
+M6-A 现有安全/故障能力盘点
+ ↓
+M6-B 缺失的 deterministic negative/fault tests
+ ↓
+M6-C two-server live acceptance
+ ↓
+M6-D cache security / redaction gate
+ ↓
+M6-E benchmark harness + 100MB/1GB/10GB evidence
+ ↓
+M6-F production docs
+ ↓
+M6 Final Gate
+```
+
+优先复用 M2～M5 已经存在的 failure tests，不重复造第二套实现。
 
 ---
 
@@ -521,43 +315,37 @@ v2 不得发布，除非全部满足：
 - [ ] Private key auth 可用。
 - [ ] Host Key Verification 强制有效。
 - [ ] 无 Remote Exec 能力。
+- [ ] AI 无法提交 SSH connection/credential/arbitrary path。
 - [ ] 正常路径为增量同步，不是重复全量下载。
 - [ ] rotation/truncate/replacement 不会拼错日志。
-- [ ] stale cache 不会制造假阴性。
+- [ ] stale / incomplete cache 不会制造假阴性。
 - [ ] `get_log_context` 可以从旧 generation 稳定读取。
 - [ ] cursor 分页 Snapshot 稳定。
 - [ ] Cache quota 和 GC 有测试。
 - [ ] 同步崩溃可恢复。
-- [ ] `fmt + clippy + test + contracts` 全部通过。
+- [ ] Cache/错误/结果不泄露 Secret 与基础设施敏感信息。
+- [ ] 100MB / 1GB / 10GB benchmark evidence 完成。
+- [ ] Production operations docs 完成。
+- [ ] `fmt + clippy -D warnings + test + release build + contracts + SSH live` 全部通过。
 
 ---
 
-# 推荐实施顺序
-
-严格按照：
+# 当前推荐动作
 
 ```text
 M0 Contract                  DONE
  ↓
-M1 Backend abstraction       NEXT
+M1 Backend abstraction       DONE
  ↓
-M2 SSH Transport
+M2 SSH Transport             DONE
  ↓
-M3 CacheStore
+M3 CacheStore                DONE
  ↓
-M4 SyncEngine
+M4 SyncEngine                DONE
  ↓
-M5 Query integration
+M5 Query integration         DONE
  ↓
-M6 Production hardening
+M6 Production hardening      NEXT
 ```
 
-不要直接从：
-
-```text
-search_logs → SSH
-```
-
-开始开发。
-
-最重要的架构控制点是先完成 M1：**让现有 Local Source 通过新的 Backend/Snapshot 抽象运行且所有 v1 测试保持通过，然后再接入 SSH。**
+**下一步：执行 M6-A，先建立安全/故障覆盖矩阵，明确“已覆盖 / 缺口 / 需要新增测试”，然后只实现真正的缺口。**
