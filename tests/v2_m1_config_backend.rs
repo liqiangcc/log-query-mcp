@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use log_query_mcp::{ConfigDocument, SourceRegistry, SourceRegistryError};
+use log_query_mcp::{ConfigDocument, SourceRegistry};
 use tempfile::tempdir;
 
 #[test]
@@ -33,13 +33,19 @@ fn v2_local_document_builds_registry_through_local_backend() {
 }
 
 #[test]
-fn v2_ssh_document_is_valid_but_m1_rejects_unimplemented_backend() {
-    let document =
-        ConfigDocument::from_json_str(include_str!("contracts/v2/valid/ssh-password-tail.json"))
-            .expect("valid v2 SSH configuration should parse");
+fn v2_ssh_document_builds_remote_registry_without_connecting_at_startup() {
+    let cache = tempdir().expect("cache root should be created");
+    let mut config: serde_json::Value =
+        serde_json::from_str(include_str!("contracts/v2/valid/ssh-password-tail.json"))
+            .expect("valid v2 SSH fixture should be JSON");
+    config["cache"]["root"] = serde_json::json!(cache.path());
+    let document = ConfigDocument::from_json_str(&config.to_string())
+        .expect("valid v2 SSH configuration should parse");
 
-    assert!(matches!(
-        SourceRegistry::from_document(document),
-        Err(SourceRegistryError::BackendUnavailable { backend: "ssh", .. })
-    ));
+    let registry = SourceRegistry::from_document(document)
+        .expect("M5 remote registry should build without opening SSH at startup");
+    let source = registry
+        .get("remote-order-test")
+        .expect("remote source should be registered");
+    assert_eq!(source.descriptor().service, "order-service");
 }

@@ -170,6 +170,15 @@ impl From<SourceRegistryError> for ToolError {
             SourceRegistryError::InvalidConfiguration(_)
             | SourceRegistryError::InvalidV2Configuration(_)
             | SourceRegistryError::BackendUnavailable { .. }
+            | SourceRegistryError::AsyncBackendRequired
+            | SourceRegistryError::RemoteConfigurationInvalid
+            | SourceRegistryError::RemoteRecursiveDiscoveryUnsupported { .. }
+            | SourceRegistryError::RemotePathInvalid
+            | SourceRegistryError::RemoteSnapshotMissingPin
+            | SourceRegistryError::CacheInitialization(_)
+            | SourceRegistryError::TransportInitialization(_)
+            | SourceRegistryError::SyncInitialization(_)
+            | SourceRegistryError::RemoteTaskJoin { .. }
             | SourceRegistryError::DirectoryRuleInvalid { .. }
             | SourceRegistryError::SnapshotSourceMismatch
             | SourceRegistryError::PathNotConfigured => Self::internal_error(),
@@ -179,7 +188,13 @@ impl From<SourceRegistryError> for ToolError {
             SourceRegistryError::DiscoveryFailed { source, .. } => map_source_discovery(source),
             SourceRegistryError::TooManyFiles { .. } => Self::resource_limit(),
             SourceRegistryError::UnknownSource(_) => Self::new(ToolErrorCode::UnknownSource),
-            SourceRegistryError::FileChanged { .. } => Self::new(ToolErrorCode::FileChanged),
+            SourceRegistryError::FileChanged { .. }
+            | SourceRegistryError::CachedGenerationUnavailable { .. } => {
+                Self::new(ToolErrorCode::FileChanged)
+            }
+            SourceRegistryError::RemoteExplicitFileNotRegular { .. }
+            | SourceRegistryError::RemoteTransport { .. }
+            | SourceRegistryError::RemoteSync { .. } => Self::new(ToolErrorCode::SourceUnavailable),
         }
     }
 }

@@ -43,9 +43,10 @@ mod stateful_query;
 pub use cache::{
     ByteRange, CACHE_CATALOG_VERSION, CACHE_MANIFEST_VERSION, CONTINUITY_FINGERPRINT_WINDOW_BYTES,
     CacheCoverage, CacheFileId, CacheManifest, CacheSourceId, CacheStore, CacheStoreError,
-    CacheStoreLimits, GcReport, GenerationId, GenerationKey, GenerationMetadata, GenerationRecord,
-    ManifestValidationError, PinnedGeneration, RecoveryReport, RemoteSyncTarget, StagedAppend,
-    StagedGeneration, SyncAction, SyncEngine, SyncError, SyncGenerationReason, SyncOutcome,
+    CacheStoreLimits, GcReport, GenerationId, GenerationKey, GenerationMetadata, GenerationPin,
+    GenerationRecord, ManifestValidationError, PinnedGeneration, RecoveryReport, RemoteSyncTarget,
+    StagedAppend, StagedGeneration, SyncAction, SyncEngine, SyncError, SyncGenerationReason,
+    SyncOutcome,
 };
 pub use config::{
     AppConfig, CONFIG_VERSION, ConfigLoadError, ConfigValidationError, DirectoryRule, Encoding,
@@ -73,6 +74,7 @@ pub use time_filter::{
 };
 pub use tool_error::{ToolError, ToolErrorCode};
 
+pub use backend::SnapshotFile;
 #[cfg(target_os = "linux")]
 pub use context_executor::{ContextExecution, ContextExecutor, ContextTaskError};
 #[cfg(target_os = "linux")]

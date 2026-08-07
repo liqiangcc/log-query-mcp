@@ -1,7 +1,6 @@
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashSet},
-    fs::File,
     io::{ErrorKind, Read, Seek, SeekFrom},
     sync::Arc,
     time::{Duration, Instant},
@@ -205,7 +204,8 @@ impl StatefulQueryService {
                     &self.registry,
                     &binding.source_ids,
                     limits.max_scan_files_per_query,
-                )?,
+                )
+                .await?,
                 None,
                 CumulativeQueryUsage::default(),
             )
@@ -355,7 +355,7 @@ impl StatefulQueryService {
                 };
 
                 let safe_file = source.open_snapshot_file(&candidate.snapshot)?;
-                let mut file = safe_file.into_file();
+                let mut file = safe_file;
                 seek_to_scan_position(&mut file, position, candidate.snapshot.size_at_snapshot())?;
 
                 let scan_limits = ScanLimits {
@@ -504,7 +504,7 @@ fn query_binding(
     Ok((binding, time_range))
 }
 
-fn build_candidates(
+async fn build_candidates(
     registry: &SourceRegistry,
     source_ids: &[String],
     max_files: usize,
@@ -517,7 +517,7 @@ fn build_candidates(
         if remaining == 0 {
             return Err(StatefulQueryError::FileLimitExceeded);
         }
-        let snapshots = source.snapshot_files(remaining)?;
+        let snapshots = source.query_snapshot_files(remaining).await?;
         remaining = remaining
             .checked_sub(snapshots.len())
             .ok_or(StatefulQueryError::ResourceCounterOverflow)?;
@@ -564,7 +564,7 @@ fn process_matches(
     }
 
     let mut prefix_file = if timestamp_parser.is_some() {
-        Some(source.open_snapshot_file(&candidate.snapshot)?.into_file())
+        Some(source.open_snapshot_file(&candidate.snapshot)?)
     } else {
         None
     };
@@ -750,8 +750,8 @@ fn check_interrupted(
     Ok(())
 }
 
-fn seek_to_scan_position(
-    file: &mut File,
+fn seek_to_scan_position<R: Read + Seek>(
+    file: &mut R,
     position: ScanPosition,
     snapshot_size: u64,
 ) -> Result<(), StatefulQueryError> {
@@ -782,8 +782,8 @@ fn validated_next_position(
     Ok(next)
 }
 
-fn read_line_prefix(
-    file: &mut File,
+fn read_line_prefix<R: Read + Seek>(
+    file: &mut R,
     line_start_offset: u64,
     snapshot_size: u64,
     maximum_bytes: usize,

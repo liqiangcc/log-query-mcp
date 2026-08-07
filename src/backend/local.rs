@@ -9,7 +9,7 @@ use crate::{
     SourceRegistryError, discover_regular_files,
 };
 
-use super::BackendFileSnapshot;
+use super::{BackendFileSnapshot, SnapshotFile};
 
 /// Local log access backend that preserves the v1 `SafeRoot`/`openat2()` security boundary.
 #[derive(Debug)]
@@ -98,6 +98,8 @@ impl LocalBackend {
                     relative_path,
                     identity,
                     size_at_snapshot,
+                    coverage: None,
+                    generation_pin: None,
                 },
             )
             .collect())
@@ -110,7 +112,7 @@ impl LocalBackend {
         identity: FileIdentity,
         size_at_snapshot: u64,
         file_id: &str,
-    ) -> Result<SafeFile, SourceRegistryError> {
+    ) -> Result<SnapshotFile, SourceRegistryError> {
         if !self.path_is_configured(relative_path) {
             return Err(SourceRegistryError::PathNotConfigured);
         }
@@ -128,7 +130,34 @@ impl LocalBackend {
                 file_id: file_id.to_owned(),
             });
         }
-        Ok(file)
+        Ok(SnapshotFile::Local(file))
+    }
+
+    pub(crate) fn open_referenced_file(
+        &self,
+        source_id: &str,
+        relative_path: &Path,
+        identity: FileIdentity,
+        size_at_match: u64,
+        file_id: &str,
+    ) -> Result<SnapshotFile, SourceRegistryError> {
+        if !self.path_is_configured(relative_path) {
+            return Err(SourceRegistryError::PathNotConfigured);
+        }
+        let file = self
+            .root
+            .open_regular_file(relative_path)
+            .map_err(|source| SourceRegistryError::FileUnavailable {
+                source_id: source_id.to_owned(),
+                source,
+            })?;
+        if file.identity() != identity || file.size() < size_at_match {
+            return Err(SourceRegistryError::FileChanged {
+                source_id: source_id.to_owned(),
+                file_id: file_id.to_owned(),
+            });
+        }
+        Ok(SnapshotFile::Local(file))
     }
 
     pub(crate) fn open_configured_file(
@@ -136,6 +165,7 @@ impl LocalBackend {
         source_id: &str,
         relative_path: &Path,
     ) -> Result<SafeFile, SourceRegistryError> {
+        // Local current-file access remains local-only; M5 snapshot reads use SnapshotFile.
         if !self.path_is_configured(relative_path) {
             return Err(SourceRegistryError::PathNotConfigured);
         }

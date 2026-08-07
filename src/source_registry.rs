@@ -8,10 +8,12 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    AppConfig, AppConfigV2, BackendType, ConfigDocument, ConfigV2ValidationError,
-    ConfigValidationError, FileIdentity, LimitsConfig, SafeFile, SafeOpenError,
-    SourceDiscoveryError, TimestampRule,
-    backend::{LocalBackend, SourceBackend},
+    AppConfig, AppConfigV2, BackendType, CacheCoverage, CacheStore, CacheStoreError,
+    ConfigDocument, ConfigV2ValidationError, ConfigValidationError, FileIdentity, GenerationPin,
+    LimitsConfig, SafeFile, SafeOpenError, SourceDiscoveryError, SyncEngine, SyncError,
+    TimestampRule,
+    backend::{LocalBackend, RemoteBackend, SnapshotFile, SourceBackend},
+    transport::{SshConnectionManager, SshTransportError},
 };
 
 pub const MAX_REGISTERED_FILES_PER_SOURCE: usize = 10_000;
@@ -33,6 +35,8 @@ pub struct SourceFileSnapshot {
     relative_path: PathBuf,
     identity: FileIdentity,
     size_at_snapshot: u64,
+    coverage: Option<CacheCoverage>,
+    generation_pin: Option<GenerationPin>,
 }
 
 impl SourceFileSnapshot {
@@ -59,6 +63,16 @@ impl SourceFileSnapshot {
     #[must_use]
     pub const fn size_at_snapshot(&self) -> u64 {
         self.size_at_snapshot
+    }
+
+    #[must_use]
+    pub fn coverage(&self) -> Option<&CacheCoverage> {
+        self.coverage.as_ref()
+    }
+
+    #[must_use]
+    pub fn generation_pin(&self) -> Option<&GenerationPin> {
+        self.generation_pin.as_ref()
     }
 
     #[must_use]
@@ -109,6 +123,37 @@ impl ConfiguredSource {
                 relative_path: snapshot.relative_path,
                 identity: snapshot.identity,
                 size_at_snapshot: snapshot.size_at_snapshot,
+                coverage: snapshot.coverage,
+                generation_pin: snapshot.generation_pin,
+            })
+            .collect())
+    }
+
+    pub async fn query_snapshot_files(
+        &self,
+        max_files: usize,
+    ) -> Result<Vec<SourceFileSnapshot>, SourceRegistryError> {
+        if max_files == 0 || max_files > MAX_REGISTERED_FILES_PER_SOURCE {
+            return Err(SourceRegistryError::TooManyFiles {
+                source_id: self.descriptor.source_id.clone(),
+                limit: max_files,
+            });
+        }
+        let snapshots = self
+            .backend
+            .query_snapshot_files(&self.descriptor.source_id, max_files)
+            .await?;
+        Ok(snapshots
+            .into_iter()
+            .enumerate()
+            .map(|(index, snapshot)| SourceFileSnapshot {
+                source_id: self.descriptor.source_id.clone(),
+                file_id: stable_file_id(&self.descriptor.source_id, &snapshot.relative_path, index),
+                relative_path: snapshot.relative_path,
+                identity: snapshot.identity,
+                size_at_snapshot: snapshot.size_at_snapshot,
+                coverage: snapshot.coverage,
+                generation_pin: snapshot.generation_pin,
             })
             .collect())
     }
@@ -116,7 +161,7 @@ impl ConfiguredSource {
     pub fn open_snapshot_file(
         &self,
         snapshot: &SourceFileSnapshot,
-    ) -> Result<SafeFile, SourceRegistryError> {
+    ) -> Result<SnapshotFile, SourceRegistryError> {
         if snapshot.source_id != self.descriptor.source_id {
             return Err(SourceRegistryError::SnapshotSourceMismatch);
         }
@@ -127,6 +172,23 @@ impl ConfiguredSource {
             snapshot.identity,
             snapshot.size_at_snapshot,
             &snapshot.file_id,
+            snapshot.generation_pin.as_ref(),
+        )
+    }
+
+    pub fn open_referenced_file(
+        &self,
+        relative_path: impl AsRef<Path>,
+        identity: FileIdentity,
+        size_at_match: u64,
+        file_id: &str,
+    ) -> Result<SnapshotFile, SourceRegistryError> {
+        self.backend.open_referenced_file(
+            &self.descriptor.source_id,
+            relative_path.as_ref(),
+            identity,
+            size_at_match,
+            file_id,
         )
     }
 
@@ -161,17 +223,75 @@ impl SourceRegistry {
 
     pub fn from_config_v2(config: AppConfigV2) -> Result<Self, SourceRegistryError> {
         config.validate()?;
-        if let Some(source) = config
+        let limits = config.limits.local_limits();
+        let has_remote = config
             .sources
             .iter()
-            .find(|source| source.enabled && source.backend.backend_type == BackendType::Ssh)
-        {
-            return Err(SourceRegistryError::BackendUnavailable {
-                source_id: source.source_id.clone(),
-                backend: "ssh",
+            .any(|source| source.enabled && source.backend.backend_type == BackendType::Ssh);
+        let remote_runtime = if has_remote {
+            let cache_config = config
+                .cache
+                .as_ref()
+                .ok_or(SourceRegistryError::RemoteConfigurationInvalid)?;
+            let cache = CacheStore::from_config(cache_config)
+                .map_err(SourceRegistryError::CacheInitialization)?;
+            let connections = SshConnectionManager::from_config(&config)
+                .map_err(SourceRegistryError::TransportInitialization)?;
+            let sync = SyncEngine::new(
+                cache.clone(),
+                connections.clone(),
+                config.limits.max_sync_bytes_per_query,
+            )
+            .map_err(SourceRegistryError::SyncInitialization)?;
+            Some((cache, connections, sync))
+        } else {
+            None
+        };
+
+        let mut sources = Vec::new();
+        let mut by_id = HashMap::new();
+        for source_config in config.sources.into_iter().filter(|source| source.enabled) {
+            let source_id = source_config.source_id.clone();
+            let backend = match source_config.backend.backend_type {
+                BackendType::Local => SourceBackend::Local(LocalBackend::from_config(
+                    &source_id,
+                    &source_config.to_v1_config(),
+                )?),
+                BackendType::Ssh => {
+                    let (cache, connections, sync) = remote_runtime
+                        .as_ref()
+                        .ok_or(SourceRegistryError::RemoteConfigurationInvalid)?;
+                    SourceBackend::Remote(RemoteBackend::new(
+                        source_config.clone(),
+                        cache.clone(),
+                        sync.clone(),
+                        connections.clone(),
+                        config.limits.max_remote_files_per_source,
+                    )?)
+                }
+            };
+            let configured = Arc::new(ConfiguredSource {
+                descriptor: SourceDescriptor {
+                    source_id: source_config.source_id.clone(),
+                    name: source_config.name,
+                    description: source_config.description,
+                    service: source_config.service,
+                    environment: source_config.environment,
+                    tags: source_config.tags,
+                },
+                backend,
+                timestamp_rule: source_config.timestamp_rule,
             });
+            configured.backend.startup_validate(&source_id)?;
+            let index = sources.len();
+            by_id.insert(source_id, index);
+            sources.push(configured);
         }
-        Self::from_config(config.as_v1_shape())
+        Ok(Self {
+            sources,
+            by_id,
+            limits,
+        })
     }
 
     pub fn from_config(config: AppConfig) -> Result<Self, SourceRegistryError> {
@@ -198,9 +318,9 @@ impl SourceRegistry {
                 timestamp_rule: source_config.timestamp_rule,
             });
 
-            // Fail startup for unsafe explicit files, invalid directory roots,
+            // Fail startup for unsafe local explicit files, invalid directory roots,
             // or a discovery result beyond the absolute v1 hard limit.
-            configured.snapshot_files(MAX_REGISTERED_FILES_PER_SOURCE)?;
+            configured.backend.startup_validate(&source_id)?;
 
             let index = sources.len();
             by_id.insert(source_id, index);
@@ -289,6 +409,65 @@ pub enum SourceRegistryError {
     BackendUnavailable {
         source_id: String,
         backend: &'static str,
+    },
+
+    #[error("configured source backend requires asynchronous query preparation")]
+    AsyncBackendRequired,
+
+    #[error("remote source configuration is invalid")]
+    RemoteConfigurationInvalid,
+
+    #[error("remote recursive directory discovery is not supported in the v2 MVP: {source_id}")]
+    RemoteRecursiveDiscoveryUnsupported { source_id: String },
+
+    #[error("remote configured path is invalid")]
+    RemotePathInvalid,
+
+    #[error("remote explicit file is not a regular file: {source_id}/{file_index}")]
+    RemoteExplicitFileNotRegular {
+        source_id: String,
+        file_index: usize,
+    },
+
+    #[error("remote snapshot is missing its cache generation pin")]
+    RemoteSnapshotMissingPin,
+
+    #[error("failed to initialize remote cache")]
+    CacheInitialization(#[source] CacheStoreError),
+
+    #[error("failed to initialize SSH transport")]
+    TransportInitialization(#[source] SshTransportError),
+
+    #[error("failed to initialize remote synchronization")]
+    SyncInitialization(#[source] SyncError),
+
+    #[error("remote source transport is unavailable: {source_id}")]
+    RemoteTransport {
+        source_id: String,
+        #[source]
+        source: SshTransportError,
+    },
+
+    #[error("remote source synchronization failed: {source_id}")]
+    RemoteSync {
+        source_id: String,
+        #[source]
+        source: SyncError,
+    },
+
+    #[error("remote refresh worker failed: {source_id}")]
+    RemoteTaskJoin {
+        source_id: String,
+        #[source]
+        source: tokio::task::JoinError,
+    },
+
+    #[error("cached generation is unavailable: {source_id}/{file_id}")]
+    CachedGenerationUnavailable {
+        source_id: String,
+        file_id: String,
+        #[source]
+        source: CacheStoreError,
     },
 
     #[error("configured log source root is unavailable: {source_id}")]

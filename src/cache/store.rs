@@ -232,6 +232,50 @@ impl CacheStore {
         self.pin_generation(source_identifier, remote_identifier, &generation)
     }
 
+    pub fn lease_generation(
+        &self,
+        source_identifier: &str,
+        remote_identifier: &str,
+        generation_id: &GenerationId,
+    ) -> Result<GenerationPin, CacheStoreError> {
+        validate_source_identifier(source_identifier)?;
+        validate_remote_identifier(remote_identifier)?;
+        let Some((source_id, file_id)) = self.lookup_ids(source_identifier, remote_identifier)?
+        else {
+            return Err(CacheStoreError::GenerationNotFound);
+        };
+        let key = GenerationKey::new(source_id.clone(), file_id.clone(), generation_id.clone());
+        let mut state = self.lock_state()?;
+        let manifest = self
+            .load_manifest_by_ids(&source_id, &file_id)?
+            .ok_or(CacheStoreError::GenerationNotFound)?;
+        let record = manifest
+            .generations
+            .iter()
+            .find(|record| &record.generation == generation_id)
+            .cloned()
+            .ok_or(CacheStoreError::GenerationNotFound)?;
+        let path = self.generation_path(&key);
+        let file = open_regular_private_file(&path)?;
+        let actual_len = file.metadata()?.len();
+        if actual_len != record.data_len {
+            return Err(CacheStoreError::GenerationLengthMismatch {
+                expected: record.data_len,
+                actual: actual_len,
+            });
+        }
+        *state.pins.entry(key.clone()).or_insert(0) += 1;
+        drop(state);
+
+        Ok(GenerationPin {
+            inner: Arc::new(GenerationPinInner {
+                store: self.clone(),
+                key,
+                record,
+            }),
+        })
+    }
+
     pub fn pin_generation(
         &self,
         source_identifier: &str,
@@ -834,6 +878,53 @@ impl Drop for StagedAppend {
             self.file.take();
             let _ = fs::remove_file(&self.staging_path);
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct GenerationPin {
+    inner: Arc<GenerationPinInner>,
+}
+
+impl std::fmt::Debug for GenerationPin {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("GenerationPin")
+            .field("generation", &self.inner.key.generation_id)
+            .field("data_len", &self.inner.record.data_len)
+            .finish()
+    }
+}
+
+impl PartialEq for GenerationPin {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner.key == other.inner.key
+    }
+}
+
+impl Eq for GenerationPin {}
+
+impl GenerationPin {
+    #[must_use]
+    pub fn generation_id(&self) -> &GenerationId {
+        &self.inner.key.generation_id
+    }
+
+    #[must_use]
+    pub fn record(&self) -> &GenerationRecord {
+        &self.inner.record
+    }
+}
+
+struct GenerationPinInner {
+    store: CacheStore,
+    key: GenerationKey,
+    record: GenerationRecord,
+}
+
+impl Drop for GenerationPinInner {
+    fn drop(&mut self) {
+        self.store.unpin(&self.key);
     }
 }
 

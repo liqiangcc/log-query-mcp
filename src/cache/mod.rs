@@ -10,8 +10,8 @@ pub use manifest::{
     GenerationMetadata, GenerationRecord, ManifestValidationError,
 };
 pub use store::{
-    CacheStore, CacheStoreError, CacheStoreLimits, GcReport, PinnedGeneration, RecoveryReport,
-    StagedAppend, StagedGeneration,
+    CacheStore, CacheStoreError, CacheStoreLimits, GcReport, GenerationPin, PinnedGeneration,
+    RecoveryReport, StagedAppend, StagedGeneration,
 };
 pub use sync::{
     CONTINUITY_FINGERPRINT_WINDOW_BYTES, RemoteSyncTarget, SyncAction, SyncEngine, SyncError,

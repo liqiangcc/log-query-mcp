@@ -45,13 +45,25 @@ impl fmt::Debug for SyncEngine {
 
 impl SyncEngine {
     pub fn from_config(config: &AppConfigV2, cache: CacheStore) -> Result<Self, SyncError> {
-        if config.limits.max_sync_bytes_per_query == 0 {
+        Self::new(
+            cache,
+            SshConnectionManager::from_config(config)?,
+            config.limits.max_sync_bytes_per_query,
+        )
+    }
+
+    pub fn new(
+        cache: CacheStore,
+        connections: SshConnectionManager,
+        max_sync_bytes_per_query: u64,
+    ) -> Result<Self, SyncError> {
+        if max_sync_bytes_per_query == 0 {
             return Err(SyncError::InvalidConfiguration);
         }
         Ok(Self {
             cache,
-            connections: SshConnectionManager::from_config(config)?,
-            max_sync_bytes_per_query: config.limits.max_sync_bytes_per_query,
+            connections,
+            max_sync_bytes_per_query,
         })
     }
 
