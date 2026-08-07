@@ -9,8 +9,7 @@ use thiserror::Error;
 
 use crate::{
     AppConfig, CONFIG_VERSION, ConfigValidationError, DirectoryRule, Encoding, LimitsConfigV2,
-    LogSourceConfig, TimestampRule,
-    config_limits_v2::LimitsConfigV2ValidationError,
+    LogSourceConfig, TimestampRule, config_limits_v2::LimitsConfigV2ValidationError,
 };
 
 pub const CONFIG_VERSION_V2: u32 = 2;
