@@ -66,7 +66,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
 if [[ -n "${tag}" ]]; then
-  scripts/check_release_tag.sh "${tag}"
+  bash scripts/check_release_tag.sh "${tag}"
 fi
 
 version="$(
@@ -88,7 +88,7 @@ fi
 [[ -f examples/log-query-mcp.v1.json ]] || die "missing v1 example config"
 [[ -f examples/log-query-mcp.v2.remote.json ]] || die "missing v2 remote example config"
 [[ -f systemd/log-query-mcp.service ]] || die "missing systemd unit"
-for script in install.sh uninstall.sh upgrade.sh rollback.sh; do
+for script in install.sh uninstall.sh upgrade.sh rollback.sh healthcheck.sh; do
   [[ -f "scripts/${script}" ]] || die "missing ${script}"
 done
 
@@ -100,7 +100,7 @@ install -m 0755 "${bin_dir}/log-query-mcp-stdio" "${out_dir}/${package_name}/bin
 install -D -m 0644 examples/log-query-mcp.v1.json "${out_dir}/${package_name}/examples/log-query-mcp.v1.json"
 install -D -m 0644 examples/log-query-mcp.v2.remote.json "${out_dir}/${package_name}/examples/log-query-mcp.v2.remote.json"
 install -D -m 0644 systemd/log-query-mcp.service "${out_dir}/${package_name}/systemd/log-query-mcp.service"
-for script in install.sh uninstall.sh upgrade.sh rollback.sh; do
+for script in install.sh uninstall.sh upgrade.sh rollback.sh healthcheck.sh; do
   install -D -m 0755 "scripts/${script}" "${out_dir}/${package_name}/scripts/${script}"
 done
 install -D -m 0644 README.md "${out_dir}/${package_name}/README.md"
