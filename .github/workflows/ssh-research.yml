@@ -1,5 +1,6 @@
 name: SSH Transport
 
+# This read-only workflow is also the M4 live gate for SSH/SFTP -> SyncEngine -> CacheStore.
 on:
   push:
     branches:
