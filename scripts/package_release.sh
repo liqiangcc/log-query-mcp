@@ -110,6 +110,7 @@ for doc in \
   docs/OPERATIONS.md \
   docs/PRODUCTION_CHECKLIST.md \
   docs/M6_PERFORMANCE_BASELINE_V2.md \
+  docs/M6_FINAL_BASELINE_V2.md \
   docs/RELEASE_READINESS_V2.md; do
   if [[ -f "${doc}" ]]; then
     install -D -m 0644 "${doc}" "${out_dir}/${package_name}/${doc}"
