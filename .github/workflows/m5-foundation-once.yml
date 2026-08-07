@@ -35,13 +35,13 @@ jobs:
           cargo check --locked --all-targets --all-features
           cargo test --locked --all-targets --all-features
           git diff --check
-          CHANGED=$(git diff --name-only | grep -Ev '^(src/cache/store.rs|src/cache/mod.rs|src/cache/sync.rs|src/lib.rs|src/backend/mod.rs|src/backend/local.rs|src/backend/remote.rs|src/source_registry.rs|src/query_engine.rs|src/stateful_query.rs|src/context_reader.rs|src/tool_error.rs)$' || true)
+          CHANGED=$(git diff --name-only | grep -Ev '^(src/cache/store.rs|src/cache/mod.rs|src/cache/sync.rs|src/lib.rs|src/backend/mod.rs|src/backend/local.rs|src/backend/remote.rs|src/source_registry.rs|src/query_engine.rs|src/stateful_query.rs|src/context_reader.rs|src/tool_error.rs|tests/v2_m1_config_backend.rs)$' || true)
           test -z "$CHANGED"
 
       - name: Commit verified M5 foundation
         run: |
-          git add -- src/cache/store.rs src/cache/mod.rs src/cache/sync.rs src/lib.rs src/backend/mod.rs src/backend/local.rs src/backend/remote.rs src/source_registry.rs src/query_engine.rs src/stateful_query.rs src/context_reader.rs src/tool_error.rs
-          CHANGED=$(git diff --cached --name-only | grep -Ev '^(src/cache/store.rs|src/cache/mod.rs|src/cache/sync.rs|src/lib.rs|src/backend/mod.rs|src/backend/local.rs|src/backend/remote.rs|src/source_registry.rs|src/query_engine.rs|src/stateful_query.rs|src/context_reader.rs|src/tool_error.rs)$' || true)
+          git add -- src/cache/store.rs src/cache/mod.rs src/cache/sync.rs src/lib.rs src/backend/mod.rs src/backend/local.rs src/backend/remote.rs src/source_registry.rs src/query_engine.rs src/stateful_query.rs src/context_reader.rs src/tool_error.rs tests/v2_m1_config_backend.rs
+          CHANGED=$(git diff --cached --name-only | grep -Ev '^(src/cache/store.rs|src/cache/mod.rs|src/cache/sync.rs|src/lib.rs|src/backend/mod.rs|src/backend/local.rs|src/backend/remote.rs|src/source_registry.rs|src/query_engine.rs|src/stateful_query.rs|src/context_reader.rs|src/tool_error.rs|tests/v2_m1_config_backend.rs)$' || true)
           test -z "$CHANGED"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
