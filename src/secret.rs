@@ -11,7 +11,7 @@ pub struct EnvSecretResolver;
 
 impl SecretResolver for EnvSecretResolver {
     fn resolve(&self, secret_ref: &str) -> Result<SecretValue, SecretResolveError> {
-        resolve_environment_with(secret_ref, env::var_os)
+        resolve_environment_with(secret_ref, |name| env::var_os(name))
     }
 }
 
