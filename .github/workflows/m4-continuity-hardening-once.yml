@@ -40,4 +40,4 @@ jobs:
           git commit -m 'fix(cache): verify continuity before unchanged sync'
           git push origin HEAD:feat/v2-m1-backend-config
 
-# Rerun marker: verify against the live M4 integration wiring.
+# Rerun marker: isolated after live test rustfmt cleanup.
