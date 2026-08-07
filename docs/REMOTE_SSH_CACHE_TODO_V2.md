@@ -21,218 +21,149 @@ v2 全部实现继续遵守：
 - SSH 是内部 Transport，不是业务 API。
 - Cache generation + snapshot length 是 Remote cursor / match_ref 的稳定边界。
 
-## 1. M0：契约与技术预研 — DONE
+## 1. M0～M5 — DONE
 
-- [x] ADR-0007～0011。
-- [x] v2 config / error schema。
-- [x] v1 + v2 Contracts Gate。
-- [x] `russh + russh-sftp + Tokio` 技术预研。
-- [x] Password / private key / encrypted key / known_hosts 路径验证。
-- [x] 明确 Remote Exec 不属于架构。
+- [x] M0：ADR、v2 config/error contract、`russh + russh-sftp` research。
+- [x] M1：v1/v2 config routing、`SourceBackend` / `LocalBackend`。
+- [x] M2：SecretResolver、Password/private/encrypted key、strict known_hosts、只读 SFTP、timeout/broken-session/semaphore、300 range-read handle regression。
+- [x] M3：opaque Cache IDs、0700/0600、atomic generation/append、crash recovery、snapshot pin、quota/GC。
+- [x] M4：full/tail/from_now、incremental append、continuity fingerprint、rotation/truncate/replacement、sync budget。
+- [x] M5：Remote discovery/query through local cache、Local+Remote、cursor/match_ref generation consistency、`CACHE_SCOPE_EXCEEDED`。
 
-## 2. M1：Config + Source Backend — DONE
+实现基线：
 
-- [x] v1/v2 配置版本路由。
-- [x] `SourceBackend` / `LocalBackend` 抽象。
-- [x] v2 Local Source 可运行。
-- [x] Local `openat2()` 边界保持。
+- [`M1_IMPLEMENTATION_BASELINE_V2.md`](./M1_IMPLEMENTATION_BASELINE_V2.md)
+- [`M2_IMPLEMENTATION_BASELINE_V2.md`](./M2_IMPLEMENTATION_BASELINE_V2.md)
+- [`M3_IMPLEMENTATION_BASELINE_V2.md`](./M3_IMPLEMENTATION_BASELINE_V2.md)
+- [`M4_IMPLEMENTATION_BASELINE_V2.md`](./M4_IMPLEMENTATION_BASELINE_V2.md)
+- [`M5_IMPLEMENTATION_BASELINE_V2.md`](./M5_IMPLEMENTATION_BASELINE_V2.md)
 
-基线：[`M1_IMPLEMENTATION_BASELINE_V2.md`](./M1_IMPLEMENTATION_BASELINE_V2.md)
+## 2. M6-A～D Security / Fault / Multi-Server — DONE
 
-## 3. M2：SSH/SFTP Transport — DONE
-
-- [x] `SecretResolver`。
-- [x] Password / private key / encrypted private key。
-- [x] strict Host Key Verification。
-- [x] connect / operation timeout。
-- [x] global SSH semaphore。
-- [x] SFTP read-only `stat/lstat/read_dir/read_range`。
-- [x] broken-session / cancellation / network fault 语义。
-- [x] deterministic file-handle shutdown。
-- [x] 300 continuous bounded range-read regression。
-- [x] 无 exec/shell/write/upload。
-
-基线：[`M2_IMPLEMENTATION_BASELINE_V2.md`](./M2_IMPLEMENTATION_BASELINE_V2.md)
-
-## 4. M3：CacheStore — DONE
-
-- [x] opaque internal IDs。
-- [x] 0700 directory / 0600 file。
-- [x] catalog / manifest persistence。
-- [x] staging + atomic generation commit。
-- [x] append continuation + crash tail recovery。
-- [x] snapshot fixed length。
-- [x] multi-generation / pin-aware GC。
-- [x] global/per-source quota。
-- [x] corruption/orphan recovery tests。
-
-基线：[`M3_IMPLEMENTATION_BASELINE_V2.md`](./M3_IMPLEMENTATION_BASELINE_V2.md)
-
-## 5. M4：SyncEngine — DONE
-
-- [x] `full / tail / from_now` bootstrap。
-- [x] incremental append。
-- [x] 64 KiB continuity fingerprint。
-- [x] truncate / replacement / continuity mismatch → new generation。
-- [x] sync byte budget。
-- [x] sync failure preserves last valid cache。
-- [x] real SFTP → SyncEngine → CacheStore live gate。
-
-基线：[`M4_IMPLEMENTATION_BASELINE_V2.md`](./M4_IMPLEMENTATION_BASELINE_V2.md)
-
-## 6. M5：Remote Query Integration — DONE
-
-- [x] Remote explicit files + non-recursive directory discovery。
-- [x] regular-file / suffix / ordering validation。
-- [x] on-query refresh。
-- [x] Remote → Cache → existing Scanner / Query Engine。
-- [x] Local + Remote mixed query。
-- [x] cursor generation/snapshot pin。
-- [x] cursor continuation does not refresh Remote。
-- [x] match_ref generation pin。
-- [x] `get_log_context` normal path uses 0 SSH。
-- [x] old match_ref remains stable across rotation within TTL。
-- [x] incomplete cache returns `CACHE_SCOPE_EXCEEDED`。
-- [x] runtime v2 Remote/Sync/Cache error contract。
-
-基线：[`M5_IMPLEMENTATION_BASELINE_V2.md`](./M5_IMPLEMENTATION_BASELINE_V2.md)
-
-## 7. M6-A～D：Security / Fault / Multi-Server / Cache — DONE
-
-- [x] AI cannot submit host / username / credential / arbitrary remote path。
-- [x] Remote symlink escape rejected。
-- [x] read-only transport boundary proven。
-- [x] errors/results redact Secret and infrastructure paths。
-- [x] cache permissions / corruption / external-deletion / recovery evidence。
+- [x] AI cannot submit SSH host/user/credential/root/arbitrary path。
+- [x] Remote symlink escape rejected；regular-file-only。
+- [x] no Remote Exec / Shell / write / upload / delete。
+- [x] redacted public errors/results。
+- [x] cache corruption/orphan/quota/recovery evidence。
 - [x] auth / host-key / timeout / disconnect / cancellation failure matrix。
 - [x] server restart fail-closed + recovery。
-- [x] two independent SSH servers from one local MCP。
-- [x] Password on Server A + encrypted private key on Server B。
-- [x] one-server failure does not contaminate the other server cache。
-- [x] Local + Server A + Server B mixed query。
+- [x] two independent SSH servers + Local mixed query。
+- [x] global SSH semaphore + one-server failure isolation。
 
 矩阵：[`M6_SECURITY_FAULT_MATRIX_V2.md`](./M6_SECURITY_FAULT_MATRIX_V2.md)
 
-## 8. M6-E：Performance — IMPLEMENTATION COMPLETE
+## 3. M6-E Performance — IMPLEMENTATION COMPLETE
 
 Large-file evidence：
 
 - [x] 100 MiB full bootstrap。
 - [x] 1 GiB full bootstrap。
 - [x] 10 GiB logical Tail(64 MiB) bootstrap。
-- [x] unchanged continuity probe。
-- [x] 1 MiB append。
-- [x] 100 MiB append。
+- [x] unchanged continuity probe = 64 KiB。
+- [x] append only transfers payload + bounded probes。
 - [x] local cache scan = 0 remote bytes。
 - [x] 300 continuous range-read handle regression。
-- [x] global SSH session limit evidence。
 
 Concurrency：
 
-- [x] single-server 4-query concurrency benchmark harness implemented。
-- [x] dual-server concurrent query benchmark harness implemented。
-- [x] harness wired into real two-OpenSSH `SSH Transport` workflow。
-- [ ] newest live elapsed metrics — **BLOCKED by GitHub Actions Billing before runner start**。
+- [x] single-server 4-query benchmark harness。
+- [x] dual-server concurrent-query benchmark harness。
+- [x] harness wired into real two-OpenSSH SSH Transport workflow。
+- [ ] newest live elapsed metrics — **BLOCKED before runner start by GitHub Actions Billing**。
 
 基线：[`M6_PERFORMANCE_BASELINE_V2.md`](./M6_PERFORMANCE_BASELINE_V2.md)
 
-## 9. M6-F：Production Readiness — DONE
+## 4. M6-F Production Readiness — DONE
 
-### Production docs
+### Release / package
 
-- [x] README Local + Remote + security + performance boundary。
-- [x] INSTALL v1 Local / v2 Remote / Secret / known_hosts / cache / safe upgrade。
-- [x] OPERATIONS Remote errors / host-key rotation / cache capacity / recovery。
-- [x] PRODUCTION_CHECKLIST distinguishes automated evidence from target-server acceptance。
-- [x] RELEASE_READINESS_V2 release contract。
-- [x] M6_FINAL_BASELINE_V2 final implementation status。
+- [x] binaries + v1/v2 examples + systemd + production docs。
+- [x] install / uninstall / `healthcheck.sh` / upgrade / rollback helpers。
+- [x] `BUILDINFO` + inner/outer `SHA256SUMS`。
+- [x] package validator checks shape, executable helpers, checksum and BUILDINFO/version consistency。
+- [x] Release package job defaults to `contents: read`。
+- [x] only tag publish job receives `contents: write` and depends on verified package job。
 
-### Release package
+### Protocol health / lifecycle
 
-- [x] Package contains binaries / v1+v2 examples / systemd / production docs。
-- [x] Package contains install / uninstall / protocol health / upgrade / rollback helpers。
-- [x] `BUILDINFO`。
-- [x] internal `SHA256SUMS`。
-- [x] outer archive `SHA256SUMS`。
-- [x] `validate_release_package.sh` verifies package shape + executable helpers + inner/outer checksums + BUILDINFO/version consistency。
-- [x] Release workflow package job defaults to `contents: read`。
-- [x] only tag publish job receives `contents: write`。
-- [x] publish depends on verified package job。
+- [x] standard health check requires systemd active + valid MCP `initialize` response。
+- [x] protocol-health failure matrix covers inactive service / JSON-RPC error / wrong server / transport failure。
+- [x] upgrade verifies checksum before mutation, preserves config, backs up runtime state and atomically replaces runtime files。
+- [x] restart/protocol-health failure triggers automatic rollback。
+- [x] rollback restores exact previous state and must pass protocol health。
+- [x] rollback preserves backed-up ownership/modes for service-readable config/unit。
+- [x] isolated lifecycle tests cover successful upgrade / explicit rollback / restart failure / corrupt package / tar input。
 
-### Protocol health / Upgrade / rollback
+### Final Candidate helper / docs
 
-- [x] standard `healthcheck.sh` validates systemd active + MCP `initialize` protocol health。
-- [x] health test matrix covers inactive service / JSON-RPC error / wrong server / transport failure。
-- [x] `upgrade.sh` verifies checksum before mutation。
-- [x] backup binaries / BUILDINFO / config / unit。
-- [x] normal upgrade preserves production config。
-- [x] same-directory temporary + rename replacement。
-- [x] restart + MCP protocol health check。
-- [x] automatic rollback after post-mutation failure。
-- [x] explicit `rollback.sh` + protocol health check after restore。
-- [x] rollback preserves backed-up owner/group so `root:log-query-mcp` config ownership is not lost。
-- [x] isolated test covers success / explicit rollback / restart failure / corrupt package / tar input。
-- [x] isolated test validates config `0640` and unit `0644` metadata restoration。
-- [x] isolated upgrade/rollback test executed locally after final hardening and passed。
-- [x] package validator valid/corrupt cases executed locally and behaved fail-closed。
-- [x] lifecycle shell helpers/test entry points normalized to executable Git modes (`ddb87133183c44af6164e30efca01115e708e610`)。
-
-### Final Candidate helper
-
-- [x] `scripts/rc_check.sh` added as one-command repository-local Final Candidate Gate。
-- [x] checks shell syntax / Contracts / rustfmt / Clippy / full tests / release build。
-- [x] checks protocol-health failure matrix + upgrade/rollback failure matrix。
-- [x] assembles and validates release package。
-- [x] explicitly documents that real SSH/SFTP live evidence and target-production acceptance remain separate gates。
+- [x] `scripts/rc_check.sh` runs all repository-local non-live gates in one command。
+- [x] Rust、Contracts、SSH Transport、Release expose manual rerun paths；M6 Performance already exposes profile-based `workflow_dispatch`。
+- [x] README / INSTALL / OPERATIONS / PRODUCTION_CHECKLIST / RELEASE_READINESS / M6_FINAL aligned with v2。
+- [x] Draft PR #25 updated with final production-readiness scope。
 
 Release contract：[`RELEASE_READINESS_V2.md`](./RELEASE_READINESS_V2.md)
 
-## 10. Final Gate — EXTERNALLY BLOCKED
+## 5. Final Gate — EXTERNALLY BLOCKED
 
-历史 M1～M6 relevant Rust / Contracts / SSH / Performance Gates 已经有成功证据。
+Latest verified repository head before the final baseline-only update:
 
-Latest observed candidate `5926aa48f312d5875dd0650990aa4238676d0a9d` again reached GitHub Actions but was rejected before any runner step. Rust run `31200587991` / job `92939348162` reported：
+```text
+d38337b855d59649cb0143f515238510b992b2e4
+```
+
+On that exact head GitHub created these PR candidate runs:
+
+```text
+Rust      31200874586
+Contracts 31200875744
+Release   31200875028
+```
+
+All required package/test jobs were rejected **before runner execution**. Rust and Contracts jobs had `steps=[]`; Release package had `steps=[]` and its dependent publish job was correctly skipped. GitHub's annotation states:
 
 ```text
 The job was not started because recent account payments have failed
 or your spending limit needs to be increased.
 ```
 
-因此当前状态必须区分：
+因此这不是已知代码失败，但也绝不能标成 PASS。
 
-```text
-repository implementation       COMPLETE
-repository-local RC helper      COMPLETE
-local release-script validation PASS (recorded isolated evidence)
-Draft PR                        OPEN (#25)
-latest candidate Actions        BLOCKED by GitHub Billing
-RC Ready                        NO
-```
+Canonical blocker：Issue #23。
 
-Billing 恢复后只剩验证动作，不再需要设计/实现新的 v2 功能：
+Billing 恢复后剩余的是验证动作，不是继续开发：
 
+- [ ] run `bash scripts/rc_check.sh` on the candidate source/environment and record result。
 - [ ] candidate Rust Gate PASS。
 - [ ] candidate Contracts Gate PASS。
-- [ ] candidate SSH live Gate PASS，记录 concurrency metrics。
-- [ ] candidate Release package/upgrade Gate PASS。
-- [ ] 如相关性能代码未变化，可引用 large-file run；否则重跑 M6 Performance。
-- [ ] 确认没有 unexplained critical failure。
+- [ ] candidate SSH live Gate PASS，记录 single/dual concurrency metrics。
+- [ ] candidate Release Gate PASS（shell syntax / smoke / protocol health / lifecycle / package validation）。
+- [ ] 若 transport/sync/performance 相关代码相对成功 large-file evidence 有变化，则重跑 M6 Performance；否则记录可追溯复用理由。
+- [ ] 确认没有 unexplained critical failure，然后才可把 RC 标成 Ready。
 
-## 11. 发布/环境动作
+## 6. 发布 / 环境动作
 
-- [x] 创建 Draft PR #25。
-- [ ] 将 PR 标记 Ready / 合并 main — **BLOCKED until Final Gate green and requires explicit publication authorization**。
-- [ ] 创建 `v{version}` tag — **BLOCKED until Final Gate green and requires explicit publication authorization**。
-- [ ] 发布 GitHub Release — 由 tag workflow执行，**BLOCKED until Final Gate green**。
-- [ ] 目标生产服务器 INSTALL/Remote/AI-client/upgrade/rollback 人工验收 — 需要实际目标环境。
+这些不是仓库剩余实现任务：
 
-## 12. 最终判断
+- [x] Draft PR #25 已创建，保持 Draft。
+- [ ] Mark PR Ready / merge main — Final Gate 全绿后且需显式授权。
+- [ ] 创建 `v{Cargo.toml version}` tag — Final Gate 全绿后且需显式授权。
+- [ ] GitHub Release — tag workflow，Final Gate 未绿时禁止发布。
+- [ ] 目标生产服务器 INSTALL / Remote / AI-client / upgrade / rollback 人工验收 — 必须在真实目标环境执行。
 
-v2 的仓库设计与实现工作已经全部完成。当前没有剩余的已知仓库功能/安全/发布工具实现任务。
+## 7. 最终判断
 
-当前未完成项全部属于以下两类，而不是继续开发：
+```text
+known v2 repository design work        0 remaining
+known v2 implementation work           0 remaining
+security/fault implementation          COMPLETE
+performance harness implementation     COMPLETE
+production/release tooling             COMPLETE
+production documentation               COMPLETE
+Draft PR                               OPEN (#25)
+latest candidate CI                    BLOCKED externally (Billing)
+RC Ready                               NO
+formal Release                         NOT CREATED
+production target acceptance           PENDING target environment
+```
 
-1. **外部验证阻塞**：GitHub Actions Billing 导致最新 candidate Final Gate 无法获得 runner；
-2. **发布/环境动作**：Ready/merge/tag/Release 需要 Final Gate 全绿及显式发布授权，生产目标验收必须在真实目标环境执行。
-
-在 Billing 恢复前继续修改业务代码只会制造新的 candidate，而不会解决当前阻塞。
+继续修改业务代码不会解决当前阻塞，只会制造新的 candidate。下一步应是解除 Issue #23 的外部 Billing 阻塞并执行 Final Gate；随后才进入受控的 Ready/merge/tag/release/生产验收流程。
