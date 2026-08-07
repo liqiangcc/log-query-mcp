@@ -10,5 +10,5 @@ pub use manifest::{
 };
 pub use store::{
     CacheStore, CacheStoreError, CacheStoreLimits, GcReport, PinnedGeneration, RecoveryReport,
-    StagedGeneration,
+    StagedAppend, StagedGeneration,
 };

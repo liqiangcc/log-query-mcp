@@ -44,7 +44,7 @@ pub use cache::{
     ByteRange, CACHE_CATALOG_VERSION, CACHE_MANIFEST_VERSION, CacheCoverage, CacheFileId,
     CacheManifest, CacheSourceId, CacheStore, CacheStoreError, CacheStoreLimits, GcReport,
     GenerationId, GenerationKey, GenerationMetadata, GenerationRecord, ManifestValidationError,
-    PinnedGeneration, RecoveryReport, StagedGeneration,
+    PinnedGeneration, RecoveryReport, StagedAppend, StagedGeneration,
 };
 pub use config::{
     AppConfig, CONFIG_VERSION, ConfigLoadError, ConfigValidationError, DirectoryRule, Encoding,
