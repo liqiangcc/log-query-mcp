@@ -176,8 +176,7 @@ async fn remote_query_end_to_end_preserves_snapshots_and_context() {
 
     let first = query_service
         .search(
-            StatefulQueryRequest::new(vec!["remote-query".to_owned()], "MATCH")
-                .with_max_results(1),
+            StatefulQueryRequest::new(vec!["remote-query".to_owned()], "MATCH").with_max_results(1),
         )
         .await
         .expect("remote first page");
