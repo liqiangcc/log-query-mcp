@@ -1,0 +1,46 @@
+name: M3 Fix Unused Mut Once
+
+on:
+  push:
+    branches:
+      - "feat/v2-m1-backend-config"
+    paths:
+      - ".github/workflows/m3-fix-unused-mut-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.ref == 'refs/heads/feat/v2-m1-backend-config'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out current branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/v2-m1-backend-config
+
+      - name: Apply exact Clippy fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/cache/store.rs')
+          text = path.read_text()
+          old = '    pub fn collect_garbage(&self) -> Result<GcReport, CacheStoreError> {\n        let mut state = self.lock_state()?;'
+          new = '    pub fn collect_garbage(&self) -> Result<GcReport, CacheStoreError> {\n        let state = self.lock_state()?;'
+          if text.count(old) != 1:
+              raise SystemExit('expected exact collect_garbage pattern once')
+          path.write_text(text.replace(old, new))
+          PY
+          cargo fmt --all -- --check
+          git diff --check
+          test "$(git diff --name-only)" = "src/cache/store.rs"
+
+      - name: Commit exact fix
+        run: |
+          git add -- src/cache/store.rs
+          test "$(git diff --cached --name-only)" = "src/cache/store.rs"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(cache): remove unnecessary mutable binding'
+          git push origin HEAD:feat/v2-m1-backend-config
