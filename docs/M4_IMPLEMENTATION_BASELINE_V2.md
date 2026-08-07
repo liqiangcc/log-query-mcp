@@ -3,42 +3,39 @@
 > 状态：M4 SyncEngine implementation complete  
 > 日期：2026-08-07  
 > 分支：`feat/v2-m1-backend-config`  
-> M4 最终代码 Gate 基线：`71a4b1b7e559345394867fd43407c180107c24a0`  
-> SyncEngine 接入提交：`1189aba3a746fbc0424b66be7667e58dd8a426ae`  
-> Remote Path 边界加固提交：`b16eab52b34e49f67b3642911652e7f074708d5c`  
-> 正式 Rust Gate：run `31178915781`  
-> 正式 Contracts Gate：run `31178915591`  
+> M4 最终代码 Gate 基线：`65f0d47f0f09c31952059bb3e01cdda908133076`  
+> SyncEngine 接入：`1189aba3a746fbc0424b66be7667e58dd8a426ae`  
+> Remote Path 边界加固：`b16eab52b34e49f67b3642911652e7f074708d5c`  
+> Continuity 加固：`e1ed09bd080998d075416900c42d152ae2a77bda`  
+> Real SFTP M4 集成测试：`2958d68afaa3e80d9fcd491cb1b50b7e1242b9ba`  
+> Real SFTP Gate 接线：`f7147ddfc5977b75103fb5ac438c1315848c0e58`  
+> 正式 Rust Gate：run `31180209710`  
+> 正式 Contracts Gate：run `31180209975`  
+> 正式 SSH/SFTP Live Gate：run `31180209929`  
 > 上游清单：[`REMOTE_SSH_CACHE_TODO_V2.md`](./REMOTE_SSH_CACHE_TODO_V2.md)  
 > M3 基线：[`M3_IMPLEMENTATION_BASELINE_V2.md`](./M3_IMPLEMENTATION_BASELINE_V2.md)
 
 ## 1. M4 目标
 
-M4 把 M2 的 SSH/SFTP 只读 Transport 与 M3 的 CacheStore 连接起来，把远程不断变化的日志安全转换成稳定、可恢复的本地 Cache Generation。
+M4 把 M2 的只读 SSH/SFTP Transport 与 M3 CacheStore 连接起来，把不断变化的远程日志转换成稳定、可恢复、有 generation 边界的本地缓存。
 
-核心目标：
+M4 已完成：
 
-- 首次同步支持 `full` / `tail(bytes)` / `from_now`；
-- 正常增长只下载增量 range；
+- `full` / `tail(bytes)` / `from_now` bootstrap；
+- 正常增长只持久化新增 range；
 - 正常 append 保持同一个 generation；
 - truncate / replacement / continuity mismatch 创建新 generation；
-- rotation/replacement 不允许把两个不同物理日志错误拼接；
-- 任意同步失败不破坏最后有效 cache；
-- 同步字节数受 `max_sync_bytes_per_query` 约束；
-- Remote path 只能由管理员配置推导，不能从调用方注入绝对路径。
+- 64 KiB SHA-256 continuity fingerprint；
+- 同步失败保持最后有效 cache；
+- `max_sync_bytes_per_query` 对所有远程读取生效；
+- Remote path 只能从管理员配置推导；
+- fake-reader fault tests + 真实 OpenSSH/SFTP integration test。
 
-M4 不负责：
-
-- Remote directory discovery；
-- Remote Source 注册进 Query Engine；
-- coverage 到 `CACHE_SCOPE_EXCEEDED` 的查询响应映射；
-- cursor / `match_ref` 与 generation pin 的端到端生命周期；
-- Local + Remote 混合查询。
-
-这些职责属于 M5。
+M4 不负责 Remote discovery、Query Engine 集成、coverage 查询错误映射以及 cursor / `match_ref` 的 generation 生命周期。这些职责属于 M5。
 
 ---
 
-## 2. 架构
+## 2. 架构边界
 
 ```text
 LogSourceConfigV2
@@ -49,19 +46,14 @@ LogSourceConfigV2
                 │
                 ▼
            SyncEngine
-                │
-        ┌───────┴────────┐
-        │                │
-        ▼                ▼
-SshConnectionManager   CacheStore
-        │            begin_generation
-        ▼            begin_append
- SshReadTransport          │
- lstat + read_range        ▼
-        │           stable generation
-        └─────────┬────────┘
-                  ▼
-        continuity decision
+          /          \
+         /            \
+SshConnectionManager  CacheStore
+        │          begin_generation
+        │          begin_append
+        ▼               │
+ SshReadTransport       ▼
+ lstat + read_range  stable generation
 ```
 
 同步核心只需要远端：
@@ -84,21 +76,19 @@ remove
 upload
 ```
 
-生产实现使用 `SshReadTransport`；同步算法内部通过最小 `RemoteSyncReader` 接口解耦，因此 fault/rotation/continuity 场景可以用 deterministic fake reader 测试，而不扩大生产权限面。
+生产实现使用 `SshReadTransport`；同步算法通过私有最小 `RemoteSyncReader` 接口解耦，因此 rotation、continuity、断线和额度耗尽可以 deterministic 测试，而不扩大生产权限面。
 
 ---
 
-## 3. RemoteSyncTarget 安全边界
+## 3. Remote Path 安全边界
 
-M4 最终 API：
+M4 API：
 
 ```text
 RemoteSyncTarget::from_source(source, remote_identifier)
 ```
 
-调用方不能额外传入 `remote_path`。
-
-真实 SFTP path 只能由：
+调用方不能传任意 `remote_path`。真实 SFTP path 只能由：
 
 ```text
 source.root + remote_identifier
@@ -106,46 +96,31 @@ source.root + remote_identifier
 
 内部推导。
 
-### 3.1 root
+`remote_identifier` 必须是受控相对标识，拒绝：
 
-要求：
+- 绝对路径；
+- `.` / `..`；
+- 空 path component；
+- 反斜杠；
+- control character；
+- 超长标识。
 
-- Linux 绝对路径；
-- 非空；
-- 长度受限；
-- 不含 control character。
+因此后续 M5 不能把 MCP 客户端提交的任意路径直接送入 SSH/SFTP 层。
 
-### 3.2 remote identifier
-
-要求：
-
-- 必须是相对标识；
-- 不允许绝对路径；
-- 不允许 `.`；
-- 不允许 `..`；
-- 不允许空 path component；
-- 不允许反斜杠；
-- 不允许 control character；
-- 长度受限。
-
-因此 M5 以后只能把管理员配置 / discovery 得出的相对文件标识交给 M4，不能把 MCP 客户端提交的任意路径直接进入 SFTP Transport。
-
-`Debug` 输出不会打印真实 remote path，只显示 `<configured-remote-path>`。
+`Debug` 不打印真实 remote path，只显示 `<configured-remote-path>`。
 
 ---
 
 ## 4. Bootstrap
 
-### 4.1 `full`
+### `full`
 
 ```text
 cached_range = [0, remote_size)
 coverage     = Full
 ```
 
-首次下载整个远程文件。
-
-### 4.2 `tail(bytes)`
+### `tail(bytes)`
 
 ```text
 start        = max(remote_size - bytes, 0)
@@ -153,18 +128,14 @@ cached_range = [start, remote_size)
 coverage     = Tail(start)
 ```
 
-只保存要求的尾部范围。
-
-### 4.3 `from_now`
+### `from_now`
 
 ```text
 cached_range = [remote_size, remote_size)
 coverage     = FromNow(remote_size)
 ```
 
-首次不缓存历史正文，只记录开始位置。
-
-为了后续判断“同一物理文件是否继续增长”，`from_now` 首次同步允许读取当前位置之前最多 64 KiB 作为 continuity verification anchor；这些字节只用于 fingerprint，不进入 cache coverage，也不会被 Query Engine 当成可查询历史。
+`from_now` 首次不缓存历史正文，但允许读取同步边界之前最多 64 KiB 建立 continuity anchor。这些字节只用于 fingerprint，不属于可查询 coverage。
 
 ---
 
@@ -188,28 +159,37 @@ SHA-256
 sha256-v1:<start>:<end>:<hex>
 ```
 
-fingerprint 只覆盖旧同步边界附近的小窗口，不计算完整日志 hash。
+fingerprint 只覆盖上一次同步边界附近的小窗口，不计算整个日志文件 hash。
 
-目标不是证明整个远程文件永远未变化，而是回答同步时最关键的问题：
+关键原则：
 
-> 当前远程文件在上一次同步边界前的尾部，是否仍然与已经缓存的 generation 连续？
+> `size` 和 `mtime` 只能作为辅助 metadata，不能单独证明当前远程文件仍是同一物理日志。
 
-如果不能证明连续，则 fail-safe：不 append 到旧 generation。
+只要已有 current generation 且远程 size 没有变小，M4 都会先验证保存的 continuity fingerprint，再决定 `Unchanged` 还是 `Appended`。
+
+这意味着即使：
+
+```text
+size 相同
+mtime 相同
+```
+
+但内容已经被同名 replacement 替换，只要旧同步边界 fingerprint 不一致，就会创建新 generation，而不会错误返回 `Unchanged`。
 
 ---
 
 ## 6. 同步状态机
 
-观察远程文件时先使用 `lstat`，并要求：
+远程文件先通过 `lstat` 检查：
 
 ```text
 file_type == Regular
 size      != None
 ```
 
-symlink / directory / other / unknown 都拒绝同步。
+symlink / directory / other / unknown 均 fail-closed。
 
-### 6.1 首次出现
+### 首次出现
 
 ```text
 无 current generation
@@ -217,96 +197,62 @@ symlink / directory / other / unknown 都拒绝同步。
 → NewGeneration(InitialBootstrap)
 ```
 
-### 6.2 Cache 状态异常
-
-如果：
+### Cache 状态不可信
 
 ```text
 current.cached_range.end != current.remote_size
-```
-
-说明当前 cache 元数据不能作为安全 append 基础：
-
-```text
 → NewGeneration(CacheStateMismatch)
 ```
 
-### 6.3 Remote size 变小
+### Remote size 变小
 
 ```text
 remote_size < old_remote_size
 → NewGeneration(RemoteTruncated)
 ```
 
-典型场景：truncate、rotation 后新的同名文件更小。
+### Remote size 不小于旧 size
 
-### 6.4 size 不变
-
-如果：
-
-```text
-size 相同 && mtime 相同
-```
-
-则：
-
-```text
-Unchanged
-```
-
-不执行 `read_range`。
-
-如果：
-
-```text
-size 相同 && mtime 改变
-```
-
-MVP 采用保守策略：
-
-```text
-→ NewGeneration(MetadataChangedWithoutGrowth)
-```
-
-即使实际内容可能恰好相同，也不冒险把它继续视为旧物理日志。
-
-### 6.5 size 增大
-
-先读取上次保存的 fingerprint window：
+先验证旧 fingerprint：
 
 ```text
 remote[old_fingerprint.start .. old_fingerprint.end]
 ```
 
-并与 manifest 中 fingerprint 比较。
-
-如果 fingerprint 缺失/格式无效：
+若 fingerprint 缺失/格式无效：
 
 ```text
 → NewGeneration(ContinuityUnavailable)
 ```
 
-如果 fingerprint mismatch：
+若 fingerprint mismatch：
 
 ```text
 → NewGeneration(ContinuityMismatch)
 ```
 
-如果 fingerprint match：
+若 fingerprint match 且 size 相同：
 
 ```text
-→ 只下载 [old_remote_size, new_remote_size)
+→ Unchanged
+→ cached_bytes_written = 0
+```
+
+注意：`Unchanged` 并不代表 0 次远程读取；它会执行小范围 continuity probe，但不会下载/写入正文 payload。
+
+若 fingerprint match 且 size 增大：
+
+```text
+→ 仅下载 [old_remote_size, new_remote_size)
 → Appended
 → generation id 不变
 ```
 
-这能覆盖“truncate 后迅速重新增长到比旧 size 更大”的危险场景：单独比较 size 会误判为 append，continuity fingerprint 会阻止错误拼接。
+`mtime` 会继续记录在 manifest 中，但不再作为 continuity authority。mtime 改变而内容 fingerprint 不变时，不会无谓轮换 generation。
 
 ---
 
 ## 7. Incremental Append 提交顺序
-
-正常 append：
 
 ```text
 1. lstat observed metadata
@@ -314,58 +260,50 @@ remote[old_fingerprint.start .. old_fingerprint.end]
 3. pin current generation snapshot
 4. begin_append() 创建 staging
 5. 仅下载 [old_remote_size, observed_remote_size)
-6. 使用 old cached tail + 新增 bytes 构造新 fingerprint
-7. 从远程重新读取新 fingerprint window 复核
+6. old cached tail + 新增 bytes 形成新 fingerprint
+7. 远程重新读取新 fingerprint window 复核
 8. final lstat
 9. StagedAppend.commit()
 10. 原子更新 manifest
 ```
 
-如果第 1～8 步任意失败：
+第 1～8 步任意失败：
 
 ```text
-StagedAppend drop
-→ staging 被清理
-→ current manifest 不变
-→ 最后有效 generation 不变
+staging 被丢弃
+current manifest 不变
+最后有效 generation 不变
 ```
 
-如果进程在实际 append 数据后、manifest commit 前崩溃，则由 M3 recovery 按 manifest 中已提交 `data_len` 截掉额外尾部。
+若进程在数据 append 后、manifest commit 前崩溃，M3 recovery 会按 manifest 的已提交 `data_len` 截掉未提交尾部。
 
 ---
 
-## 8. Stable Snapshot 语义
+## 8. Stable Snapshot
 
 M4 的“同步到最新”定义为：
 
 > 建立一个在本次同步观察边界上的稳定 Snapshot。
 
-如果远程文件在同步过程中继续增长，只要已经观察的边界仍然连续且未被 truncate，M4 可以提交到本次开始时观察到的 `remote_size`；更晚的新字节在下一次 `on_query` sync 再增量下载。
+远程文件在同步过程中继续增长时，只要已经观察的边界仍连续且没有 shrink，本次可提交到开始时观察的 `remote_size`；更晚的新字节由下一次 `on_query` refresh 增量同步。
 
-如果同步过程中远程文件缩小，或者 fingerprint window 不再一致，则本次同步失败，不提交不稳定结果。
+如果同步过程中文件 shrink 或 fingerprint verification 不一致，本次 sync 失败，不发布不稳定结果。
 
 ---
 
 ## 9. Sync Byte Budget
 
-`max_sync_bytes_per_query` 约束的是：
+`max_sync_bytes_per_query` 统计所有 remote bytes read，包括：
 
 ```text
-所有 remote bytes read
-```
-
-不仅包括实际写入 cache 的日志数据，也包括 continuity verification probe。
-
-例如 append：
-
-```text
-旧 fingerprint probe
-+ 新增 range
+continuity probe
++ 新增 payload range
 + 新 fingerprint verification
-<= max_sync_bytes_per_query
 ```
 
-超过额度时返回：
+因此即使 `Unchanged`，continuity probe 也消耗预算。
+
+超过额度：
 
 ```text
 SyncError::SyncLimitExceeded
@@ -375,113 +313,117 @@ SyncError::SyncLimitExceeded
 
 ---
 
-## 10. Cache Capacity
+## 10. Rotation / Replacement 判定
 
-在开始写入候选 generation 前，M4 会先检查当前候选 cached range：
-
-```text
-candidate_len <= cache.max_bytes_per_source
-candidate_len <= cache.max_bytes
-```
-
-超过时返回：
-
-```text
-SyncError::CacheCapacityExceeded
-```
-
-M3 已提供完整 GC / retention / generation protection 机制。
-
-M4 不在同步路径中自行实现 cursor / `match_ref` 生命周期 GC；这些 token 的 generation pin 生命周期在 M5 Query Snapshot 集成时完成。
+| 场景 | M4 行为 |
+| --- | --- |
+| size 相同 + fingerprint match | `Unchanged`，不写 cache payload |
+| size 相同 + fingerprint mismatch | 新 generation |
+| mtime 变化 + fingerprint match | 保持当前 generation |
+| 正常增长 + fingerprint match | append，同 generation |
+| size 变小 | 新 generation |
+| size 增大 + old fingerprint mismatch | 新 generation |
+| fingerprint 不可用 | 新 generation |
+| truncate 后快速重新增长 | fingerprint mismatch 检出，新 generation |
+| 同步过程中 fingerprint 改变 | 本次 sync 失败 |
+| 同步过程中 file shrink | 本次 sync 失败 |
+| `application.log -> application.log.1` | 不同相对 identifier 拥有独立 cache identity；M5 discovery 负责发现 |
+| 新 `application.log` 创建 | 由 size + continuity fingerprint 判定，不与旧物理日志错误拼接 |
 
 ---
 
 ## 11. Failure Semantics
 
-### SSH / SFTP failure
-
-包括：
-
-```text
-connect failure
-auth failure
-host key failure
-operation timeout
-SFTP read failure
-broken transport
-```
-
-直接向上传递稳定错误，不使用 stale cache，因为 v2 MVP：
+SSH/SFTP connect/auth/host-key/timeout/read failure 直接返回稳定错误；v2 MVP 中：
 
 ```text
 allow_stale_on_error = false
 ```
 
-已有有效 cache 保持不变。
+所以失败不会静默返回 stale cache，但已有最后有效 cache 也不会被破坏。
 
-### Remote file deletion
+Remote file 删除目前会表现为 SFTP/transport sync error；语义仍然是 refresh 失败、最后有效 generation 不变。
 
-当前 M2 Transport 不对所有 SFTP server error 细分 `ENOENT`；文件删除会表现为 transport/SFTP sync error。
+本地 staging / disk failure 在 manifest commit 前不会发布候选 generation。
 
-语义仍然是：
+Crash recovery 继承 M3：
+
+- 清理 orphan staging；
+- 回收未被 manifest 引用的 generation；
+- data 比 manifest 长时截回已提交长度；
+- data 比 manifest 短时 fail-closed。
+
+---
+
+## 12. 测试证据
+
+### Deterministic M4 tests
+
+覆盖：
+
+- full bootstrap；
+- tail bootstrap；
+- from_now bootstrap + append；
+- unchanged 必须验证 continuity；
+- 正常 append 只写新增 payload；
+- truncate 新 generation；
+- same-size same-mtime replacement 仍能检测；
+- mtime 改变但内容未变不会误 rotation；
+- truncate 后快速增长由 fingerprint mismatch 检出；
+- append read failure 保留旧 generation；
+- sync byte limit failure 不发布 manifest；
+- remote path 从 configured root 推导；
+- `../secret.log` / `/etc/passwd` 被拒绝。
+
+Continuity hardening Gate：
 
 ```text
-本次 refresh 失败
-最后有效 cache 不被替换
-不静默返回 stale data
+M4 Continuity Hardening Once
+run 31179774011
+12 passed, 0 failed
 ```
 
-### Local staging / disk failure
+### Real OpenSSH/SFTP Gate
 
-在 manifest commit 前失败不会发布新 generation。
+永久测试：
 
-### Crash recovery
+```text
+tests/m4_sync_live.rs
+```
 
-继承 M3：
+真实链路：
 
-- orphan staging 会在 recovery 清理；
-- 未被 manifest 引用的 generation 文件会被回收；
-- append data 比 manifest 长时会截回已提交长度；
-- data 比 manifest 声明短时 fail-closed，不静默修复。
+```text
+OpenSSH sshd
+→ password auth + known_hosts
+→ SFTP
+→ SshReadTransport
+→ SyncEngine
+→ CacheStore
+```
+
+验证：
+
+```text
+initial full bootstrap
+→ remote append
+→ incremental sync
+→ same generation
+→ unchanged refresh
+→ cached content == first\nsecond\n
+```
+
+正式 SSH/SFTP Gate：
+
+```text
+SSH Transport run 31180209929  PASS
+```
+
+同一 Gate 还重新执行 M2 production SSH/SFTP live tests，并验证 research POC 仍兼容。
 
 ---
 
-## 12. Rotation / Replacement 判定表
-
-| 场景 | M4 行为 |
-| --- | --- |
-| 无变化 | `Unchanged`，0 range download |
-| 正常增长 + fingerprint match | append，同 generation |
-| size 变小 | 新 generation |
-| 同 size + mtime 变化 | 保守创建新 generation |
-| size 增大 + old fingerprint mismatch | 新 generation |
-| fingerprint 不可用 | 新 generation |
-| 同步过程中 fingerprint 改变 | 本次 sync 失败 |
-| 同步过程中 file shrink | 本次 sync 失败 |
-| `application.log -> application.log.1` | 两个相对 identifier 分别拥有稳定 file/cache identity，M5 discovery 负责发现 |
-| 新 `application.log` 创建 | 同名 replacement 由 metadata + fingerprint/size 判定，不与旧 generation 错误拼接 |
-
----
-
-## 13. 测试覆盖
-
-M4 deterministic tests 已覆盖：
-
-- `full` bootstrap；
-- `tail(bytes)` bootstrap；
-- `from_now` bootstrap 后正常 append；
-- metadata 无变化时 0 次 range download；
-- 正常 append 仅持久化新增 range；
-- truncate 创建新 generation 且保留旧 generation；
-- 同 size + mtime 变化视为 replacement；
-- truncate 后快速增长由 fingerprint mismatch 检出；
-- append 中途 read failure 不改变 current generation；
-- bootstrap 超出 sync byte limit 不发布 manifest；
-- RemoteSyncTarget 只能从配置 root 推导路径；
-- `../secret.log` 被拒绝；
-- `/etc/passwd` 被拒绝。
-
-正式项目 Gate：
+## 13. 最终正式 Gate
 
 ```text
 cargo fmt --all -- --check                          PASS
@@ -490,13 +432,16 @@ cargo clippy --locked --all-targets --all-features PASS
 cargo test --locked --all-targets --all-features   PASS
 cargo build --release --locked --bins              PASS
 Contracts v1 + v2                                  PASS
+Real OpenSSH/SFTP production transport             PASS
+Real SFTP -> SyncEngine -> CacheStore              PASS
 ```
 
 对应：
 
 ```text
-Rust      run 31178915781  PASS
-Contracts run 31178915591  PASS
+Rust          run 31180209710  PASS
+Contracts     run 31180209975  PASS
+SSH Transport run 31180209929  PASS
 ```
 
 ---
@@ -504,15 +449,18 @@ Contracts run 31178915591  PASS
 ## 14. M4 Gate
 
 ```text
-正常查询路径只同步增量                       PASS
-无变化时不下载正文 range                    PASS
-rotation/replacement 不会错误拼接日志       PASS
-truncate + rapid growth 可检测               PASS
-full/tail/from_now bootstrap 可表达          PASS
-同步失败不破坏最后有效 cache                PASS
-sync byte budget 可稳定失败                  PASS
-remote path 不能由调用方任意注入             PASS
-不存在 remote exec/write                     PASS
+正常增长只持久化增量 payload                    PASS
+Unchanged 仍验证 continuity                     PASS
+mtime 不作为 continuity authority               PASS
+same-size/same-mtime replacement 可检测          PASS
+rotation/replacement 不错误拼接日志              PASS
+truncate + rapid growth 可检测                   PASS
+full/tail/from_now bootstrap 可表达              PASS
+同步失败不破坏最后有效 cache                    PASS
+sync byte budget 可稳定失败                     PASS
+remote path 不能由调用方任意注入                PASS
+不存在 remote exec/write                        PASS
+真实 OpenSSH/SFTP -> SyncEngine -> CacheStore    PASS
 ```
 
 **M4 Gate 通过，可以进入 M5。**
@@ -521,7 +469,7 @@ remote path 不能由调用方任意注入             PASS
 
 ## 15. M5 入口
 
-M5 的正确接入流程应保持：
+M5 应保持：
 
 ```text
 resolve configured Remote Source
@@ -539,7 +487,7 @@ existing scanner / QueryEngine
 bind cursor + match_ref to Query Snapshot
 ```
 
-M5 必须继续保持：
+M5 必须继续满足：
 
 - Query Engine 不直接访问 SSH；
 - Scanner 不直接访问 SSH；
