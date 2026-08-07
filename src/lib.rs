@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod config_document;
+pub mod config_limits_v2;
 pub mod config_v2;
 pub mod response_limit;
 mod scan_executor;
@@ -41,6 +42,7 @@ pub use config::{
     LimitsConfig, LogSourceConfig, TimestampRule, ValidationIssue,
 };
 pub use config_document::{ConfigDocument, ConfigDocumentLoadError};
+pub use config_limits_v2::LimitsConfigV2;
 pub use config_v2::{
     AppConfigV2, BackendType, BootstrapPolicy, BootstrapType, CONFIG_VERSION_V2, CacheConfig,
     ConfigV2LoadError, ConfigV2ValidationError, ConfigV2ValidationIssue, ConnectionType,
