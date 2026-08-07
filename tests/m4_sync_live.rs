@@ -11,7 +11,8 @@ use serde_json::json;
 use tempfile::TempDir;
 
 fn required(name: &str) -> String {
-    std::env::var(name).unwrap_or_else(|_| panic!("missing required test environment variable {name}"))
+    std::env::var(name)
+        .unwrap_or_else(|_| panic!("missing required test environment variable {name}"))
 }
 
 #[tokio::test]
@@ -74,8 +75,10 @@ async fn real_sftp_bootstrap_then_incremental_append_preserves_generation() {
             "max_remote_files_per_source": 10
         }
     });
-    let config = AppConfigV2::from_json_str(&config_json.to_string()).expect("valid M4 live config");
-    let cache = CacheStore::from_config(config.cache.as_ref().expect("cache config")).expect("cache");
+    let config =
+        AppConfigV2::from_json_str(&config_json.to_string()).expect("valid M4 live config");
+    let cache =
+        CacheStore::from_config(config.cache.as_ref().expect("cache config")).expect("cache");
     let engine = SyncEngine::from_config(&config, cache.clone()).expect("sync engine");
     let target = RemoteSyncTarget::from_source(&config.sources[0], "sync-live.log")
         .expect("remote sync target");
