@@ -10,7 +10,9 @@ on:
       - "Cargo.lock"
       - "src/secret.rs"
       - "src/transport/**"
+      - "src/cache/**"
       - "tests/ssh_transport_live.rs"
+      - "tests/m4_sync_live.rs"
       - "research/ssh-sftp-poc/**"
       - ".github/workflows/ssh-research.yml"
   workflow_dispatch:
@@ -38,6 +40,7 @@ jobs:
           echo 'logreader:test-password' | sudo chpasswd
           sudo mkdir -p /home/logreader/.ssh /home/logreader/logs
           echo 'hello world from log-query-mcp ssh transport' | sudo tee /home/logreader/logs/application.log >/dev/null
+          printf 'first\n' | sudo tee /home/logreader/logs/sync-live.log >/dev/null
           echo 'denied' | sudo tee /home/logreader/logs/denied.log >/dev/null
           sudo dd if=/dev/zero of=/home/logreader/logs/large.log bs=1M count=8 status=none
           sudo mkfifo /home/logreader/logs/blocking.pipe
@@ -46,6 +49,7 @@ jobs:
           sudo chown root:root /home/logreader/logs/denied.log
           sudo chmod 700 /home/logreader/.ssh
           sudo chmod 444 /home/logreader/logs/application.log /home/logreader/logs/large.log
+          sudo chmod 666 /home/logreader/logs/sync-live.log
           sudo chmod 000 /home/logreader/logs/denied.log
 
           ssh-keygen -q -t ed25519 -N 'test-passphrase' -f /tmp/log-query-mcp-ssh-poc/client_key
@@ -113,6 +117,15 @@ jobs:
           NC_PID=$!
           trap 'kill "$NC_PID" 2>/dev/null || true' EXIT
           cargo test --test ssh_transport_live -- --ignored --test-threads=1
+
+      - name: Verify M4 remote sync through real SFTP
+        env:
+          M2_SSH_PORT: "2222"
+          M2_SSH_PASSWORD: test-password
+          M2_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
+          M2_REMOTE_DIR: /home/logreader/logs
+          M4_LOCAL_SYNC_FILE: /home/logreader/logs/sync-live.log
+        run: cargo test --test m4_sync_live -- --ignored --test-threads=1
 
       - name: Check research POC remains compatible
         run: cargo check --manifest-path research/ssh-sftp-poc/Cargo.toml
