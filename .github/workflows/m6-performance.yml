@@ -133,8 +133,8 @@ jobs:
             /usr/bin/time -v -o "/tmp/log-query-mcp-m6-perf/${profile}-time.txt" \
               cargo test --release --locked --test m6_performance_live sync_and_scan_profile \
                 -- --ignored --exact --nocapture \
-              2>&1 | tee "/tmp/log-query-mcp-m6-perf/${profile}.log"
-            grep 'M6_PERF_METRIC' "/tmp/log-query-mcp-m6-perf/${profile}.log" \
+              2>&1 | tee "/tmp/log-query-mcp-m6-perf/${profile}-output.log"
+            grep 'M6_PERF_METRIC' "/tmp/log-query-mcp-m6-perf/${profile}-output.log" \
               | tee "/tmp/log-query-mcp-m6-perf/${profile}-metrics.jsonl"
             df -hT /tmp | tee "/tmp/log-query-mcp-m6-perf/${profile}-disk.txt"
           }
@@ -157,7 +157,7 @@ jobs:
             /tmp/log-query-mcp-m6-perf/*-metrics.jsonl
             /tmp/log-query-mcp-m6-perf/*-time.txt
             /tmp/log-query-mcp-m6-perf/*-disk.txt
-            /tmp/log-query-mcp-m6-perf/*.log
+            /tmp/log-query-mcp-m6-perf/*-output.log
           if-no-files-found: warn
           retention-days: 14
 
