@@ -6,7 +6,7 @@ use log_query_mcp::{
     ToolErrorCode, transport::SshTransportError,
 };
 use rmcp::{ServerHandler, model::RawContent};
-use serde_json::{Value, json};
+use serde_json::json;
 use tempfile::TempDir;
 
 const PRIVATE_HOST: &str = "m6-private-host.invalid";
@@ -225,6 +225,3 @@ fn first_text(result: &rmcp::model::CallToolResult) -> &str {
         other => panic!("expected text content, got {other:?}"),
     }
 }
-
-#[allow(dead_code)]
-fn _assert_json_value_is_send_sync(_: Value) {}
