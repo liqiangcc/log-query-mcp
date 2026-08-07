@@ -1,0 +1,132 @@
+name: M6 SFTP Handle Fix Once
+
+on:
+  push:
+    branches:
+      - "feat/v2-m1-backend-config"
+    paths:
+      - ".github/workflows/m6-perf-handle-fix-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out current branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/v2-m1-backend-config
+          fetch-depth: 0
+
+      - name: Apply exact transport and performance fixes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          ssh = Path("src/transport/ssh.rs")
+          text = ssh.read_text()
+          old = '''        let mut buffer = vec![0_u8; length];
+                  let result = timeout(self.operation_timeout, file.read_exact(&mut buffer)).await;
+                  self.finish_operation(result, SshTransportError::SftpProtocol)?;
+                  Ok(buffer)
+          '''
+          new = '''        let mut buffer = vec![0_u8; length];
+                  let result = timeout(self.operation_timeout, file.read_exact(&mut buffer)).await;
+                  self.finish_operation(result, SshTransportError::SftpProtocol)?;
+
+                  // russh-sftp File::Drop only sends a non-awaited close request. A long sync opens
+                  // one bounded range handle per chunk, so explicitly await close to avoid building
+                  // up hundreds of unconfirmed remote handles on large files.
+                  let result = timeout(self.operation_timeout, file.close()).await;
+                  self.finish_operation(result, SshTransportError::SftpProtocol)?;
+                  Ok(buffer)
+          '''
+          if old not in text:
+              raise SystemExit("expected read_range snippet not found")
+          ssh.write_text(text.replace(old, new, 1))
+
+          live = Path("tests/ssh_transport_live.rs")
+          text = live.read_text()
+          anchor = '''#[tokio::test]
+          #[ignore = "requires the SSH Transport workflow fixture"]
+          async fn operation_timeout_marks_reader_broken() {
+          '''
+          test = '''#[tokio::test]
+          #[ignore = "requires the SSH Transport workflow fixture"]
+          async fn repeated_range_reads_close_remote_handles() {
+              let connection = password_connection(
+                  "many-ranges",
+                  port("M2_SSH_PORT"),
+                  &required("M2_KNOWN_HOSTS"),
+                  "M2_SSH_PASSWORD",
+                  3000,
+                  5000,
+              );
+              let manager = SshConnectionManager::from_config(&config(vec![connection], "many-ranges"))
+                  .expect("connection manager should build");
+              let reader = manager
+                  .open_reader("many-ranges")
+                  .await
+                  .expect("reader should connect");
+              let large_file = required("M2_LARGE_FILE");
+
+              // More than 256 opens catches leaked/unconfirmed SFTP handles without transferring a
+              // large fixture. Each read stays bounded and reuses offsets inside the existing 8 MiB file.
+              for index in 0_u64..300 {
+                  let offset = (index % 2048) * 4096;
+                  let bytes = reader
+                      .read_range(&large_file, offset, 4096)
+                      .await
+                      .expect("repeated bounded range read should succeed");
+                  assert_eq!(bytes.len(), 4096);
+                  assert!(bytes.iter().all(|byte| *byte == 0));
+              }
+
+              reader.close().await.expect("SFTP session should close");
+          }
+
+          #[tokio::test]
+          #[ignore = "requires the SSH Transport workflow fixture"]
+          async fn operation_timeout_marks_reader_broken() {
+          '''
+          if anchor not in text:
+              raise SystemExit("expected live-test anchor not found")
+          live.write_text(text.replace(anchor, test, 1))
+
+          workflow = Path(".github/workflows/m6-performance.yml")
+          text = workflow.read_text()
+          text = text.replace(
+              '2>&1 | tee "/tmp/log-query-mcp-m6-perf/${profile}.log"\n'
+              '            grep \'M6_PERF_METRIC\' "/tmp/log-query-mcp-m6-perf/${profile}.log" \\\n',
+              '2>&1 | tee "/tmp/log-query-mcp-m6-perf/${profile}-output.log"\n'
+              '            grep \'M6_PERF_METRIC\' "/tmp/log-query-mcp-m6-perf/${profile}-output.log" \\\n',
+              1,
+          )
+          old_upload = '''            /tmp/log-query-mcp-m6-perf/*-disk.txt
+                      /tmp/log-query-mcp-m6-perf/*.log
+          '''
+          new_upload = '''            /tmp/log-query-mcp-m6-perf/*-disk.txt
+                      /tmp/log-query-mcp-m6-perf/*-output.log
+          '''
+          if old_upload not in text:
+              raise SystemExit("expected performance artifact glob not found")
+          workflow.write_text(text.replace(old_upload, new_upload, 1))
+          PY
+
+          cargo fmt --all -- --check || cargo fmt --all
+          cargo fmt --all -- --check
+          cargo check --locked --all-targets --all-features
+
+      - name: Commit verified fixes
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/transport/ssh.rs tests/ssh_transport_live.rs .github/workflows/m6-performance.yml
+          git commit -m "fix(ssh): close SFTP range handles explicitly"
+          git push origin HEAD:feat/v2-m1-backend-config
