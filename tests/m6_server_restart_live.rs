@@ -113,7 +113,10 @@ async fn server_outage_fails_closed_without_destroying_last_valid_cache() {
         ))
         .await
         .expect_err("on-query refresh must fail while sshd is unavailable");
-    assert_eq!(ToolError::from(error).code, ToolErrorCode::RemoteUnavailable);
+    assert_eq!(
+        ToolError::from(error).code,
+        ToolErrorCode::RemoteUnavailable
+    );
 
     let cache = CacheStore::from_config(config.cache.as_ref().expect("cache config"))
         .expect("reopen cache while remote is unavailable");
@@ -133,8 +136,7 @@ async fn query_recovers_after_server_restart_and_incremental_append() {
     let config = config();
     let page = service(&config)
         .search(
-            StatefulQueryRequest::new(vec![SOURCE_ID.to_owned()], "RESTART")
-                .with_max_results(10),
+            StatefulQueryRequest::new(vec![SOURCE_ID.to_owned()], "RESTART").with_max_results(10),
         )
         .await
         .expect("query should recover after sshd restart");
