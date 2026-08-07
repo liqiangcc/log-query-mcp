@@ -19,23 +19,29 @@
 | 两台独立 SSH Server + Local mixed query | 已自动验证过 | `m6_multi_server_live.rs` |
 | 300 次连续 bounded range read | 已自动验证过 | `ssh_transport_live.rs` |
 | 100 MiB / 1 GiB / 10 GiB-tail benchmark | 已自动验证过 | `M6_PERFORMANCE_BASELINE_V2.md` |
+| single/dual-server concurrency harness | 已实现并接入 live Gate | `m6_concurrency_performance_live.rs` |
+| protocol health failure matrix | 本地已验证；CI Gate 已加入 | `tests/healthcheck_test.sh` |
 | release package assembly | 已自动验证过 | `scripts/package_release.sh` |
 | package completeness + 内/外 SHA256 | 本地 validator 已验证；CI Gate 已加入 | `scripts/validate_release_package.sh` |
 | upgrade/rollback 隔离演练 | 本地已验证；CI Gate 已加入 | `tests/upgrade_rollback_test.sh` |
+| 全部非 live-SSH 本地 RC Gate | 一键入口已实现 | `scripts/rc_check.sh` |
 | tag 与 Cargo version 一致性 | Gate 已存在 | `scripts/check_release_tag.sh` |
 
-> 当前 feature 分支最新 CI 重新执行受到 GitHub Actions Billing/Spending Limit 外部阻塞。正式 RC/Release 前必须在 Billing 恢复后让 candidate commit 的全部 Gate 再次变绿；历史成功 Gate 和本地脚本验证不能替代这一步。
+> 当前 feature 分支最新 CI 重新执行受到 GitHub Actions Billing/Spending Limit 外部阻塞，跟踪于 Issue #23。正式 RC/Release 前必须在 Billing 恢复后让 candidate commit 的全部 Gate 再次变绿；历史成功 Gate 和本地脚本验证不能替代这一步。
 
 ## 2. Release Candidate Gate
 
 候选 commit 必须满足：
 
+- [ ] `bash scripts/rc_check.sh` 在候选 commit 对应源码成功。
 - [ ] Rust workflow 在**候选 commit**成功。
 - [ ] Contracts workflow 在**候选 commit**成功。
 - [ ] SSH Transport workflow 在**候选 commit**成功，包含 single/dual-server concurrency benchmark。
+- [ ] single/dual-server concurrency elapsed metrics 已记录到 `M6_PERFORMANCE_BASELINE_V2.md`。
 - [ ] M6 Performance workflow 在**候选 commit 或未改变相关代码的可追溯 commit**成功。
 - [ ] Release package job 在**候选 commit**成功。
 - [ ] Release artifact 通过 `validate_release_package.sh`。
+- [ ] `healthcheck_test.sh` 成功。
 - [ ] `upgrade_rollback_test.sh` 成功。
 - [ ] 没有未解释的 workflow failure/cancelled/skipped critical step。
 
@@ -51,8 +57,8 @@
 | `validate_release_package.sh` 通过 | 待正式发布验收 |  |
 | 包内 `SHA256SUMS` 全部通过 | 待正式发布验收 |  |
 | `BUILDINFO` 包含 version/target/commit/ref/build time/rustc | 待正式发布验收 |  |
-| 包含 install/uninstall/upgrade/rollback | 待正式发布验收 |  |
-| 包含 INSTALL/OPERATIONS/PRODUCTION_CHECKLIST/M6_PERFORMANCE/RELEASE_READINESS | 待正式发布验收 |  |
+| 包含 install/uninstall/healthcheck/upgrade/rollback | 待正式发布验收 |  |
+| 包含 INSTALL/OPERATIONS/PRODUCTION_CHECKLIST/M6_PERFORMANCE/M6_FINAL/RELEASE_READINESS | 待正式发布验收 |  |
 
 ## 4. 目标服务器安装验收
 
@@ -61,6 +67,7 @@
 | Linux kernel `>= 5.6` | 待验收 |  |
 | `x86_64` glibc 环境 | 待验收 |  |
 | systemd 可用 | 待验收 |  |
+| curl 可用于标准 protocol health check | 待验收 |  |
 | `scripts/install.sh` 以 root 成功执行 | 待验收 |  |
 | `log-query-mcp` 用户/组最小权限 | 待验收 |  |
 | binaries 位于 `/opt/log-query-mcp/bin` | 待验收 |  |
@@ -115,6 +122,7 @@
 | `systemctl enable --now` 成功 | 待验收 |  |
 | systemd active / journal 无 panic | 待验收 |  |
 | 默认只监听 `127.0.0.1:8000` | 待验收 |  |
+| `scripts/healthcheck.sh` 成功 | 待验收 |  |
 | HTTP `/mcp` initialize 成功 | 待验收 |  |
 | MCP Inspector 显示三个工具 | 待验收 |  |
 | `list_log_sources` 只返回批准来源 | 待验收 |  |
@@ -146,10 +154,11 @@ CI/本地测试证明脚本逻辑，但目标服务器仍需执行一次受控�
 | 升级前外层 SHA256 验证 | 待验收 |  |
 | `upgrade.sh` 创建 backup path | 待验收 |  |
 | 正常升级保持 production config | 待验收 |  |
-| 新 binaries/unit 原子替换后服务健康 | 待验收 |  |
+| 新 binaries/unit 原子替换后 `healthcheck.sh` 成功 | 待验收 |  |
+| systemd active 但 MCP initialize 错误时升级被判失败 | 待验收 |  |
 | 显式 `rollback.sh` 成功恢复旧版本 | 待验收 |  |
-| restart/health failure 的自动 rollback 已演练 | 待验收 |  |
-| rollback 后 MCP smoke query 正常 | 待验收 |  |
+| restart/protocol-health failure 的自动 rollback 已演练 | 待验收 |  |
+| rollback 后 `healthcheck.sh` + MCP smoke query 正常 | 待验收 |  |
 | backup retention/清理策略已确定 | 待验收 |  |
 
 ## 11. 实际 AI 客户端验收
@@ -181,6 +190,8 @@ CI/本地测试证明脚本逻辑，但目标服务器仍需执行一次受控�
 版本:
 release tag:
 candidate commit:
+Issue #23 final-gate blocker status:
+local rc_check result:
 Release workflow run:
 Rust run:
 Contracts run:
