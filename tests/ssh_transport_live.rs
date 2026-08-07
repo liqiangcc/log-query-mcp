@@ -364,11 +364,7 @@ async fn large_file_supports_bounded_offset_range_read() {
         .expect("reader should connect");
 
     let bytes = reader
-        .read_range(
-            &required("M2_LARGE_FILE"),
-            5 * 1024 * 1024,
-            2 * 1024 * 1024,
-        )
+        .read_range(&required("M2_LARGE_FILE"), 5 * 1024 * 1024, 2 * 1024 * 1024)
         .await
         .expect("large offset range should be readable");
     assert_eq!(bytes.len(), 2 * 1024 * 1024);
