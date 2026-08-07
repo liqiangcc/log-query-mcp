@@ -7,7 +7,13 @@ use log_query_mcp::{
     transport::{RemoteFileType, SshConnectionManager, SshTransportError},
 };
 use serde_json::{Value, json};
-use tokio::time::sleep;
+use tokio::{
+    io::copy_bidirectional,
+    net::{TcpListener, TcpStream},
+    sync::oneshot,
+    task::JoinHandle,
+    time::sleep,
+};
 
 fn required(name: &str) -> String {
     env::var(name).unwrap_or_else(|_| panic!("missing test environment variable {name}"))
@@ -114,6 +120,27 @@ fn config(connections: Vec<Value>, source_connection_id: &str) -> AppConfigV2 {
     AppConfigV2::from_json_str(&document.to_string()).expect("live test config should be valid")
 }
 
+async fn spawn_disconnect_proxy(
+    listen_port: u16,
+    upstream_port: u16,
+) -> (oneshot::Sender<()>, JoinHandle<()>) {
+    let listener = TcpListener::bind(("127.0.0.1", listen_port))
+        .await
+        .expect("disconnect proxy should bind");
+    let (disconnect_tx, disconnect_rx) = oneshot::channel();
+    let task = tokio::spawn(async move {
+        let (mut client, _) = listener.accept().await.expect("proxy should accept client");
+        let mut upstream = TcpStream::connect(("127.0.0.1", upstream_port))
+            .await
+            .expect("proxy should connect upstream");
+        tokio::select! {
+            _ = copy_bidirectional(&mut client, &mut upstream) => {}
+            _ = disconnect_rx => {}
+        }
+    });
+    (disconnect_tx, task)
+}
+
 #[tokio::test]
 #[ignore = "requires the SSH Transport workflow fixture"]
 async fn password_auth_supports_read_only_sftp_operations() {
@@ -191,6 +218,27 @@ async fn encrypted_private_key_authentication_reads_logs() {
 
 #[tokio::test]
 #[ignore = "requires the SSH Transport workflow fixture"]
+async fn wrong_private_key_is_rejected() {
+    let connection = private_key_connection(
+        "wrong-key",
+        port("M2_SSH_PORT"),
+        &required("M2_KNOWN_HOSTS"),
+        &required("M2_WRONG_SSH_KEY_FILE"),
+    );
+    let manager = SshConnectionManager::from_config(&config(vec![connection], "wrong-key"))
+        .expect("connection manager should build");
+
+    assert_eq!(
+        manager
+            .open_reader("wrong-key")
+            .await
+            .expect_err("unauthorized private key must fail"),
+        SshTransportError::AuthenticationFailed
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the SSH Transport workflow fixture"]
 async fn wrong_password_is_rejected_without_leaking_secret() {
     let connection = password_connection(
         "bad-password",
@@ -209,6 +257,30 @@ async fn wrong_password_is_rejected_without_leaking_secret() {
         .expect_err("wrong password must fail");
     assert_eq!(error, SshTransportError::AuthenticationFailed);
     assert!(!error.to_string().contains(&required("M2_WRONG_PASSWORD")));
+}
+
+#[tokio::test]
+#[ignore = "requires the SSH Transport workflow fixture"]
+async fn missing_known_hosts_fails_closed() {
+    let missing_known_hosts = format!("{}/missing-known-hosts", required("M2_FIXTURE_DIR"));
+    let connection = password_connection(
+        "missing-known-hosts",
+        port("M2_SSH_PORT"),
+        &missing_known_hosts,
+        "M2_SSH_PASSWORD",
+        3000,
+        3000,
+    );
+    let manager = SshConnectionManager::from_config(&config(vec![connection], "missing-known-hosts"))
+        .expect("connection manager should build");
+
+    assert_eq!(
+        manager
+            .open_reader("missing-known-hosts")
+            .await
+            .expect_err("missing known_hosts must fail"),
+        SshTransportError::HostKeyVerificationFailed
+    );
 }
 
 #[tokio::test]
@@ -274,6 +346,32 @@ async fn permission_and_missing_file_fail_without_exposing_paths() {
 
 #[tokio::test]
 #[ignore = "requires the SSH Transport workflow fixture"]
+async fn large_file_supports_bounded_offset_range_read() {
+    let connection = password_connection(
+        "large",
+        port("M2_SSH_PORT"),
+        &required("M2_KNOWN_HOSTS"),
+        "M2_SSH_PASSWORD",
+        3000,
+        5000,
+    );
+    let manager = SshConnectionManager::from_config(&config(vec![connection], "large"))
+        .expect("connection manager should build");
+    let reader = manager
+        .open_reader("large")
+        .await
+        .expect("reader should connect");
+
+    let bytes = reader
+        .read_range(&required("M2_LARGE_FILE"), 5 * 1024 * 1024, 2 * 1024 * 1024)
+        .await
+        .expect("large offset range should be readable");
+    assert_eq!(bytes.len(), 2 * 1024 * 1024);
+    assert!(bytes.iter().all(|byte| *byte == 0));
+}
+
+#[tokio::test]
+#[ignore = "requires the SSH Transport workflow fixture"]
 async fn operation_timeout_marks_reader_broken() {
     let connection = password_connection(
         "timeout",
@@ -304,6 +402,53 @@ async fn operation_timeout_marks_reader_broken() {
             .expect_err("timed out reader must remain broken"),
         SshTransportError::Broken
     );
+}
+
+#[tokio::test]
+#[ignore = "requires the SSH Transport workflow fixture"]
+async fn network_disconnect_marks_reader_broken() {
+    let ssh_port = port("M2_SSH_PORT");
+    let proxy_port = port("M2_DROP_PORT");
+    let (disconnect, proxy_task) = spawn_disconnect_proxy(proxy_port, ssh_port).await;
+    let connection = password_connection(
+        "disconnect",
+        proxy_port,
+        &required("M2_PROXY_KNOWN_HOSTS"),
+        "M2_SSH_PASSWORD",
+        3000,
+        5000,
+    );
+    let manager = SshConnectionManager::from_config(&config(vec![connection], "disconnect"))
+        .expect("connection manager should build");
+    let reader = manager
+        .open_reader("disconnect")
+        .await
+        .expect("proxied reader should connect");
+
+    let error = {
+        let read = reader.read_range(&required("M2_FIFO_FILE"), 0, 1);
+        tokio::pin!(read);
+        tokio::select! {
+            result = &mut read => panic!("blocking read completed before network disconnect: {result:?}"),
+            _ = sleep(Duration::from_millis(100)) => {}
+        }
+        disconnect
+            .send(())
+            .expect("disconnect signal should reach proxy");
+        read.await.expect_err("network disconnect must fail the read")
+    };
+    assert!(matches!(
+        error,
+        SshTransportError::SftpProtocol | SshTransportError::OperationTimeout
+    ));
+    assert_eq!(
+        reader
+            .stat(&required("M2_REMOTE_FILE"))
+            .await
+            .expect_err("disconnected reader must remain broken"),
+        SshTransportError::Broken
+    );
+    proxy_task.await.expect("disconnect proxy task should finish");
 }
 
 #[tokio::test]
