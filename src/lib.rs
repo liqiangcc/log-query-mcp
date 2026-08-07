@@ -42,7 +42,7 @@ pub use config::{
 };
 pub use config_document::{ConfigDocument, ConfigDocumentLoadError};
 pub use config_v2::{
-    AppConfigV2, BackendType, BootstrapPolicy, BootstrapType, CacheConfig, CONFIG_VERSION_V2,
+    AppConfigV2, BackendType, BootstrapPolicy, BootstrapType, CONFIG_VERSION_V2, CacheConfig,
     ConfigV2LoadError, ConfigV2ValidationError, ConfigV2ValidationIssue, ConnectionType,
     FreshnessPolicy, HostKeyConfig, LogSourceConfigV2, RemoteSyncPolicy, SourceBackendConfig,
     SshAuthConfig, SshAuthType, SshConnectionConfig,
