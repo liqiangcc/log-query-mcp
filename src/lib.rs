@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod cache;
 pub mod config;
 pub mod config_document;
 pub mod config_limits_v2;
@@ -39,6 +40,12 @@ mod stateful_context;
 #[cfg(target_os = "linux")]
 mod stateful_query;
 
+pub use cache::{
+    ByteRange, CACHE_CATALOG_VERSION, CACHE_MANIFEST_VERSION, CacheCoverage, CacheFileId,
+    CacheManifest, CacheSourceId, CacheStore, CacheStoreError, CacheStoreLimits, GcReport,
+    GenerationId, GenerationKey, GenerationMetadata, GenerationRecord, ManifestValidationError,
+    PinnedGeneration, RecoveryReport, StagedGeneration,
+};
 pub use config::{
     AppConfig, CONFIG_VERSION, ConfigLoadError, ConfigValidationError, DirectoryRule, Encoding,
     LimitsConfig, LogSourceConfig, TimestampRule, ValidationIssue,
