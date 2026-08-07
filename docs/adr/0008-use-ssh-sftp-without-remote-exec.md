@@ -1,6 +1,6 @@
 # ADR-0008：Remote Source 仅使用 SSH/SFTP，不提供远程命令执行
 
-- 状态：Proposed for v2
+- 状态：Accepted for v2
 - 日期：2026-08-07
 
 ## 决策
