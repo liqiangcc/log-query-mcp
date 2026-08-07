@@ -36,7 +36,8 @@ impl CacheCatalog {
         let mut source_ids = HashSet::new();
         let mut file_ids = HashSet::new();
         for source in &self.sources {
-            if source.source_identifier.is_empty() || !source_identifiers.insert(&source.source_identifier)
+            if source.source_identifier.is_empty()
+                || !source_identifiers.insert(&source.source_identifier)
             {
                 return Err(ManifestValidationError::InvalidCatalog);
             }

@@ -90,10 +90,7 @@ impl CacheStore {
         Self::open(&config.root, CacheStoreLimits::from(config))
     }
 
-    pub fn open(
-        root: impl AsRef<Path>,
-        limits: CacheStoreLimits,
-    ) -> Result<Self, CacheStoreError> {
+    pub fn open(root: impl AsRef<Path>, limits: CacheStoreLimits) -> Result<Self, CacheStoreError> {
         limits.validate()?;
         let root = root.as_ref().to_path_buf();
         if !root.exists() {
@@ -173,7 +170,8 @@ impl CacheStore {
     ) -> Result<Option<CacheManifest>, CacheStoreError> {
         validate_source_identifier(source_identifier)?;
         validate_remote_identifier(remote_identifier)?;
-        let Some((source_id, file_id)) = self.lookup_ids(source_identifier, remote_identifier)? else {
+        let Some((source_id, file_id)) = self.lookup_ids(source_identifier, remote_identifier)?
+        else {
             return Ok(None);
         };
         self.load_manifest_by_ids(&source_id, &file_id)
@@ -202,7 +200,8 @@ impl CacheStore {
     ) -> Result<PinnedGeneration, CacheStoreError> {
         validate_source_identifier(source_identifier)?;
         validate_remote_identifier(remote_identifier)?;
-        let Some((source_id, file_id)) = self.lookup_ids(source_identifier, remote_identifier)? else {
+        let Some((source_id, file_id)) = self.lookup_ids(source_identifier, remote_identifier)?
+        else {
             return Err(CacheStoreError::GenerationNotFound);
         };
         let key = GenerationKey::new(source_id.clone(), file_id.clone(), generation_id.clone());
@@ -245,7 +244,8 @@ impl CacheStore {
             for catalog_file in &source.files {
                 self.ensure_file_layout(&source.cache_id, &catalog_file.file_id)?;
                 let file_dir = self.file_dir(&source.cache_id, &catalog_file.file_id);
-                report.orphan_staging_removed += clean_directory_files(&file_dir.join(STAGING_DIR))?;
+                report.orphan_staging_removed +=
+                    clean_directory_files(&file_dir.join(STAGING_DIR))?;
 
                 let manifest_path = file_dir.join(MANIFEST_FILE);
                 if !manifest_path.exists() {
@@ -310,7 +310,8 @@ impl CacheStore {
 
         for source in &state.catalog.sources {
             for catalog_file in &source.files {
-                let Some(manifest) = self.load_manifest_by_ids(&source.cache_id, &catalog_file.file_id)?
+                let Some(manifest) =
+                    self.load_manifest_by_ids(&source.cache_id, &catalog_file.file_id)?
                 else {
                     continue;
                 };
@@ -546,7 +547,10 @@ impl StagedGeneration {
         &self.generation_id
     }
 
-    pub fn commit(mut self, metadata: GenerationMetadata) -> Result<GenerationRecord, CacheStoreError> {
+    pub fn commit(
+        mut self,
+        metadata: GenerationMetadata,
+    ) -> Result<GenerationRecord, CacheStoreError> {
         metadata.validate()?;
         let mut file = self.file.take().ok_or(CacheStoreError::StagingClosed)?;
         file.flush()?;
@@ -754,10 +758,7 @@ fn save_atomic_json<T: Serialize>(path: &Path, value: &T) -> Result<(), CacheSto
         .file_name()
         .and_then(|value| value.to_str())
         .ok_or(CacheStoreError::InvalidLayout)?;
-    let temporary = parent.join(format!(
-        ".{file_name}.tmp-{}",
-        Uuid::new_v4().simple()
-    ));
+    let temporary = parent.join(format!(".{file_name}.tmp-{}", Uuid::new_v4().simple()));
     let result = (|| {
         let mut file = create_private_file(&temporary)?;
         serde_json::to_writer_pretty(&mut file, value)?;
@@ -893,23 +894,29 @@ mod tests {
         assert!(!manifest.source_id.as_str().contains("service-a"));
         assert!(!manifest.file_id.as_str().contains("application"));
         assert_eq!(manifest.current_generation, Some(record.generation.clone()));
-        assert!(!store
-            .generation_path(&GenerationKey::new(
-                manifest.source_id.clone(),
-                manifest.file_id.clone(),
-                record.generation,
-            ))
-            .to_string_lossy()
-            .contains("application.log"));
+        assert!(
+            !store
+                .generation_path(&GenerationKey::new(
+                    manifest.source_id.clone(),
+                    manifest.file_id.clone(),
+                    record.generation,
+                ))
+                .to_string_lossy()
+                .contains("application.log")
+        );
 
         #[cfg(unix)]
         {
-            let root_mode = fs::metadata(temp.path()).expect("root metadata").permissions().mode();
-            assert_eq!(root_mode & 0o777, 0o700);
-            let manifest_mode = fs::metadata(store.manifest_path(&manifest.source_id, &manifest.file_id))
-                .expect("manifest metadata")
+            let root_mode = fs::metadata(temp.path())
+                .expect("root metadata")
                 .permissions()
                 .mode();
+            assert_eq!(root_mode & 0o777, 0o700);
+            let manifest_mode =
+                fs::metadata(store.manifest_path(&manifest.source_id, &manifest.file_id))
+                    .expect("manifest metadata")
+                    .permissions()
+                    .mode();
             assert_eq!(manifest_mode & 0o777, 0o600);
         }
     }
@@ -941,10 +948,12 @@ mod tests {
                 .expect("stage");
             staged.write_all(b"partial").expect("write");
         }
-        assert!(store
-            .load_manifest("service-a", "logs/application.log")
-            .expect("manifest")
-            .is_none());
+        assert!(
+            store
+                .load_manifest("service-a", "logs/application.log")
+                .expect("manifest")
+                .is_none()
+        );
         let report = store.recover().expect("recover");
         assert_eq!(report.generations, 0);
     }
@@ -958,8 +967,11 @@ mod tests {
             .load_manifest("service-a", "logs/application.log")
             .expect("manifest")
             .expect("present");
-        fs::write(store.manifest_path(&manifest.source_id, &manifest.file_id), b"not-json")
-            .expect("corrupt");
+        fs::write(
+            store.manifest_path(&manifest.source_id, &manifest.file_id),
+            b"not-json",
+        )
+        .expect("corrupt");
 
         assert!(matches!(
             CacheStore::open(temp.path(), limits(1024, 3)),
@@ -984,14 +996,18 @@ mod tests {
             .load_manifest("service-a", "logs/application.log")
             .expect("manifest")
             .expect("present");
-        assert!(manifest
-            .generations
-            .iter()
-            .any(|record| record.generation == first.generation));
-        assert!(!manifest
-            .generations
-            .iter()
-            .any(|record| record.generation == second.generation));
+        assert!(
+            manifest
+                .generations
+                .iter()
+                .any(|record| record.generation == first.generation)
+        );
+        assert!(
+            !manifest
+                .generations
+                .iter()
+                .any(|record| record.generation == second.generation)
+        );
         assert_eq!(manifest.current_generation, Some(third.generation));
         drop(pin);
     }
