@@ -27,6 +27,12 @@ jobs:
 
           ssh = Path("src/transport/ssh.rs")
           text = ssh.read_text()
+          old_import = "    io::{AsyncReadExt, AsyncSeekExt},\n"
+          new_import = "    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},\n"
+          if old_import not in text:
+              raise SystemExit("expected tokio io import not found")
+          text = text.replace(old_import, new_import, 1)
+
           old = '''        let mut buffer = vec![0_u8; length];
                   let result = timeout(self.operation_timeout, file.read_exact(&mut buffer)).await;
                   self.finish_operation(result, SshTransportError::SftpProtocol)?;
@@ -36,10 +42,10 @@ jobs:
                   let result = timeout(self.operation_timeout, file.read_exact(&mut buffer)).await;
                   self.finish_operation(result, SshTransportError::SftpProtocol)?;
 
-                  // russh-sftp File::Drop only sends a non-awaited close request. A long sync opens
-                  // one bounded range handle per chunk, so explicitly await close to avoid building
-                  // up hundreds of unconfirmed remote handles on large files.
-                  let result = timeout(self.operation_timeout, file.close()).await;
+                  // russh-sftp 2.3 requires AsyncWriteExt::shutdown() to properly close a File
+                  // handle. A large sync performs many bounded range reads, so await shutdown
+                  // before opening the next handle instead of relying on Drop alone.
+                  let result = timeout(self.operation_timeout, file.shutdown()).await;
                   self.finish_operation(result, SshTransportError::SftpProtocol)?;
                   Ok(buffer)
           '''
