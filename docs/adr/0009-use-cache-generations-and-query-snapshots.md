@@ -1,6 +1,6 @@
 # ADR-0009：Remote Cache 使用 Generation 与查询快照保证一致性
 
-- 状态：Proposed for v2
+- 状态：Accepted for v2
 - 日期：2026-08-07
 
 ## 决策
