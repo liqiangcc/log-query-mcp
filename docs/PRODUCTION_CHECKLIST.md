@@ -1,155 +1,199 @@
 # Log Query MCP 生产验收清单
 
-本文用于首个生产发布和每次升级前后的验收。没有在目标环境实际执行的项目必须保持为“待验收”。
+本文用于首个生产发布和每次升级前后的验收。**没有在目标环境实际执行的项目必须保持为“待验收”**；CI 通过不等同于目标服务器验收。
 
 ## 1. 自动验证项
 
-这些项目由 CI 或本地发布验证覆盖，不等同于目标生产服务器验收。
+这些项目由 CI 或本地可重复验证覆盖。
 
 | 项目 | 状态 | 证据 |
 |---|---|---|
-| Rust 格式检查 | 已自动验证 | `cargo fmt --all -- --check` |
-| Clippy 严格检查 | 已自动验证 | `cargo clippy --locked --all-targets --all-features -- -D warnings` |
-| 全量测试 | 已自动验证 | `cargo test --locked --all-targets --all-features` |
-| v1 contract/schema 校验 | 已自动验证 | `python3 scripts/validate_contracts.py` |
-| release binaries 构建 | 已自动验证 | `cargo build --release --locked --bins --target x86_64-unknown-linux-gnu` |
-| stdio smoke test | 已自动验证 | `tests/mcp_transport_smoke.rs` |
-| Streamable HTTP smoke test | 已自动验证 | `tests/mcp_transport_smoke.rs` |
-| release package dry-run | 已自动验证 | `scripts/package_release.sh --target x86_64-unknown-linux-gnu --out-dir dist --require-docs` |
-| tag 与版本一致性校验 | 已自动验证 | `scripts/check_release_tag.sh v{version}` |
+| Rust 格式检查 | 已自动验证过 | `cargo fmt --all -- --check` |
+| Clippy 严格检查 | 已自动验证过 | `cargo clippy --locked --all-targets --all-features -- -D warnings` |
+| 全量测试 | 已自动验证过 | `cargo test --locked --all-targets --all-features` |
+| v1/v2 contract/schema | 已自动验证过 | `python3 scripts/validate_contracts.py` |
+| release binaries | 已自动验证过 | `cargo build --release --locked --bins` |
+| stdio / Streamable HTTP smoke | 已自动验证过 | `tests/mcp_transport_smoke.rs` |
+| Password/private-key/host-key/timeout SFTP live matrix | 已自动验证过 | `SSH Transport` workflow |
+| Remote query / cache / rotation / restart / fail-closed | 已自动验证过 | M4/M5/M6 live tests |
+| 两台独立 SSH Server + Local mixed query | 已自动验证过 | `m6_multi_server_live.rs` |
+| 300 次连续 bounded range read | 已自动验证过 | `ssh_transport_live.rs` |
+| 100 MiB / 1 GiB / 10 GiB-tail benchmark | 已自动验证过 | `M6_PERFORMANCE_BASELINE_V2.md` |
+| release package assembly | 已自动验证过 | `scripts/package_release.sh` |
+| package completeness + 内/外 SHA256 | 本地 validator 已验证；CI Gate 已加入 | `scripts/validate_release_package.sh` |
+| upgrade/rollback 隔离演练 | 本地已验证；CI Gate 已加入 | `tests/upgrade_rollback_test.sh` |
+| tag 与 Cargo version 一致性 | Gate 已存在 | `scripts/check_release_tag.sh` |
 
-## 2. 发布包验收
+> 当前 feature 分支最新 CI 重新执行受到 GitHub Actions Billing/Spending Limit 外部阻塞。正式 RC/Release 前必须在 Billing 恢复后让 candidate commit 的全部 Gate 再次变绿；历史成功 Gate 和本地脚本验证不能替代这一步。
+
+## 2. Release Candidate Gate
+
+候选 commit 必须满足：
+
+- [ ] Rust workflow 在**候选 commit**成功。
+- [ ] Contracts workflow 在**候选 commit**成功。
+- [ ] SSH Transport workflow 在**候选 commit**成功，包含 single/dual-server concurrency benchmark。
+- [ ] M6 Performance workflow 在**候选 commit 或未改变相关代码的可追溯 commit**成功。
+- [ ] Release package job 在**候选 commit**成功。
+- [ ] Release artifact 通过 `validate_release_package.sh`。
+- [ ] `upgrade_rollback_test.sh` 成功。
+- [ ] 没有未解释的 workflow failure/cancelled/skipped critical step。
+
+只有 Billing/runner 等外部阻塞解除并完成上述 Gate，才可标记 RC Ready。
+
+## 3. 发布包验收
 
 | 项目 | 状态 | 记录 |
 |---|---|---|
-| GitHub Release tag 为 `v{Cargo.toml package.version}` | 待验收 |  |
-| 下载 `tar.gz` 和 `SHA256SUMS` | 待验收 |  |
-| `sha256sum -c SHA256SUMS` 通过 | 待验收 |  |
-| 包内 `sha256sum -c SHA256SUMS` 通过 | 待验收 |  |
-| `BUILDINFO` 记录版本、target、commit、构建时间和 rustc | 待验收 |  |
-| 包内容包含三份生产文档 | 待验收 |  |
+| GitHub Release tag 为 `v{Cargo.toml package.version}` | 待正式发布验收 |  |
+| 下载 tar.gz 和外层 `SHA256SUMS` | 待正式发布验收 |  |
+| 外层 `sha256sum -c SHA256SUMS` 通过 | 待正式发布验收 |  |
+| `validate_release_package.sh` 通过 | 待正式发布验收 |  |
+| 包内 `SHA256SUMS` 全部通过 | 待正式发布验收 |  |
+| `BUILDINFO` 包含 version/target/commit/ref/build time/rustc | 待正式发布验收 |  |
+| 包含 install/uninstall/upgrade/rollback | 待正式发布验收 |  |
+| 包含 INSTALL/OPERATIONS/PRODUCTION_CHECKLIST/M6_PERFORMANCE/RELEASE_READINESS | 待正式发布验收 |  |
 
-## 3. 目标服务器安装验收
+## 4. 目标服务器安装验收
 
 | 项目 | 状态 | 记录 |
 |---|---|---|
 | Linux kernel `>= 5.6` | 待验收 |  |
-| 服务器为 `x86_64` glibc 环境 | 待验收 |  |
+| `x86_64` glibc 环境 | 待验收 |  |
 | systemd 可用 | 待验收 |  |
 | `scripts/install.sh` 以 root 成功执行 | 待验收 |  |
-| 创建或复用 `log-query-mcp` 用户和组 | 待验收 |  |
-| 二进制安装到 `/opt/log-query-mcp/bin` | 待验收 |  |
-| 配置文件安装到 `/etc/log-query-mcp/config.json` | 待验收 |  |
-| systemd unit 安装到 `/etc/systemd/system/log-query-mcp.service` | 待验收 |  |
-| 配置文件权限为 root 可写、服务组可读 | 待验收 |  |
+| `log-query-mcp` 用户/组最小权限 | 待验收 |  |
+| binaries 位于 `/opt/log-query-mcp/bin` | 待验收 |  |
+| config 位于 `/etc/log-query-mcp/config.json` | 待验收 |  |
+| cache root 位于受控 `/var/lib/log-query-mcp/cache` | 待验收 |  |
+| systemd unit 正确安装 | 待验收 |  |
+| config 仅 root 可写、服务组可读 | 待验收 |  |
 
-## 4. 配置和权限验收
-
-| 项目 | 状态 | 记录 |
-|---|---|---|
-| 所有 `source_id` 已审批 | 待验收 |  |
-| `root` 都是绝对路径且不是符号链接 | 待验收 |  |
-| 未配置过宽目录，如 `/` 或整个 `/var` | 待验收 |  |
-| `files` 或 `directories` 与实际轮转策略一致 | 待验收 |  |
-| `log-query-mcp` 用户可读取白名单日志 | 待验收 |  |
-| 非白名单日志不可读取或不可通过工具访问 | 待验收 |  |
-| limits 与目标日志规模匹配 | 待验收 |  |
-
-## 5. 服务启动验收
+## 5. Local Source 配置/权限验收
 
 | 项目 | 状态 | 记录 |
 |---|---|---|
-| `systemctl enable --now log-query-mcp.service` 成功 | 待验收 |  |
-| `systemctl status` 显示 active | 待验收 |  |
-| `journalctl` 无配置错误、权限错误或 panic | 待验收 |  |
-| 默认监听 `127.0.0.1:8000` | 待验收 |  |
-| 未经显式配置不监听非 loopback 地址 | 待验收 |  |
-| 重启服务后 cursor 和 `match_ref` 失效行为符合预期 | 待验收 |  |
+| 所有 Local `source_id` 已审批 | 待验收 |  |
+| root 为必要的绝对目录，不是过宽 `/`/`/var` | 待验收 |  |
+| files/directories 与 rotation 策略一致 | 待验收 |  |
+| 服务用户只读批准日志 | 待验收 |  |
+| 非白名单日志不能通过 MCP 访问 | 待验收 |  |
+| openat2 安全前提（kernel/mount）满足 | 待验收 |  |
 
-## 6. MCP 协议验收
+## 6. Remote SSH Source 验收
 
 | 项目 | 状态 | 记录 |
 |---|---|---|
-| HTTP `/mcp` initialize 请求成功 | 待验收 |  |
-| MCP Inspector 可连接 Streamable HTTP URL | 待验收 |  |
-| Inspector Tools 页显示三个工具 | 待验收 |  |
+| 每个 connection/source 已审批 | 待验收 |  |
+| 使用专用 read-only 账号，无 sudo | 待验收 |  |
+| 条件允许时启用 SFTP-only/chroot | 待验收或不适用 |  |
+| Password 只通过 `secret_ref` 提供 | 待验收或不适用 |  |
+| Private key 文件权限最小化 | 待验收或不适用 |  |
+| encrypted key passphrase 通过 Secret reference | 待验收或不适用 |  |
+| known_hosts 已通过独立可信渠道核对 fingerprint | 待验收 |  |
+| host-key mismatch 实际 fail-closed | 待验收 |  |
+| AI/API 无法提交 host/username/secret_ref/remote root | 待验收 |  |
+| 服务端没有为 MCP 开放 Remote Exec/Shell | 待验收 |  |
+| Remote 账号不能写/删目标日志 | 待验收 |  |
+
+## 7. Cache 与容量验收
+
+| 项目 | 状态 | 记录 |
+|---|---|---|
+| cache filesystem 容量满足 bootstrap + retention + generations | 待验收 |  |
+| cache directory/file 权限符合 0700/0600 | 待验收 |  |
+| cache/manifest 不含 Secret | 待验收 |  |
+| global/per-source quota 与日志规模匹配 | 待验收 |  |
+| Tail/FromNow 的覆盖边界符合业务查询需求 | 待验收 |  |
+| `CACHE_SCOPE_EXCEEDED` 被客户端视为“不完整覆盖”而非“无结果” | 待验收 |  |
+| 不使用人工删除 current/pinned generation 作为常规清理方式 | 待验收 |  |
+
+## 8. 服务启动与 MCP 验收
+
+| 项目 | 状态 | 记录 |
+|---|---|---|
+| `systemctl enable --now` 成功 | 待验收 |  |
+| systemd active / journal 无 panic | 待验收 |  |
+| 默认只监听 `127.0.0.1:8000` | 待验收 |  |
+| HTTP `/mcp` initialize 成功 | 待验收 |  |
+| MCP Inspector 显示三个工具 | 待验收 |  |
 | `list_log_sources` 只返回批准来源 | 待验收 |  |
-| `search_logs` 可按已知 trace ID 或 request ID 返回结果 | 待验收 |  |
-| `get_log_context` 可用 `match_ref` 返回有限上下文 | 待验收 |  |
-| 错误响应只包含 `code`、`message`、`retryable` | 待验收 |  |
-| 响应不暴露绝对路径、inode、offset 或 backtrace | 待验收 |  |
+| list/result/error 不泄露 host、username、secret、remote/cache absolute path | 待验收 |  |
+| Local `search_logs` 返回已知样例 | 待验收 |  |
+| Remote `search_logs` 返回已知样例 | 待验收 |  |
+| Local + Remote mixed query 正确 | 待验收 |  |
+| `get_log_context(match_ref)` 返回有限上下文 | 待验收 |  |
 
-MCP Inspector 记录：
-
-```text
-Inspector version:
-执行人:
-执行时间:
-连接 URL:
-工具调用样例:
-结果摘要:
-```
-
-## 7. 实际 AI 客户端验收
+## 9. Remote 故障/恢复验收
 
 | 项目 | 状态 | 记录 |
 |---|---|---|
-| AI 客户端配置 `type=streamable-http` | 待验收 |  |
-| AI 客户端连接 `http://127.0.0.1:8000/mcp` 或受控网关 URL | 待验收 |  |
-| AI 客户端可列出工具 | 待验收 |  |
-| AI 客户端可执行真实日志搜索 | 待验收 |  |
-| AI 客户端可基于 `match_ref` 读取上下文 | 待验收 |  |
-| AI 客户端无法请求任意服务器路径 | 待验收 |  |
-| AI 客户端查询结果满足脱敏和最小暴露要求 | 待验收 |  |
+| SSH server 不可用时 fail-closed | 待验收 |  |
+| auth failure 不泄露 Secret | 待验收 |  |
+| host key 变化时拒绝连接 | 待验收 |  |
+| server restart 后查询恢复 | 待验收 |  |
+| append 只同步新增 range | 待验收 |  |
+| rotation/truncate/replacement 创建正确 generation | 待验收 |  |
+| 同步失败不破坏最后有效 cache | 待验收 |  |
+| 一台 Remote Server 失败不污染另一台 cache | 待验收 |  |
 
-客户端记录：
+## 10. 升级与回滚验收
 
-```text
-客户端名称:
-客户端版本:
-运行位置:
-连接方式:
-测试问题:
-工具调用摘要:
-结论:
-```
-
-## 8. 运维场景验收
+CI/本地测试证明脚本逻辑，但目标服务器仍需执行一次受控演练。
 
 | 项目 | 状态 | 记录 |
 |---|---|---|
-| 配置变更后重启生效 | 待验收 |  |
-| 日志轮转后可按配置读取新文件 | 待验收 |  |
-| 文件替换场景返回稳定错误或重试后恢复 | 待验收 |  |
-| 权限移除后返回来源不可用而不是泄露底层路径 | 待验收 |  |
-| 查询超限返回 `RESOURCE_LIMIT` | 待验收 |  |
-| 服务停止和启动不影响系统其他服务 | 待验收 |  |
-| 升级流程已演练 | 待验收 |  |
-| 回滚流程已演练 | 待验收 |  |
-| 卸载流程已演练或确认不在本次范围 | 待验收 |  |
+| 升级前外层 SHA256 验证 | 待验收 |  |
+| `upgrade.sh` 创建 backup path | 待验收 |  |
+| 正常升级保持 production config | 待验收 |  |
+| 新 binaries/unit 原子替换后服务健康 | 待验收 |  |
+| 显式 `rollback.sh` 成功恢复旧版本 | 待验收 |  |
+| restart/health failure 的自动 rollback 已演练 | 待验收 |  |
+| rollback 后 MCP smoke query 正常 | 待验收 |  |
+| backup retention/清理策略已确定 | 待验收 |  |
 
-## 9. 非 loopback 暴露验收
+## 11. 实际 AI 客户端验收
 
-v1 不内置认证和 TLS。只有确有需要时才允许非 loopback 暴露。
+| 项目 | 状态 | 记录 |
+|---|---|---|
+| 客户端使用 Streamable HTTP | 待验收 |  |
+| 可列出工具和搜索真实日志 | 待验收 |  |
+| 可基于 match_ref 读取上下文 | 待验收 |  |
+| 无法请求任意服务器路径 | 待验收 |  |
+| 无法触发 Remote Exec/写操作 | 待验收 |  |
+| incomplete cache/error 能被正确理解 | 待验收 |  |
+
+## 12. 非 loopback 暴露验收
+
+服务不内置认证/TLS。只有确有需要时才允许非 loopback 暴露。
 
 | 项目 | 状态 | 记录 |
 |---|---|---|
 | 已记录暴露原因和审批 | 待验收或不适用 |  |
-| 使用反向代理、上层网关或内网 ACL | 待验收或不适用 |  |
-| TLS 由上游终止或专用内网链路保护 | 待验收或不适用 |  |
-| 访问控制限制到批准 AI 客户端 | 待验收或不适用 |  |
-| Inspector 代理没有暴露到不可信网络 | 待验收或不适用 |  |
+| 使用反向代理/网关/内网 ACL | 待验收或不适用 |  |
+| TLS 由可信上游终止 | 待验收或不适用 |  |
+| 只允许批准 AI 客户端访问 | 待验收或不适用 |  |
+| Inspector/调试入口未暴露不可信网络 | 待验收或不适用 |  |
 
-## 10. 发布签署
+## 13. 发布签署
 
 ```text
 版本:
+release tag:
+candidate commit:
+Release workflow run:
+Rust run:
+Contracts run:
+SSH live run:
+Performance run:
 发布包 SHA256:
 目标服务器:
-配置版本或审批单:
-自动验证结果:
+配置/审批单:
+known_hosts fingerprint 审核记录:
+自动验证结论:
 人工验收结论:
 遗留风险:
+backup path:
 回滚方案:
 验收人:
 验收时间:
