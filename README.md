@@ -121,19 +121,23 @@ sudo chmod 0640 /etc/log-query-mcp/config.json
 
 ## 安全升级与回滚
 
-发布包包含 `upgrade.sh` 和 `rollback.sh`。升级会先校验包内 SHA256，备份当前 binaries、`BUILDINFO`、配置和 systemd unit，再使用同目录临时文件 + rename 原子替换运行文件。正常升级**不会覆盖现有生产配置**。
+发布包包含 `healthcheck.sh`、`upgrade.sh` 和 `rollback.sh`。升级会先校验包内 SHA256，备份当前 binaries、`BUILDINFO`、配置和 systemd unit，再使用同目录临时文件 + rename 原子替换运行文件。正常升级**不会覆盖现有生产配置**。
 
 ```bash
 sudo scripts/upgrade.sh /path/to/log-query-mcp-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz
 ```
 
-升级后的 restart/health check 失败时会自动从本次 backup 回滚。也可以显式回滚：
+升级完成后不是只看进程存活：标准 `healthcheck.sh` 同时要求 `systemctl is-active` 和 MCP `/mcp` `initialize` 协议响应正确。restart 或协议健康检查失败时会自动从本次 backup 回滚。
+
+也可以显式回滚：
 
 ```bash
 sudo scripts/rollback.sh /var/lib/log-query-mcp/backups/<backup-dir>
 ```
 
-Release Gate 会执行隔离的 upgrade/rollback 演练，覆盖：正常升级、显式回滚、restart 失败自动回滚、损坏包在修改前拒绝、配置保持和 tar.gz 输入。
+回滚后同样必须通过 service + MCP protocol health check。
+
+Release Gate 会执行隔离的 health-check 和 upgrade/rollback 演练，覆盖：正常升级、显式回滚、restart 失败自动回滚、损坏包在修改前拒绝、配置保持、tar.gz 输入，以及“进程活着但 MCP 协议错误”的失败场景。
 
 ## Remote 快速准备
 
@@ -159,13 +163,13 @@ log-reader
 
 ## 快速验证
 
-确认服务监听 loopback：
+发布包内推荐直接执行：
 
 ```bash
-ss -ltn | grep '127.0.0.1:8000'
+sudo scripts/healthcheck.sh
 ```
 
-执行 MCP 初始化请求：
+它验证 systemd active 和 MCP `initialize`。人工协议请求也可以使用：
 
 ```bash
 curl -sS http://127.0.0.1:8000/mcp \
@@ -219,9 +223,33 @@ M6 已建立可重复工程 benchmark，而不是产品 SLA。当前基线证明
 - cache local scan 不访问 SSH；
 - 1 GiB full bootstrap 可以完成；
 - 10 GiB logical log 可只缓存 64 MiB tail；
-- 300 次连续 bounded range read 不泄漏 SFTP file handle。
+- 300 次连续 bounded range read 不泄漏 SFTP file handle；
+- single/dual-server concurrency harness 已接入真实 SSH live Gate。
 
 详见 [M6 性能基线](./docs/M6_PERFORMANCE_BASELINE_V2.md)。
+
+## Release Candidate 状态
+
+v2 仓库实现已完成，但最新 candidate 的 GitHub Actions runner 当前被账户 Billing/Spending Limit 在启动前阻断。外部验证事项统一跟踪在 GitHub Issue #23。
+
+这意味着：
+
+```text
+repository implementation  COMPLETE
+latest candidate CI        BLOCKED externally
+RC Ready                   NO, until Final Gates rerun green
+formal Release             NOT CREATED
+```
+
+Billing 恢复后可直接通过 `workflow_dispatch` 重跑 Rust、Contracts、SSH Transport 和 Release Gate，不需要额外空提交。
+
+在本地 Linux 环境可先执行全部非 live-SSH 仓库 Gate：
+
+```bash
+bash scripts/rc_check.sh
+```
+
+该命令不能替代真实双 SSH live Gate，也不能替代目标生产服务器验收。
 
 ## 文档索引
 
@@ -229,6 +257,7 @@ M6 已建立可重复工程 benchmark，而不是产品 SLA。当前基线证明
 - [生产运维指南](./docs/OPERATIONS.md)
 - [生产验收清单](./docs/PRODUCTION_CHECKLIST.md)
 - [v2 Release Readiness](./docs/RELEASE_READINESS_V2.md)
+- [M6 Final Baseline](./docs/M6_FINAL_BASELINE_V2.md)
 - [M6 性能基线](./docs/M6_PERFORMANCE_BASELINE_V2.md)
 - [M6 安全/故障矩阵](./docs/M6_SECURITY_FAULT_MATRIX_V2.md)
 - [v2 Remote SSH + Cache 设计](./docs/REMOTE_SSH_CACHE_DESIGN_V2.md)
@@ -247,12 +276,22 @@ M6 已建立可重复工程 benchmark，而不是产品 SLA。当前基线证明
 
 ## 开发验证
 
+完整本地 Final Candidate（不含真实 SSH live/生产环境）：
+
+```bash
+bash scripts/rc_check.sh
+```
+
+或分步执行：
+
 ```bash
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-targets --all-features
 cargo build --release --locked --bins
 python3 scripts/validate_contracts.py
+bash tests/healthcheck_test.sh
+bash tests/upgrade_rollback_test.sh
 ```
 
 发布包 dry-run：
@@ -261,7 +300,6 @@ python3 scripts/validate_contracts.py
 cargo build --release --locked --bins --target x86_64-unknown-linux-gnu
 bash scripts/package_release.sh --target x86_64-unknown-linux-gnu --out-dir dist --require-docs
 bash scripts/validate_release_package.sh dist/log-query-mcp-v0.1.0-x86_64-unknown-linux-gnu.tar.gz dist/SHA256SUMS
-bash tests/upgrade_rollback_test.sh
 ```
 
 ## 当前不包含
