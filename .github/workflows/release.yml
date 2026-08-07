@@ -8,6 +8,7 @@ on:
     tags:
       - "v*"
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,6 +30,19 @@ jobs:
       - name: Install release target
         run: rustup target add "${TARGET}"
 
+      - name: Check release shell syntax
+        run: |
+          bash -n scripts/check_release_tag.sh
+          bash -n scripts/install.sh
+          bash -n scripts/uninstall.sh
+          bash -n scripts/healthcheck.sh
+          bash -n scripts/upgrade.sh
+          bash -n scripts/rollback.sh
+          bash -n scripts/package_release.sh
+          bash -n scripts/validate_release_package.sh
+          bash -n tests/healthcheck_test.sh
+          bash -n tests/upgrade_rollback_test.sh
+
       - name: Validate release tag
         if: github.ref_type == 'tag'
         run: bash scripts/check_release_tag.sh "${GITHUB_REF_NAME}"
@@ -38,6 +52,9 @@ jobs:
 
       - name: Run transport smoke tests
         run: cargo test --locked --test mcp_transport_smoke -- --nocapture
+
+      - name: Exercise protocol health-check failures
+        run: bash tests/healthcheck_test.sh
 
       - name: Exercise upgrade and rollback
         run: bash tests/upgrade_rollback_test.sh
