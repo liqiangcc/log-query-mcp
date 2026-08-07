@@ -10,6 +10,7 @@ mod scanner;
 pub mod secret;
 mod time_filter;
 pub mod tool_error;
+pub mod transport;
 
 #[cfg(target_os = "linux")]
 mod backend;
