@@ -1,10 +1,16 @@
-name: SSH Research
+name: SSH Transport
 
 on:
   push:
     branches:
       - "docs/remote-ssh-cache-design-v2"
+      - "feat/**"
     paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/secret.rs"
+      - "src/transport/**"
+      - "tests/ssh_transport_live.rs"
       - "research/ssh-sftp-poc/**"
       - ".github/workflows/ssh-research.yml"
   workflow_dispatch:
@@ -13,7 +19,7 @@ permissions:
   contents: read
 
 jobs:
-  ssh-sftp-poc:
+  ssh-sftp-transport:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -31,10 +37,15 @@ jobs:
           sudo useradd -m -s /bin/bash logreader
           echo 'logreader:test-password' | sudo chpasswd
           sudo mkdir -p /home/logreader/.ssh /home/logreader/logs
-          echo 'hello world from log-query-mcp ssh poc' | sudo tee /home/logreader/logs/application.log >/dev/null
-          sudo chown -R logreader:logreader /home/logreader/.ssh /home/logreader/logs
+          echo 'hello world from log-query-mcp ssh transport' | sudo tee /home/logreader/logs/application.log >/dev/null
+          echo 'denied' | sudo tee /home/logreader/logs/denied.log >/dev/null
+          sudo mkfifo /home/logreader/logs/blocking.pipe
+          sudo chown -R logreader:logreader /home/logreader/.ssh
+          sudo chown -R logreader:logreader /home/logreader/logs
+          sudo chown root:root /home/logreader/logs/denied.log
           sudo chmod 700 /home/logreader/.ssh
           sudo chmod 444 /home/logreader/logs/application.log
+          sudo chmod 000 /home/logreader/logs/denied.log
 
           ssh-keygen -q -t ed25519 -N 'test-passphrase' -f /tmp/log-query-mcp-ssh-poc/client_key
           sudo cp /tmp/log-query-mcp-ssh-poc/client_key.pub /home/logreader/.ssh/authorized_keys
@@ -62,78 +73,48 @@ jobs:
 
           sudo /usr/sbin/sshd -f /tmp/log-query-mcp-ssh-poc/sshd_config -E /tmp/log-query-mcp-ssh-poc/sshd.log
           ssh-keyscan -p 2222 127.0.0.1 > /tmp/log-query-mcp-ssh-poc/known_hosts
-          : > /tmp/log-query-mcp-ssh-poc/empty_known_hosts
 
-      - name: Check POC crate
-        run: cargo check --manifest-path research/ssh-sftp-poc/Cargo.toml
+          ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-ssh-poc/wrong_host_key
+          WRONG_KEY=$(cut -d' ' -f1,2 /tmp/log-query-mcp-ssh-poc/wrong_host_key.pub)
+          printf '[127.0.0.1]:2222 %s\n' "$WRONG_KEY" > /tmp/log-query-mcp-ssh-poc/bad_known_hosts
 
-      - name: Verify password authentication and read-only SFTP operations
-        env:
-          POC_SSH_HOST: 127.0.0.1
-          POC_SSH_PORT: "2222"
-          POC_SSH_USERNAME: logreader
-          POC_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
-          POC_AUTH: password
-          POC_SSH_PASSWORD: test-password
-          POC_REMOTE_DIR: /home/logreader/logs
-          POC_REMOTE_FILE: /home/logreader/logs/application.log
-        run: cargo run --quiet --manifest-path research/ssh-sftp-poc/Cargo.toml
+      - name: Generate dependency lockfile
+        run: cargo generate-lockfile
 
-      - name: Verify encrypted private key authentication
-        env:
-          POC_SSH_HOST: 127.0.0.1
-          POC_SSH_PORT: "2222"
-          POC_SSH_USERNAME: logreader
-          POC_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
-          POC_AUTH: key
-          POC_SSH_KEY_FILE: /tmp/log-query-mcp-ssh-poc/client_key
-          POC_SSH_KEY_PASSPHRASE: test-passphrase
-          POC_REMOTE_DIR: /home/logreader/logs
-          POC_REMOTE_FILE: /home/logreader/logs/application.log
-        run: cargo run --quiet --manifest-path research/ssh-sftp-poc/Cargo.toml
+      - name: Upload generated lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: m2-cargo-lock
+          path: Cargo.lock
+          if-no-files-found: error
 
-      - name: Verify missing host key fails closed
-        env:
-          POC_SSH_HOST: 127.0.0.1
-          POC_SSH_PORT: "2222"
-          POC_SSH_USERNAME: logreader
-          POC_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/empty_known_hosts
-          POC_AUTH: password
-          POC_SSH_PASSWORD: test-password
-          POC_REMOTE_DIR: /home/logreader/logs
-          POC_REMOTE_FILE: /home/logreader/logs/application.log
+      - name: Check production transport
         run: |
-          if cargo run --quiet --manifest-path research/ssh-sftp-poc/Cargo.toml; then
-            echo 'expected host key verification failure' >&2
-            exit 1
-          fi
+          cargo fmt --all -- --check
+          cargo check --all-targets --all-features
 
-      - name: Verify SSH handshake connect timeout
+      - name: Verify production SSH/SFTP transport
         env:
-          POC_SSH_HOST: 127.0.0.1
-          POC_SSH_PORT: "2223"
-          POC_SSH_USERNAME: logreader
-          POC_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
-          POC_AUTH: password
-          POC_SSH_PASSWORD: test-password
-          POC_REMOTE_DIR: /home/logreader/logs
-          POC_REMOTE_FILE: /home/logreader/logs/application.log
-          POC_CONNECT_TIMEOUT_MS: "300"
+          M2_SSH_PORT: "2222"
+          M2_STALL_PORT: "2223"
+          M2_SSH_PASSWORD: test-password
+          M2_WRONG_PASSWORD: definitely-wrong
+          M2_KEY_PASSPHRASE: test-passphrase
+          M2_SSH_KEY_FILE: /tmp/log-query-mcp-ssh-poc/client_key
+          M2_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
+          M2_BAD_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/bad_known_hosts
+          M2_REMOTE_DIR: /home/logreader/logs
+          M2_REMOTE_FILE: /home/logreader/logs/application.log
+          M2_DENIED_FILE: /home/logreader/logs/denied.log
+          M2_FIFO_FILE: /home/logreader/logs/blocking.pipe
         run: |
           nc -l 127.0.0.1 2223 >/dev/null 2>&1 &
           NC_PID=$!
           trap 'kill "$NC_PID" 2>/dev/null || true' EXIT
-          START=$(date +%s%3N)
-          if cargo run --quiet --manifest-path research/ssh-sftp-poc/Cargo.toml; then
-            echo 'expected SSH handshake timeout' >&2
-            exit 1
-          fi
-          END=$(date +%s%3N)
-          ELAPSED=$((END - START))
-          if [ "$ELAPSED" -gt 5000 ]; then
-            echo "timeout enforcement took too long: ${ELAPSED}ms" >&2
-            exit 1
-          fi
+          cargo test --test ssh_transport_live -- --ignored --test-threads=1
+
+      - name: Check research POC remains compatible
+        run: cargo check --manifest-path research/ssh-sftp-poc/Cargo.toml
 
       - name: Show sshd log on failure
         if: failure()
