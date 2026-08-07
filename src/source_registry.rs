@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     sync::Arc,
@@ -8,9 +8,9 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    AppConfig, ConfigValidationError, DirectoryDiscoveryRule, DirectoryRule, FileIdentity,
-    LimitsConfig, SafeFile, SafeOpenError, SafeRoot, SourceDiscoveryError, TimestampRule,
-    discover_regular_files,
+    AppConfig, ConfigValidationError, FileIdentity, LimitsConfig, SafeFile, SafeOpenError,
+    SourceDiscoveryError, TimestampRule,
+    backend::{LocalBackend, SourceBackend},
 };
 
 pub const MAX_REGISTERED_FILES_PER_SOURCE: usize = 10_000;
@@ -69,10 +69,7 @@ impl SourceFileSnapshot {
 #[derive(Debug)]
 pub struct ConfiguredSource {
     descriptor: SourceDescriptor,
-    root: Arc<SafeRoot>,
-    explicit_files: Vec<PathBuf>,
-    directory_configs: Vec<DirectoryRule>,
-    discovery_rules: Vec<DirectoryDiscoveryRule>,
+    backend: SourceBackend,
     timestamp_rule: Option<TimestampRule>,
 }
 
@@ -98,49 +95,24 @@ impl ConfiguredSource {
             });
         }
 
-        let mut candidates = BTreeMap::<PathBuf, (FileIdentity, u64)>::new();
-        for (index, relative_path) in self.explicit_files.iter().enumerate() {
-            let file = self
-                .root
-                .open_regular_file(relative_path)
-                .map_err(|source| SourceRegistryError::ExplicitFileUnavailable {
-                    source_id: self.descriptor.source_id.clone(),
-                    file_index: index,
-                    source,
-                })?;
-            candidates.insert(relative_path.clone(), (file.identity(), file.size()));
-        }
+        let snapshots = self
+            .backend
+            .snapshot_files(&self.descriptor.source_id, max_files)?;
 
-        let discovered = discover_regular_files(&self.root, &self.discovery_rules, max_files)
-            .map_err(|source| SourceRegistryError::DiscoveryFailed {
-                source_id: self.descriptor.source_id.clone(),
-                source,
-            })?;
-        for file in discovered {
-            candidates
-                .entry(file.relative_path)
-                .or_insert((file.identity, file.size));
-        }
-
-        if candidates.len() > max_files {
-            return Err(SourceRegistryError::TooManyFiles {
-                source_id: self.descriptor.source_id.clone(),
-                limit: max_files,
-            });
-        }
-
-        Ok(candidates
+        Ok(snapshots
             .into_iter()
             .enumerate()
-            .map(
-                |(index, (relative_path, (identity, size_at_snapshot)))| SourceFileSnapshot {
-                    source_id: self.descriptor.source_id.clone(),
-                    file_id: stable_file_id(&self.descriptor.source_id, &relative_path, index),
-                    relative_path,
-                    identity,
-                    size_at_snapshot,
-                },
-            )
+            .map(|(index, snapshot)| SourceFileSnapshot {
+                source_id: self.descriptor.source_id.clone(),
+                file_id: stable_file_id(
+                    &self.descriptor.source_id,
+                    &snapshot.relative_path,
+                    index,
+                ),
+                relative_path: snapshot.relative_path,
+                identity: snapshot.identity,
+                size_at_snapshot: snapshot.size_at_snapshot,
+            })
             .collect())
     }
 
@@ -151,52 +123,27 @@ impl ConfiguredSource {
         if snapshot.source_id != self.descriptor.source_id {
             return Err(SourceRegistryError::SnapshotSourceMismatch);
         }
-        if !self.path_is_configured(&snapshot.relative_path) {
-            return Err(SourceRegistryError::PathNotConfigured);
-        }
 
-        let file = self
-            .root
-            .open_regular_file(&snapshot.relative_path)
-            .map_err(|source| SourceRegistryError::FileUnavailable {
-                source_id: self.descriptor.source_id.clone(),
-                source,
-            })?;
-        if file.identity() != snapshot.identity || file.size() < snapshot.size_at_snapshot {
-            return Err(SourceRegistryError::FileChanged {
-                source_id: self.descriptor.source_id.clone(),
-                file_id: snapshot.file_id.clone(),
-            });
-        }
-        Ok(file)
+        self.backend.open_snapshot_file(
+            &self.descriptor.source_id,
+            &snapshot.relative_path,
+            snapshot.identity,
+            snapshot.size_at_snapshot,
+            &snapshot.file_id,
+        )
     }
 
     pub fn open_configured_file(
         &self,
         relative_path: impl AsRef<Path>,
     ) -> Result<SafeFile, SourceRegistryError> {
-        let relative_path = relative_path.as_ref();
-        if !self.path_is_configured(relative_path) {
-            return Err(SourceRegistryError::PathNotConfigured);
-        }
-
-        self.root
-            .open_regular_file(relative_path)
-            .map_err(|source| SourceRegistryError::FileUnavailable {
-                source_id: self.descriptor.source_id.clone(),
-                source,
-            })
+        self.backend
+            .open_configured_file(&self.descriptor.source_id, relative_path.as_ref())
     }
 
     #[must_use]
     pub fn path_is_configured(&self, relative_path: &Path) -> bool {
-        self.explicit_files
-            .iter()
-            .any(|candidate| candidate == relative_path)
-            || self
-                .directory_configs
-                .iter()
-                .any(|rule| directory_rule_allows(rule, relative_path))
+        self.backend.path_is_configured(relative_path)
     }
 }
 
@@ -216,27 +163,8 @@ impl SourceRegistry {
 
         for source_config in config.sources.into_iter().filter(|source| source.enabled) {
             let source_id = source_config.source_id.clone();
-            let root = Arc::new(SafeRoot::open(&source_config.root).map_err(|source| {
-                SourceRegistryError::RootUnavailable {
-                    source_id: source_id.clone(),
-                    source,
-                }
-            })?);
-
-            let discovery_rules = source_config
-                .directories
-                .iter()
-                .enumerate()
-                .map(|(index, rule)| {
-                    DirectoryDiscoveryRule::from_config(rule).map_err(|source| {
-                        SourceRegistryError::DirectoryRuleInvalid {
-                            source_id: source_id.clone(),
-                            rule_index: index,
-                            source,
-                        }
-                    })
-                })
-                .collect::<Result<Vec<_>, SourceRegistryError>>()?;
+            let backend =
+                SourceBackend::Local(LocalBackend::from_config(&source_id, &source_config)?);
 
             let configured = Arc::new(ConfiguredSource {
                 descriptor: SourceDescriptor {
@@ -247,10 +175,7 @@ impl SourceRegistry {
                     environment: source_config.environment,
                     tags: source_config.tags,
                 },
-                root,
-                explicit_files: source_config.files,
-                directory_configs: source_config.directories,
-                discovery_rules,
+                backend,
                 timestamp_rule: source_config.timestamp_rule,
             });
 
@@ -313,30 +238,6 @@ impl SourceRegistry {
     pub fn is_empty(&self) -> bool {
         self.sources.is_empty()
     }
-}
-
-fn directory_rule_allows(rule: &DirectoryRule, relative_path: &Path) -> bool {
-    let Some(file_name) = relative_path.file_name().and_then(|value| value.to_str()) else {
-        return false;
-    };
-    if !rule
-        .include_suffixes
-        .iter()
-        .any(|suffix| file_name.ends_with(suffix))
-    {
-        return false;
-    }
-
-    let remainder = if rule.path == Path::new(".") {
-        relative_path
-    } else {
-        let Ok(remainder) = relative_path.strip_prefix(&rule.path) else {
-            return false;
-        };
-        remainder
-    };
-    let component_count = remainder.components().count();
-    component_count > 0 && (rule.recursive || component_count == 1)
 }
 
 fn stable_file_id(source_id: &str, relative_path: &Path, index: usize) -> String {
@@ -423,7 +324,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use crate::{CONFIG_VERSION, Encoding};
+    use crate::{CONFIG_VERSION, DirectoryRule, Encoding};
 
     use super::*;
 
