@@ -6,8 +6,8 @@ use std::{
 };
 
 use log_query_mcp::{
-    AppConfigV2, SourceRegistry, StatefulContextRequest, StatefulContextService, StatefulQueryError,
-    StatefulQueryRequest, StatefulQueryService, ToolError, ToolErrorCode,
+    AppConfigV2, SourceRegistry, StatefulContextRequest, StatefulContextService,
+    StatefulQueryError, StatefulQueryRequest, StatefulQueryService, ToolError, ToolErrorCode,
 };
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -117,12 +117,7 @@ fn service(config: Value) -> StatefulQueryService {
     StatefulQueryService::new(Arc::new(registry)).expect("M5 query service")
 }
 
-fn remote_config(
-    port: u16,
-    known_hosts: &str,
-    cache_root: &Path,
-    sources: Vec<Value>,
-) -> Value {
+fn remote_config(port: u16, known_hosts: &str, cache_root: &Path, sources: Vec<Value>) -> Value {
     json!({
         "version": 2,
         "connections": [connection(port, known_hosts)],
@@ -242,8 +237,16 @@ async fn remote_query_end_to_end_preserves_snapshots_and_context() {
         .await
         .expect("directory query");
     assert_eq!(directory_page.results.len(), 1);
-    assert!(directory_page.results[0].content.contains("DIRMATCH included"));
-    assert!(directory_page.results[0].file_name.ends_with("included.log"));
+    assert!(
+        directory_page.results[0]
+            .content
+            .contains("DIRMATCH included")
+    );
+    assert!(
+        directory_page.results[0]
+            .file_name
+            .ends_with("included.log")
+    );
 
     // A single query can combine Local and Remote sources without changing query semantics.
     let local_root = TempDir::new().expect("local source");
@@ -269,7 +272,12 @@ async fn remote_query_end_to_end_preserves_snapshots_and_context() {
         .await
         .expect("mixed Local+Remote query");
     assert_eq!(mixed.results.len(), 2);
-    assert!(mixed.results.iter().any(|result| result.content == "MIXED local"));
+    assert!(
+        mixed
+            .results
+            .iter()
+            .any(|result| result.content == "MIXED local")
+    );
     assert!(
         mixed
             .results
@@ -303,7 +311,10 @@ async fn remote_query_end_to_end_preserves_snapshots_and_context() {
             .await
             .expect_err("partial cache must not produce a false empty result");
         assert!(matches!(error, StatefulQueryError::CacheScopeExceeded));
-        assert_eq!(ToolError::from(error).code, ToolErrorCode::CacheScopeExceeded);
+        assert_eq!(
+            ToolError::from(error).code,
+            ToolErrorCode::CacheScopeExceeded
+        );
     }
 
     // Keep a match_ref on the old generation, force a replacement generation, then make future
