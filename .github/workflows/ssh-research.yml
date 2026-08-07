@@ -1,8 +1,8 @@
 name: SSH Transport
 
 # This read-only workflow is the live gate for M2 transport, M4 sync, M5 remote query,
-# M6 remote security boundaries, multi-server acceptance, restart recovery faults, and
-# repeated bounded range reads that verify SFTP file handles are closed deterministically.
+# M6 remote security boundaries, multi-server acceptance, restart recovery faults,
+# concurrency baselines, and repeated bounded range reads that verify SFTP handles close.
 on:
   push:
     branches:
@@ -26,6 +26,7 @@ on:
       - "tests/m5_remote_query_live.rs"
       - "tests/m6_remote_security_live.rs"
       - "tests/m6_multi_server_live.rs"
+      - "tests/m6_concurrency_performance_live.rs"
       - "tests/m6_server_restart_live.rs"
       - "research/ssh-sftp-poc/**"
       - ".github/workflows/ssh-research.yml"
@@ -205,7 +206,7 @@ jobs:
         run: cargo test --test m6_remote_security_live -- --ignored --test-threads=1
 
       - name: Verify M6 multi-server acceptance through two real SSH servers
-        env:
+        env: &multi_server_env
           M2_SSH_PORT: "2222"
           M2_SSH_PASSWORD: test-password
           M2_KEY_PASSPHRASE: test-passphrase
@@ -217,6 +218,10 @@ jobs:
           M6_REMOTE_B_DIR: /home/logreader_b/logs
           M6_UNUSED_SSH_PORT: "2299"
         run: cargo test --test m6_multi_server_live -- --ignored --test-threads=1
+
+      - name: Record M6 single and dual server concurrency baselines
+        env: *multi_server_env
+        run: cargo test --test m6_concurrency_performance_live -- --ignored --test-threads=1 --nocapture
 
       - name: Verify M6 server restart recovery and fail-closed behavior
         env:
