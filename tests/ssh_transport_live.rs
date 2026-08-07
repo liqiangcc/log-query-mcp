@@ -373,6 +373,40 @@ async fn large_file_supports_bounded_offset_range_read() {
 
 #[tokio::test]
 #[ignore = "requires the SSH Transport workflow fixture"]
+async fn repeated_range_reads_close_remote_handles() {
+    let connection = password_connection(
+        "many-ranges",
+        port("M2_SSH_PORT"),
+        &required("M2_KNOWN_HOSTS"),
+        "M2_SSH_PASSWORD",
+        3000,
+        5000,
+    );
+    let manager = SshConnectionManager::from_config(&config(vec![connection], "many-ranges"))
+        .expect("connection manager should build");
+    let reader = manager
+        .open_reader("many-ranges")
+        .await
+        .expect("reader should connect");
+    let large_file = required("M2_LARGE_FILE");
+
+    // More than 256 opens catches leaked/unconfirmed SFTP handles without transferring a
+    // large fixture. Each read stays bounded and reuses offsets inside the existing 8 MiB file.
+    for index in 0_u64..300 {
+        let offset = (index % 2048) * 4096;
+        let bytes = reader
+            .read_range(&large_file, offset, 4096)
+            .await
+            .expect("repeated bounded range read should succeed");
+        assert_eq!(bytes.len(), 4096);
+        assert!(bytes.iter().all(|byte| *byte == 0));
+    }
+
+    reader.close().await.expect("SFTP session should close");
+}
+
+#[tokio::test]
+#[ignore = "requires the SSH Transport workflow fixture"]
 async fn operation_timeout_marks_reader_broken() {
     let connection = password_connection(
         "timeout",

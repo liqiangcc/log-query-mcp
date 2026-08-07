@@ -14,7 +14,7 @@ use russh::{client, keys};
 use russh_sftp::{client::SftpSession, protocol::FileAttributes};
 use thiserror::Error;
 use tokio::{
-    io::{AsyncReadExt, AsyncSeekExt},
+    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
     sync::{OwnedSemaphorePermit, Semaphore},
     task,
     time::timeout,
@@ -257,6 +257,12 @@ impl SshReadTransport {
 
         let mut buffer = vec![0_u8; length];
         let result = timeout(self.operation_timeout, file.read_exact(&mut buffer)).await;
+        self.finish_operation(result, SshTransportError::SftpProtocol)?;
+
+        // russh-sftp 2.3 requires AsyncWriteExt::shutdown() to properly close a File
+        // handle. A large sync performs many bounded range reads, so await shutdown
+        // before opening the next handle instead of relying on Drop alone.
+        let result = timeout(self.operation_timeout, file.shutdown()).await;
         self.finish_operation(result, SshTransportError::SftpProtocol)?;
         Ok(buffer)
     }
