@@ -286,26 +286,6 @@ async fn sync_with_reader<R: RemoteSyncReader + Sync>(
         .await;
     }
 
-    if remote.size == current.remote_size {
-        if remote.mtime_millis == current.remote_mtime_millis {
-            return Ok(outcome_from_record(
-                SyncAction::Unchanged,
-                &current,
-                budget.used(),
-                0,
-            ));
-        }
-        return bootstrap_generation(
-            cache,
-            target,
-            reader,
-            &remote,
-            SyncGenerationReason::MetadataChangedWithoutGrowth,
-            &mut budget,
-        )
-        .await;
-    }
-
     let Some(expected_fingerprint) = current
         .continuity_fingerprint
         .as_deref()
@@ -351,6 +331,15 @@ async fn sync_with_reader<R: RemoteSyncReader + Sync>(
             &mut budget,
         )
         .await;
+    }
+
+    if remote.size == current.remote_size {
+        return Ok(outcome_from_record(
+            SyncAction::Unchanged,
+            &current,
+            budget.used(),
+            0,
+        ));
     }
 
     append_generation(cache, target, reader, &remote, &current, &mut budget).await
@@ -961,7 +950,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unchanged_metadata_does_not_download_ranges() {
+    async fn unchanged_file_verifies_continuity_without_downloading_payload() {
         let temp = TempDir::new().expect("temp");
         let cache = cache(&temp);
         let target = target(BootstrapType::Full, None);
@@ -972,7 +961,8 @@ mod tests {
         let reader = FakeReader::new(b"abcdef", 1);
         let outcome = run(&cache, &target, &reader, 1024).await.expect("sync");
         assert_eq!(outcome.action, SyncAction::Unchanged);
-        assert!(reader.reads().is_empty());
+        assert_eq!(outcome.cached_bytes_written, 0);
+        assert_eq!(reader.reads(), vec![(0, 6)]);
     }
 
     #[tokio::test]
@@ -1033,21 +1023,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn same_size_mtime_change_is_treated_as_replacement() {
+    async fn same_size_replacement_is_caught_even_when_mtime_is_unchanged() {
         let temp = TempDir::new().expect("temp");
         let cache = cache(&temp);
         let target = target(BootstrapType::Full, None);
         let first = run(&cache, &target, &FakeReader::new(b"abcdef", 1), 1024)
             .await
             .expect("bootstrap");
-        let second = run(&cache, &target, &FakeReader::new(b"uvwxyz", 2), 1024)
+        let second = run(&cache, &target, &FakeReader::new(b"uvwxyz", 1), 1024)
             .await
             .expect("replacement");
         assert_eq!(
             second.action,
-            SyncAction::NewGeneration(SyncGenerationReason::MetadataChangedWithoutGrowth)
+            SyncAction::NewGeneration(SyncGenerationReason::ContinuityMismatch)
         );
         assert_ne!(second.generation, first.generation);
+    }
+
+    #[tokio::test]
+    async fn mtime_change_with_same_content_does_not_rotate_generation() {
+        let temp = TempDir::new().expect("temp");
+        let cache = cache(&temp);
+        let target = target(BootstrapType::Full, None);
+        let first = run(&cache, &target, &FakeReader::new(b"abcdef", 1), 1024)
+            .await
+            .expect("bootstrap");
+        let second = run(&cache, &target, &FakeReader::new(b"abcdef", 2), 1024)
+            .await
+            .expect("unchanged content");
+        assert_eq!(second.action, SyncAction::Unchanged);
+        assert_eq!(second.generation, first.generation);
     }
 
     #[tokio::test]
