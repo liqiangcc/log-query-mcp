@@ -151,7 +151,7 @@ fn remote_server() -> (TempDir, LogQueryMcpServer) {
         "cache": {
             "root": cache_root,
             "max_bytes": 1048576,
-            "max_bytes_per_source": 524288,
+            "max_bytes_per_source": 1048576,
             "retention_hours": 24,
             "max_generations_per_file": 4
         },
