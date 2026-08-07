@@ -3,7 +3,7 @@ use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
 use thiserror::Error;
 
 use crate::{
-    AppConfig, ConfigLoadError, LogQueryMcpServer, SourceRegistry, SourceRegistryError,
+    ConfigDocument, ConfigDocumentLoadError, LogQueryMcpServer, SourceRegistry, SourceRegistryError,
     StatefulQueryError, StatefulQueryService, ToolError,
 };
 
@@ -17,8 +17,8 @@ pub fn server_from_env() -> Result<LogQueryMcpServer, RuntimeError> {
 }
 
 pub fn server_from_config_path(path: PathBuf) -> Result<LogQueryMcpServer, RuntimeError> {
-    let config = AppConfig::load(path)?;
-    let registry = SourceRegistry::from_config(config)?;
+    let config = ConfigDocument::load(path)?;
+    let registry = SourceRegistry::from_document(config)?;
     let query_service = StatefulQueryService::new(Arc::new(registry))?;
     LogQueryMcpServer::new(query_service).map_err(RuntimeError::McpServer)
 }
@@ -48,7 +48,7 @@ pub enum RuntimeError {
     MissingConfigEnv,
 
     #[error("failed to load configuration")]
-    ConfigLoad(#[from] ConfigLoadError),
+    ConfigLoad(#[from] ConfigDocumentLoadError),
 
     #[error("failed to build source registry")]
     SourceRegistry(#[from] SourceRegistryError),
