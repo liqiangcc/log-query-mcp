@@ -1,4 +1,13 @@
-use std::{collections::HashMap, fmt, io::SeekFrom, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    fmt,
+    io::SeekFrom,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use russh::keys::PrivateKeyWithHashAlg;
 use russh::{client, keys};
@@ -120,6 +129,7 @@ pub struct SshReadTransport {
     _session: client::Handle<KnownHostsClient>,
     sftp: SftpSession,
     operation_timeout: Duration,
+    broken: AtomicBool,
     _permit: OwnedSemaphorePermit,
 }
 
@@ -128,6 +138,7 @@ impl fmt::Debug for SshReadTransport {
         formatter
             .debug_struct("SshReadTransport")
             .field("operation_timeout", &self.operation_timeout)
+            .field("broken", &self.broken.load(Ordering::Relaxed))
             .finish_non_exhaustive()
     }
 }
@@ -190,37 +201,36 @@ impl SshReadTransport {
             _session: session,
             sftp,
             operation_timeout,
+            broken: AtomicBool::new(false),
             _permit: permit,
         })
     }
 
     pub async fn stat(&self, path: &str) -> Result<RemoteFileMetadata, SshTransportError> {
+        self.ensure_healthy()?;
         validate_remote_path(path)?;
-        let metadata = timeout(self.operation_timeout, self.sftp.metadata(path.to_owned()))
-            .await
-            .map_err(|_| SshTransportError::OperationTimeout)?
-            .map_err(|_| SshTransportError::SftpProtocol)?;
+        let result = timeout(self.operation_timeout, self.sftp.metadata(path.to_owned())).await;
+        let metadata = self.finish_operation(result, SshTransportError::SftpProtocol)?;
         Ok(metadata.into())
     }
 
     pub async fn lstat(&self, path: &str) -> Result<RemoteFileMetadata, SshTransportError> {
+        self.ensure_healthy()?;
         validate_remote_path(path)?;
-        let metadata = timeout(
+        let result = timeout(
             self.operation_timeout,
             self.sftp.symlink_metadata(path.to_owned()),
         )
-        .await
-        .map_err(|_| SshTransportError::OperationTimeout)?
-        .map_err(|_| SshTransportError::SftpProtocol)?;
+        .await;
+        let metadata = self.finish_operation(result, SshTransportError::SftpProtocol)?;
         Ok(metadata.into())
     }
 
     pub async fn read_dir(&self, path: &str) -> Result<Vec<RemoteDirEntry>, SshTransportError> {
+        self.ensure_healthy()?;
         validate_remote_path(path)?;
-        let entries = timeout(self.operation_timeout, self.sftp.read_dir(path.to_owned()))
-            .await
-            .map_err(|_| SshTransportError::OperationTimeout)?
-            .map_err(|_| SshTransportError::SftpProtocol)?;
+        let result = timeout(self.operation_timeout, self.sftp.read_dir(path.to_owned())).await;
+        let entries = self.finish_operation(result, SshTransportError::SftpProtocol)?;
 
         Ok(entries
             .filter_map(|entry| {
@@ -236,23 +246,18 @@ impl SshReadTransport {
         offset: u64,
         length: usize,
     ) -> Result<Vec<u8>, SshTransportError> {
+        self.ensure_healthy()?;
         validate_remote_path(path)?;
         validate_read_range(offset, length)?;
 
-        let mut file = timeout(self.operation_timeout, self.sftp.open(path.to_owned()))
-            .await
-            .map_err(|_| SshTransportError::OperationTimeout)?
-            .map_err(|_| SshTransportError::SftpProtocol)?;
-        timeout(self.operation_timeout, file.seek(SeekFrom::Start(offset)))
-            .await
-            .map_err(|_| SshTransportError::OperationTimeout)?
-            .map_err(|_| SshTransportError::SftpProtocol)?;
+        let result = timeout(self.operation_timeout, self.sftp.open(path.to_owned())).await;
+        let mut file = self.finish_operation(result, SshTransportError::SftpProtocol)?;
+        let result = timeout(self.operation_timeout, file.seek(SeekFrom::Start(offset))).await;
+        self.finish_operation(result, SshTransportError::SftpProtocol)?;
 
         let mut buffer = vec![0_u8; length];
-        timeout(self.operation_timeout, file.read_exact(&mut buffer))
-            .await
-            .map_err(|_| SshTransportError::OperationTimeout)?
-            .map_err(|_| SshTransportError::SftpProtocol)?;
+        let result = timeout(self.operation_timeout, file.read_exact(&mut buffer)).await;
+        self.finish_operation(result, SshTransportError::SftpProtocol)?;
         Ok(buffer)
     }
 
@@ -261,6 +266,32 @@ impl SshReadTransport {
             .await
             .map_err(|_| SshTransportError::OperationTimeout)?
             .map_err(|_| SshTransportError::SftpProtocol)
+    }
+
+    fn ensure_healthy(&self) -> Result<(), SshTransportError> {
+        if self.broken.load(Ordering::Acquire) {
+            Err(SshTransportError::Broken)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn finish_operation<T, E>(
+        &self,
+        result: Result<Result<T, E>, tokio::time::error::Elapsed>,
+        protocol_error: SshTransportError,
+    ) -> Result<T, SshTransportError> {
+        match result {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(_)) => {
+                self.broken.store(true, Ordering::Release);
+                Err(protocol_error)
+            }
+            Err(_) => {
+                self.broken.store(true, Ordering::Release);
+                Err(SshTransportError::OperationTimeout)
+            }
+        }
     }
 }
 
@@ -403,6 +434,8 @@ pub enum SshTransportError {
     SshProtocol,
     #[error("SFTP protocol operation failed")]
     SftpProtocol,
+    #[error("SSH/SFTP reader is broken")]
+    Broken,
     #[error("remote path is invalid")]
     InvalidRemotePath,
     #[error("remote read range is invalid or exceeds the hard limit")]
