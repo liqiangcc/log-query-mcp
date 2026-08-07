@@ -1,0 +1,139 @@
+name: SSH Research
+
+on:
+  push:
+    branches:
+      - "docs/remote-ssh-cache-design-v2"
+    paths:
+      - "research/ssh-sftp-poc/**"
+      - ".github/workflows/ssh-research.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ssh-sftp-poc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install OpenSSH test server
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server netcat-openbsd
+          sudo mkdir -p /run/sshd /tmp/log-query-mcp-ssh-poc
+
+      - name: Prepare SSH user and fixtures
+        run: |
+          sudo useradd -m -s /bin/bash logreader
+          echo 'logreader:test-password' | sudo chpasswd
+          sudo mkdir -p /home/logreader/.ssh /home/logreader/logs
+          echo 'hello world from log-query-mcp ssh poc' | sudo tee /home/logreader/logs/application.log >/dev/null
+          sudo chown -R logreader:logreader /home/logreader/.ssh /home/logreader/logs
+          sudo chmod 700 /home/logreader/.ssh
+          sudo chmod 444 /home/logreader/logs/application.log
+
+          ssh-keygen -q -t ed25519 -N 'test-passphrase' -f /tmp/log-query-mcp-ssh-poc/client_key
+          sudo cp /tmp/log-query-mcp-ssh-poc/client_key.pub /home/logreader/.ssh/authorized_keys
+          sudo chown logreader:logreader /home/logreader/.ssh/authorized_keys
+          sudo chmod 600 /home/logreader/.ssh/authorized_keys
+
+          sudo ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-ssh-poc/ssh_host_ed25519_key
+          sudo tee /tmp/log-query-mcp-ssh-poc/sshd_config >/dev/null <<'EOF'
+          Port 2222
+          ListenAddress 127.0.0.1
+          HostKey /tmp/log-query-mcp-ssh-poc/ssh_host_ed25519_key
+          PidFile /tmp/log-query-mcp-ssh-poc/sshd.pid
+          PasswordAuthentication yes
+          PubkeyAuthentication yes
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          StrictModes yes
+          AllowUsers logreader
+          AuthorizedKeysFile .ssh/authorized_keys
+          Subsystem sftp internal-sftp
+          LogLevel VERBOSE
+          EOF
+
+          sudo /usr/sbin/sshd -f /tmp/log-query-mcp-ssh-poc/sshd_config -E /tmp/log-query-mcp-ssh-poc/sshd.log
+          ssh-keyscan -p 2222 127.0.0.1 > /tmp/log-query-mcp-ssh-poc/known_hosts
+          : > /tmp/log-query-mcp-ssh-poc/empty_known_hosts
+
+      - name: Check POC crate
+        run: cargo check --manifest-path research/ssh-sftp-poc/Cargo.toml
+
+      - name: Verify password authentication and read-only SFTP operations
+        env:
+          POC_SSH_HOST: 127.0.0.1
+          POC_SSH_PORT: "2222"
+          POC_SSH_USERNAME: logreader
+          POC_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
+          POC_AUTH: password
+          POC_SSH_PASSWORD: test-password
+          POC_REMOTE_DIR: /home/logreader/logs
+          POC_REMOTE_FILE: /home/logreader/logs/application.log
+        run: cargo run --quiet --manifest-path research/ssh-sftp-poc/Cargo.toml
+
+      - name: Verify encrypted private key authentication
+        env:
+          POC_SSH_HOST: 127.0.0.1
+          POC_SSH_PORT: "2222"
+          POC_SSH_USERNAME: logreader
+          POC_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
+          POC_AUTH: key
+          POC_SSH_KEY_FILE: /tmp/log-query-mcp-ssh-poc/client_key
+          POC_SSH_KEY_PASSPHRASE: test-passphrase
+          POC_REMOTE_DIR: /home/logreader/logs
+          POC_REMOTE_FILE: /home/logreader/logs/application.log
+        run: cargo run --quiet --manifest-path research/ssh-sftp-poc/Cargo.toml
+
+      - name: Verify missing host key fails closed
+        env:
+          POC_SSH_HOST: 127.0.0.1
+          POC_SSH_PORT: "2222"
+          POC_SSH_USERNAME: logreader
+          POC_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/empty_known_hosts
+          POC_AUTH: password
+          POC_SSH_PASSWORD: test-password
+          POC_REMOTE_DIR: /home/logreader/logs
+          POC_REMOTE_FILE: /home/logreader/logs/application.log
+        run: |
+          if cargo run --quiet --manifest-path research/ssh-sftp-poc/Cargo.toml; then
+            echo 'expected host key verification failure' >&2
+            exit 1
+          fi
+
+      - name: Verify SSH handshake connect timeout
+        env:
+          POC_SSH_HOST: 127.0.0.1
+          POC_SSH_PORT: "2223"
+          POC_SSH_USERNAME: logreader
+          POC_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
+          POC_AUTH: password
+          POC_SSH_PASSWORD: test-password
+          POC_REMOTE_DIR: /home/logreader/logs
+          POC_REMOTE_FILE: /home/logreader/logs/application.log
+          POC_CONNECT_TIMEOUT_MS: "300"
+        run: |
+          nc -l 127.0.0.1 2223 >/dev/null 2>&1 &
+          NC_PID=$!
+          trap 'kill "$NC_PID" 2>/dev/null || true' EXIT
+          START=$(date +%s%3N)
+          if cargo run --quiet --manifest-path research/ssh-sftp-poc/Cargo.toml; then
+            echo 'expected SSH handshake timeout' >&2
+            exit 1
+          fi
+          END=$(date +%s%3N)
+          ELAPSED=$((END - START))
+          if [ "$ELAPSED" -gt 5000 ]; then
+            echo "timeout enforcement took too long: ${ELAPSED}ms" >&2
+            exit 1
+          fi
+
+      - name: Show sshd log on failure
+        if: failure()
+        run: sudo cat /tmp/log-query-mcp-ssh-poc/sshd.log || true
