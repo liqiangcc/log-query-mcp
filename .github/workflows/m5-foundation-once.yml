@@ -9,6 +9,7 @@ on:
       - ".github/scripts/m5_foundation_prepatch.py"
       - ".github/scripts/m5_foundation_patch.py"
       - ".github/scripts/m5_foundation_compat_patch.py"
+      - ".github/scripts/m5_foundation_postpatch.py"
 
 permissions:
   contents: write
@@ -28,6 +29,7 @@ jobs:
           python .github/scripts/m5_foundation_prepatch.py
           python .github/scripts/m5_foundation_patch.py
           python .github/scripts/m5_foundation_compat_patch.py
+          python .github/scripts/m5_foundation_postpatch.py
           cargo fmt --all
           cargo fmt --all -- --check
           cargo check --locked --all-targets --all-features
