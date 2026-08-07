@@ -9,8 +9,8 @@ use thiserror::Error;
 
 use crate::{
     AppConfig, AppConfigV2, BackendType, ConfigDocument, ConfigV2ValidationError,
-    ConfigValidationError, FileIdentity, LimitsConfig, SafeFile, SafeOpenError, SourceDiscoveryError,
-    TimestampRule,
+    ConfigValidationError, FileIdentity, LimitsConfig, SafeFile, SafeOpenError,
+    SourceDiscoveryError, TimestampRule,
     backend::{LocalBackend, SourceBackend},
 };
 
