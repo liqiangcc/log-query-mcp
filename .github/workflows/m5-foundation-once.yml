@@ -1,0 +1,45 @@
+name: M5 Foundation Once
+
+on:
+  push:
+    branches:
+      - "feat/v2-m1-backend-config"
+    paths:
+      - ".github/workflows/m5-foundation-once.yml"
+      - ".github/scripts/m5_foundation_patch.py"
+      - ".github/scripts/m5_foundation_compat_patch.py"
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.ref == 'refs/heads/feat/v2-m1-backend-config'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out current branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/v2-m1-backend-config
+
+      - name: Apply and verify M5 foundation
+        run: |
+          python .github/scripts/m5_foundation_patch.py
+          python .github/scripts/m5_foundation_compat_patch.py
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo check --locked --all-targets --all-features
+          cargo test --locked --all-targets --all-features
+          git diff --check
+          CHANGED=$(git diff --name-only | grep -Ev '^(src/cache/store.rs|src/cache/mod.rs|src/cache/sync.rs|src/lib.rs|src/backend/mod.rs|src/backend/local.rs|src/backend/remote.rs|src/source_registry.rs|src/query_engine.rs|src/stateful_query.rs|src/context_reader.rs|src/tool_error.rs)$' || true)
+          test -z "$CHANGED"
+
+      - name: Commit verified M5 foundation
+        run: |
+          git add -- src/cache/store.rs src/cache/mod.rs src/cache/sync.rs src/lib.rs src/backend/mod.rs src/backend/local.rs src/backend/remote.rs src/source_registry.rs src/query_engine.rs src/stateful_query.rs src/context_reader.rs src/tool_error.rs
+          CHANGED=$(git diff --cached --name-only | grep -Ev '^(src/cache/store.rs|src/cache/mod.rs|src/cache/sync.rs|src/lib.rs|src/backend/mod.rs|src/backend/local.rs|src/backend/remote.rs|src/source_registry.rs|src/query_engine.rs|src/stateful_query.rs|src/context_reader.rs|src/tool_error.rs)$' || true)
+          test -z "$CHANGED"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(remote): add cached remote query foundation'
+          git push origin HEAD:feat/v2-m1-backend-config
