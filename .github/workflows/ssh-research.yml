@@ -86,16 +86,8 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Resolve and check production transport
-        run: cargo check --all-targets --all-features
-
-      - name: Upload incrementally updated lockfile
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: m2-cargo-lock
-          path: Cargo.lock
-          if-no-files-found: error
+      - name: Check production transport with locked dependencies
+        run: cargo check --locked --all-targets --all-features
 
       - name: Verify production SSH/SFTP transport
         env:
