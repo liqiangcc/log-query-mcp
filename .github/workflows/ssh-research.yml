@@ -74,7 +74,7 @@ jobs:
           EOF
 
           sudo /usr/sbin/sshd -f /tmp/log-query-mcp-ssh-poc/sshd_config -E /tmp/log-query-mcp-ssh-poc/sshd.log
-          ssh-keyscan -p 2222 127.0.0.1 > /tmp/log-query-mcp-ssh-poc/known_hosts
+          ssh-keyscan -t ed25519 -p 2222 127.0.0.1 > /tmp/log-query-mcp-ssh-poc/known_hosts
 
           ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-ssh-poc/wrong_host_key
           WRONG_KEY=$(cut -d' ' -f1,2 /tmp/log-query-mcp-ssh-poc/wrong_host_key.pub)
@@ -128,3 +128,34 @@ jobs:
       - name: Show sshd log on failure
         if: failure()
         run: sudo cat /tmp/log-query-mcp-ssh-poc/sshd.log || true
+
+  persist-lockfile:
+    needs: ssh-sftp-transport
+    if: github.ref == 'refs/heads/feat/v2-m1-backend-config'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out validated branch
+        uses: actions/checkout@v4
+
+      - name: Download validated lockfile
+        uses: actions/download-artifact@v4
+        with:
+          name: m2-cargo-lock
+          path: /tmp/m2-lock
+
+      - name: Commit only Cargo.lock
+        run: |
+          cp /tmp/m2-lock/Cargo.lock Cargo.lock
+          OTHER_CHANGES=$(git status --short | awk '$2 != "Cargo.lock" {print}')
+          test -z "$OTHER_CHANGES"
+          git add Cargo.lock
+          test "$(git diff --cached --name-only)" = "Cargo.lock"
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore: lock ssh transport dependencies'
+          git push origin HEAD:${GITHUB_REF_NAME}
