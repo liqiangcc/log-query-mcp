@@ -68,7 +68,7 @@ for required in \
 done
 [[ -x "${package_root}/bin/log-query-mcp" ]] || die "release binary is not executable"
 [[ -x "${package_root}/bin/log-query-mcp-stdio" ]] || die "release stdio binary is not executable"
-[[ -x "${rollback_script}" ]] || die "rollback helper is not executable: ${rollback_script}"
+[[ -f "${rollback_script}" ]] || die "rollback helper not found: ${rollback_script}"
 
 [[ -x "${install_root}/bin/log-query-mcp" ]] || die "current installation is missing log-query-mcp"
 [[ -x "${install_root}/bin/log-query-mcp-stdio" ]] || die "current installation is missing log-query-mcp-stdio"
@@ -123,7 +123,7 @@ rollback_on_failure() {
   local exit_code="$?"
   trap - ERR
   echo "upgrade: post-mutation step failed; rolling back from ${backup_dir}" >&2
-  if ! "${rollback_script}" "${backup_dir}"; then
+  if ! bash "${rollback_script}" "${backup_dir}"; then
     echo "upgrade: automatic rollback also failed; manual recovery required from ${backup_dir}" >&2
   fi
   exit "${exit_code}"
