@@ -1,13 +1,7 @@
-use std::{
-    collections::HashMap,
-    fmt,
-    io::SeekFrom,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, fmt, io::SeekFrom, sync::Arc, time::Duration};
 
-use russh::{client, keys};
 use russh::keys::PrivateKeyWithHashAlg;
+use russh::{client, keys};
 use russh_sftp::{client::SftpSession, protocol::FileAttributes};
 use thiserror::Error;
 use tokio::{
@@ -17,9 +11,7 @@ use tokio::{
     time::timeout,
 };
 
-use crate::{
-    AppConfigV2, EnvSecretResolver, SecretResolver, SshAuthType, SshConnectionConfig,
-};
+use crate::{AppConfigV2, EnvSecretResolver, SecretResolver, SshAuthType, SshConnectionConfig};
 
 pub const MAX_READ_RANGE_BYTES: usize = 4 * 1024 * 1024;
 const S_IFMT: u32 = 0o170000;
@@ -172,19 +164,22 @@ impl SshReadTransport {
         .map_err(|_| SshTransportError::ConnectTimeout)?
         .map_err(map_connect_error)?;
 
-        authenticate(&mut session, &connection, secrets.as_ref(), operation_timeout).await?;
+        authenticate(
+            &mut session,
+            &connection,
+            secrets.as_ref(),
+            operation_timeout,
+        )
+        .await?;
 
         let channel = timeout(operation_timeout, session.channel_open_session())
             .await
             .map_err(|_| SshTransportError::OperationTimeout)?
             .map_err(|_| SshTransportError::SshProtocol)?;
-        timeout(
-            operation_timeout,
-            channel.request_subsystem(true, "sftp"),
-        )
-        .await
-        .map_err(|_| SshTransportError::OperationTimeout)?
-        .map_err(|_| SshTransportError::SshProtocol)?;
+        timeout(operation_timeout, channel.request_subsystem(true, "sftp"))
+            .await
+            .map_err(|_| SshTransportError::OperationTimeout)?
+            .map_err(|_| SshTransportError::SshProtocol)?;
         let sftp = timeout(operation_timeout, SftpSession::new(channel.into_stream()))
             .await
             .map_err(|_| SshTransportError::OperationTimeout)?
@@ -359,12 +354,7 @@ impl client::Handler for KnownHostsClient {
         let known_hosts = self.known_hosts.clone();
         let server_public_key = server_public_key.clone();
         let matched = task::spawn_blocking(move || {
-            keys::known_hosts::check_known_hosts_path(
-                &host,
-                port,
-                &server_public_key,
-                &known_hosts,
-            )
+            keys::known_hosts::check_known_hosts_path(&host, port, &server_public_key, &known_hosts)
         })
         .await
         .map_err(|_| SshHandlerError::HostKeyVerificationFailed)?
@@ -469,7 +459,10 @@ mod tests {
     #[test]
     fn classifies_remote_file_types_from_posix_mode() {
         assert_eq!(classify_file_type(Some(0o100444)), RemoteFileType::Regular);
-        assert_eq!(classify_file_type(Some(0o040755)), RemoteFileType::Directory);
+        assert_eq!(
+            classify_file_type(Some(0o040755)),
+            RemoteFileType::Directory
+        );
         assert_eq!(classify_file_type(Some(0o120777)), RemoteFileType::Symlink);
         assert_eq!(classify_file_type(None), RemoteFileType::Unknown);
     }
