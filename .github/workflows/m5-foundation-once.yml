@@ -6,6 +6,7 @@ on:
       - "feat/v2-m1-backend-config"
     paths:
       - ".github/workflows/m5-foundation-once.yml"
+      - ".github/scripts/m5_foundation_prepatch.py"
       - ".github/scripts/m5_foundation_patch.py"
       - ".github/scripts/m5_foundation_compat_patch.py"
 
@@ -24,6 +25,7 @@ jobs:
 
       - name: Apply and verify M5 foundation
         run: |
+          python .github/scripts/m5_foundation_prepatch.py
           python .github/scripts/m5_foundation_patch.py
           python .github/scripts/m5_foundation_compat_patch.py
           cargo fmt --all
