@@ -14,12 +14,14 @@ die() {
 archive="$1"
 outer_sums="${2:-}"
 [[ -f "${archive}" ]] || die "archive not found: ${archive}"
+archive="$(realpath "${archive}")"
 
 if [[ -n "${outer_sums}" ]]; then
   [[ -f "${outer_sums}" ]] || die "outer checksum file not found"
+  outer_sums="$(realpath "${outer_sums}")"
   (
     cd "$(dirname "${archive}")"
-    sha256sum -c "$(realpath "${outer_sums}")"
+    sha256sum -c "${outer_sums}"
   ) >/dev/null || die "outer archive checksum failed"
 fi
 
