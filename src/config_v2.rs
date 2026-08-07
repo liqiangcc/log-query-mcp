@@ -614,9 +614,9 @@ fn validate_secret_ref(
         Some(value)
             if !value.is_empty()
                 && value.len() <= MAX_SECRET_REF_CHARS
-                && value
-                    .chars()
-                    .all(|character| character.is_ascii_alphanumeric() || "._:/-".contains(character)) => {}
+                && value.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || "._:/-".contains(character)
+                }) => {}
         None if !required => {}
         _ => push_issue(
             issues,
