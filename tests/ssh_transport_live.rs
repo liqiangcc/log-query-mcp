@@ -425,9 +425,10 @@ async fn network_disconnect_marks_reader_broken() {
         .open_reader("disconnect")
         .await
         .expect("proxied reader should connect");
+    let fifo_file = required("M2_FIFO_FILE");
 
     let error = {
-        let read = reader.read_range(&required("M2_FIFO_FILE"), 0, 1);
+        let read = reader.read_range(&fifo_file, 0, 1);
         tokio::pin!(read);
         tokio::select! {
             result = &mut read => panic!("blocking read completed before network disconnect: {result:?}"),
