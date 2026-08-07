@@ -1,6 +1,7 @@
 name: SSH Transport
 
-# This read-only workflow is the live gate for M2 transport, M4 sync, and M5 remote query flow.
+# This read-only workflow is the live gate for M2 transport, M4 sync, M5 remote query,
+# and M6 remote security boundaries.
 on:
   push:
     branches:
@@ -22,6 +23,7 @@ on:
       - "tests/ssh_transport_live.rs"
       - "tests/m4_sync_live.rs"
       - "tests/m5_remote_query_live.rs"
+      - "tests/m6_remote_security_live.rs"
       - "research/ssh-sftp-poc/**"
       - ".github/workflows/ssh-research.yml"
   workflow_dispatch:
@@ -65,6 +67,9 @@ jobs:
           sudo chmod 666 /home/logreader/logs/sync-live.log /home/logreader/logs/query-live.log /home/logreader/logs/partial-live.log
           sudo chmod 444 /home/logreader/logs/query-dir/included.log /home/logreader/logs/query-dir/ignored.txt
           sudo chmod 000 /home/logreader/logs/denied.log
+          sudo ln -s /etc/passwd /home/logreader/logs/escape.log
+          sudo ln -s /etc/passwd /home/logreader/logs/query-dir/escape.log
+          sudo chown -h logreader:logreader /home/logreader/logs/escape.log /home/logreader/logs/query-dir/escape.log
 
           ssh-keygen -q -t ed25519 -N 'test-passphrase' -f /tmp/log-query-mcp-ssh-poc/client_key
           ssh-keygen -q -t ed25519 -N 'test-passphrase' -f /tmp/log-query-mcp-ssh-poc/wrong_client_key
@@ -151,6 +156,15 @@ jobs:
           M5_LOCAL_PARTIAL_FILE: /home/logreader/logs/partial-live.log
           M5_REMOTE_DIRECTORY_ROOT: /home/logreader/logs/query-dir
         run: cargo test --test m5_remote_query_live -- --ignored --test-threads=1
+
+      - name: Verify M6 remote symlink security through real SFTP
+        env:
+          M2_SSH_PORT: "2222"
+          M2_SSH_PASSWORD: test-password
+          M2_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
+          M2_REMOTE_DIR: /home/logreader/logs
+          M5_REMOTE_DIRECTORY_ROOT: /home/logreader/logs/query-dir
+        run: cargo test --test m6_remote_security_live -- --ignored --test-threads=1
 
       - name: Check research POC remains compatible
         run: cargo check --manifest-path research/ssh-sftp-poc/Cargo.toml
