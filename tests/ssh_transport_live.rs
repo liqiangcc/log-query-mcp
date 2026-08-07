@@ -150,7 +150,11 @@ async fn password_auth_supports_read_only_sftp_operations() {
         .read_dir(&remote_dir)
         .await
         .expect("readdir should succeed");
-    assert!(entries.iter().any(|entry| entry.file_name == "application.log"));
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.file_name == "application.log")
+    );
     let range = reader
         .read_range(&remote_file, 6, 5)
         .await
@@ -244,7 +248,10 @@ async fn permission_and_missing_file_fail_without_exposing_paths() {
     let manager = SshConnectionManager::from_config(&config(vec![connection], "good"))
         .expect("connection manager should build");
 
-    let reader = manager.open_reader("good").await.expect("reader should connect");
+    let reader = manager
+        .open_reader("good")
+        .await
+        .expect("reader should connect");
     let denied = required("M2_DENIED_FILE");
     let error = reader
         .read_range(&denied, 0, 1)
@@ -252,7 +259,10 @@ async fn permission_and_missing_file_fail_without_exposing_paths() {
         .expect_err("permission denied file must fail");
     assert!(!error.to_string().contains(&denied));
 
-    let reader = manager.open_reader("good").await.expect("new reader should connect");
+    let reader = manager
+        .open_reader("good")
+        .await
+        .expect("new reader should connect");
     let missing = format!("{}/missing.log", required("M2_REMOTE_DIR"));
     let error = reader
         .stat(&missing)
