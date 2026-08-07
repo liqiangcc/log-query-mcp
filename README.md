@@ -119,6 +119,22 @@ sudo chmod 0640 /etc/log-query-mcp/config.json
 
 完整步骤见 [生产安装指南](./docs/INSTALL.md)。
 
+## 安全升级与回滚
+
+发布包包含 `upgrade.sh` 和 `rollback.sh`。升级会先校验包内 SHA256，备份当前 binaries、`BUILDINFO`、配置和 systemd unit，再使用同目录临时文件 + rename 原子替换运行文件。正常升级**不会覆盖现有生产配置**。
+
+```bash
+sudo scripts/upgrade.sh /path/to/log-query-mcp-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz
+```
+
+升级后的 restart/health check 失败时会自动从本次 backup 回滚。也可以显式回滚：
+
+```bash
+sudo scripts/rollback.sh /var/lib/log-query-mcp/backups/<backup-dir>
+```
+
+Release Gate 会执行隔离的 upgrade/rollback 演练，覆盖：正常升级、显式回滚、restart 失败自动回滚、损坏包在修改前拒绝、配置保持和 tar.gz 输入。
+
 ## Remote 快速准备
 
 Remote 模式推荐使用专用账号：
@@ -194,11 +210,27 @@ MCP Inspector 可用于人工验收工具列表和调用结果。参考 <https:/
 - `match_ref` 和 cursor：单实例、服务端有状态、短期随机 token，重启后失效。
 - 错误：稳定错误代码 + 去敏消息 + `retryable`，不暴露 Secret、远端绝对路径、cache 路径、backtrace 或底层系统调用文本。
 
+## 性能边界
+
+M6 已建立可重复工程 benchmark，而不是产品 SLA。当前基线证明：
+
+- unchanged refresh 只读取 64 KiB continuity window；
+- append 只传新增 payload + bounded probes；
+- cache local scan 不访问 SSH；
+- 1 GiB full bootstrap 可以完成；
+- 10 GiB logical log 可只缓存 64 MiB tail；
+- 300 次连续 bounded range read 不泄漏 SFTP file handle。
+
+详见 [M6 性能基线](./docs/M6_PERFORMANCE_BASELINE_V2.md)。
+
 ## 文档索引
 
 - [生产安装指南](./docs/INSTALL.md)
 - [生产运维指南](./docs/OPERATIONS.md)
 - [生产验收清单](./docs/PRODUCTION_CHECKLIST.md)
+- [v2 Release Readiness](./docs/RELEASE_READINESS_V2.md)
+- [M6 性能基线](./docs/M6_PERFORMANCE_BASELINE_V2.md)
+- [M6 安全/故障矩阵](./docs/M6_SECURITY_FAULT_MATRIX_V2.md)
 - [v2 Remote SSH + Cache 设计](./docs/REMOTE_SSH_CACHE_DESIGN_V2.md)
 - [v2 Remote 实施 TODO](./docs/REMOTE_SSH_CACHE_TODO_V2.md)
 - [M5 Remote Query 实现基线](./docs/M5_IMPLEMENTATION_BASELINE_V2.md)
@@ -227,7 +259,9 @@ python3 scripts/validate_contracts.py
 
 ```bash
 cargo build --release --locked --bins --target x86_64-unknown-linux-gnu
-scripts/package_release.sh --target x86_64-unknown-linux-gnu --out-dir dist --require-docs
+bash scripts/package_release.sh --target x86_64-unknown-linux-gnu --out-dir dist --require-docs
+bash scripts/validate_release_package.sh dist/log-query-mcp-v0.1.0-x86_64-unknown-linux-gnu.tar.gz dist/SHA256SUMS
+bash tests/upgrade_rollback_test.sh
 ```
 
 ## 当前不包含
