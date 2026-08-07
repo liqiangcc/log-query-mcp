@@ -1,0 +1,166 @@
+name: M6 Performance
+
+on:
+  # Push is intentionally limited to benchmark-harness changes. It provides one reproducible
+  # evidence run when the harness changes; normal product pushes do not execute large benchmarks.
+  push:
+    branches:
+      - "feat/v2-m1-backend-config"
+    paths:
+      - "tests/m6_performance_live.rs"
+      - ".github/workflows/m6-performance.yml"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Benchmark profile"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - 100mb-full
+          - 1gb-full
+          - 10gb-tail
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install benchmark fixture dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server time
+          sudo mkdir -p /run/sshd /tmp/log-query-mcp-m6-perf/remote
+          sudo chown -R "$USER":"$(id -gn)" /tmp/log-query-mcp-m6-perf
+
+      - name: Prepare read-only OpenSSH benchmark server
+        run: |
+          sudo useradd -m -s /bin/bash logreader
+          echo 'logreader:test-password' | sudo chpasswd
+
+          sudo ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-m6-perf/ssh_host_ed25519_key
+          sudo tee /tmp/log-query-mcp-m6-perf/sshd_config >/dev/null <<'EOF'
+          Port 2230
+          ListenAddress 127.0.0.1
+          HostKey /tmp/log-query-mcp-m6-perf/ssh_host_ed25519_key
+          PidFile /tmp/log-query-mcp-m6-perf/sshd.pid
+          PasswordAuthentication yes
+          PubkeyAuthentication no
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          StrictModes yes
+          AllowUsers logreader
+          Subsystem sftp internal-sftp
+          LogLevel ERROR
+          EOF
+
+          sudo /usr/sbin/sshd -f /tmp/log-query-mcp-m6-perf/sshd_config -E /tmp/log-query-mcp-m6-perf/sshd.log
+          ssh-keyscan -t ed25519 -p 2230 127.0.0.1 > /tmp/log-query-mcp-m6-perf/known_hosts
+
+      - name: Record benchmark environment
+        run: |
+          {
+            echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "runner_image=${ImageOS:-unknown}"
+            echo "runner_arch=${RUNNER_ARCH:-unknown}"
+            rustc --version
+            cargo --version
+            uname -a
+            findmnt -T /tmp
+            df -hT /tmp
+            lscpu
+          } | tee /tmp/log-query-mcp-m6-perf/environment.txt
+
+      - name: Check benchmark harness
+        run: |
+          cargo fmt --all -- --check
+          cargo check --locked --test m6_performance_live
+
+      - name: Run selected benchmark profiles
+        env:
+          M2_SSH_PORT: "2230"
+          M2_SSH_PASSWORD: test-password
+          M2_KNOWN_HOSTS: /tmp/log-query-mcp-m6-perf/known_hosts
+          M6_PERF_LOCAL_FILE: /tmp/log-query-mcp-m6-perf/remote/performance.log
+          M6_PERF_REMOTE_DIR: /tmp/log-query-mcp-m6-perf/remote
+          M6_PERF_CACHE_ROOT: /tmp/log-query-mcp-m6-perf/cache
+          REQUESTED_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'all' }}
+        run: |
+          set -euo pipefail
+
+          run_profile() {
+            local profile="$1"
+            case "$profile" in
+              100mb-full)
+                export M6_PERF_PROFILE="$profile"
+                export M6_PERF_BOOTSTRAP=full
+                export M6_PERF_SIZE_BYTES=104857600
+                export M6_PERF_TAIL_BYTES=0
+                export M6_PERF_APPEND_BYTES=1048576
+                ;;
+              1gb-full)
+                export M6_PERF_PROFILE="$profile"
+                export M6_PERF_BOOTSTRAP=full
+                export M6_PERF_SIZE_BYTES=1073741824
+                export M6_PERF_TAIL_BYTES=0
+                export M6_PERF_APPEND_BYTES=104857600
+                ;;
+              10gb-tail)
+                export M6_PERF_PROFILE="$profile"
+                export M6_PERF_BOOTSTRAP=tail
+                export M6_PERF_SIZE_BYTES=10737418240
+                export M6_PERF_TAIL_BYTES=67108864
+                export M6_PERF_APPEND_BYTES=1048576
+                ;;
+              *)
+                echo "unknown benchmark profile: $profile" >&2
+                exit 2
+                ;;
+            esac
+
+            rm -rf "$M6_PERF_CACHE_ROOT"
+            rm -f "$M6_PERF_LOCAL_FILE"
+            echo "===== M6 benchmark: $profile ====="
+            /usr/bin/time -v -o "/tmp/log-query-mcp-m6-perf/${profile}-time.txt" \
+              cargo test --release --locked --test m6_performance_live sync_and_scan_profile \
+                -- --ignored --exact --nocapture \
+              2>&1 | tee "/tmp/log-query-mcp-m6-perf/${profile}.log"
+            grep 'M6_PERF_METRIC' "/tmp/log-query-mcp-m6-perf/${profile}.log" \
+              | tee "/tmp/log-query-mcp-m6-perf/${profile}-metrics.jsonl"
+            df -hT /tmp | tee "/tmp/log-query-mcp-m6-perf/${profile}-disk.txt"
+          }
+
+          if [[ "$REQUESTED_PROFILE" == "all" ]]; then
+            run_profile 100mb-full
+            run_profile 1gb-full
+            run_profile 10gb-tail
+          else
+            run_profile "$REQUESTED_PROFILE"
+          fi
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m6-performance-${{ github.run_id }}
+          path: |
+            /tmp/log-query-mcp-m6-perf/environment.txt
+            /tmp/log-query-mcp-m6-perf/*-metrics.jsonl
+            /tmp/log-query-mcp-m6-perf/*-time.txt
+            /tmp/log-query-mcp-m6-perf/*-disk.txt
+            /tmp/log-query-mcp-m6-perf/*.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Show sshd log on failure
+        if: failure()
+        run: sudo cat /tmp/log-query-mcp-m6-perf/sshd.log || true
