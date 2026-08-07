@@ -20,7 +20,7 @@ jobs:
           ref: feat/v2-m1-backend-config
           fetch-depth: 0
 
-      - name: Apply exact transport and performance fixes
+      - name: Apply exact transport fix and regression test
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -100,32 +100,13 @@ jobs:
           if anchor not in text:
               raise SystemExit("expected live-test anchor not found")
           live.write_text(text.replace(anchor, test, 1))
-
-          workflow = Path(".github/workflows/m6-performance.yml")
-          text = workflow.read_text()
-          text = text.replace(
-              '2>&1 | tee "/tmp/log-query-mcp-m6-perf/${profile}.log"\n'
-              '            grep \'M6_PERF_METRIC\' "/tmp/log-query-mcp-m6-perf/${profile}.log" \\\n',
-              '2>&1 | tee "/tmp/log-query-mcp-m6-perf/${profile}-output.log"\n'
-              '            grep \'M6_PERF_METRIC\' "/tmp/log-query-mcp-m6-perf/${profile}-output.log" \\\n',
-              1,
-          )
-          old_upload = '''            /tmp/log-query-mcp-m6-perf/*-disk.txt
-                      /tmp/log-query-mcp-m6-perf/*.log
-          '''
-          new_upload = '''            /tmp/log-query-mcp-m6-perf/*-disk.txt
-                      /tmp/log-query-mcp-m6-perf/*-output.log
-          '''
-          if old_upload not in text:
-              raise SystemExit("expected performance artifact glob not found")
-          workflow.write_text(text.replace(old_upload, new_upload, 1))
           PY
 
           cargo fmt --all -- --check || cargo fmt --all
           cargo fmt --all -- --check
           cargo check --locked --all-targets --all-features
 
-      - name: Commit verified fixes
+      - name: Commit verified transport fix
         run: |
           if git diff --quiet; then
             echo "No changes to commit"
@@ -133,6 +114,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/transport/ssh.rs tests/ssh_transport_live.rs .github/workflows/m6-performance.yml
+          git add src/transport/ssh.rs tests/ssh_transport_live.rs
           git commit -m "fix(ssh): close SFTP range handles explicitly"
           git push origin HEAD:feat/v2-m1-backend-config
