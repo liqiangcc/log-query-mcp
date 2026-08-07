@@ -104,11 +104,7 @@ impl ConfiguredSource {
             .enumerate()
             .map(|(index, snapshot)| SourceFileSnapshot {
                 source_id: self.descriptor.source_id.clone(),
-                file_id: stable_file_id(
-                    &self.descriptor.source_id,
-                    &snapshot.relative_path,
-                    index,
-                ),
+                file_id: stable_file_id(&self.descriptor.source_id, &snapshot.relative_path, index),
                 relative_path: snapshot.relative_path,
                 identity: snapshot.identity,
                 size_at_snapshot: snapshot.size_at_snapshot,
