@@ -1,7 +1,8 @@
 name: SSH Transport
 
 # This read-only workflow is the live gate for M2 transport, M4 sync, M5 remote query,
-# M6 remote security boundaries, multi-server acceptance, and restart recovery faults.
+# M6 remote security boundaries, multi-server acceptance, restart recovery faults, and
+# repeated bounded range reads that verify SFTP file handles are closed deterministically.
 on:
   push:
     branches:
