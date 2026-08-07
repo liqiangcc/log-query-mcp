@@ -11,6 +11,7 @@ use crate::{
 
 use super::BackendFileSnapshot;
 
+/// Local log access backend that preserves the v1 `SafeRoot`/`openat2()` security boundary.
 #[derive(Debug)]
 pub(crate) struct LocalBackend {
     root: Arc<SafeRoot>,
