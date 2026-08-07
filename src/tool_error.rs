@@ -168,6 +168,8 @@ impl From<SourceRegistryError> for ToolError {
     fn from(error: SourceRegistryError) -> Self {
         match error {
             SourceRegistryError::InvalidConfiguration(_)
+            | SourceRegistryError::InvalidV2Configuration(_)
+            | SourceRegistryError::BackendUnavailable { .. }
             | SourceRegistryError::DirectoryRuleInvalid { .. }
             | SourceRegistryError::SnapshotSourceMismatch
             | SourceRegistryError::PathNotConfigured => Self::internal_error(),
