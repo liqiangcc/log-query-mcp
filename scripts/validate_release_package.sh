@@ -42,6 +42,7 @@ for path in \
   scripts/uninstall.sh \
   scripts/upgrade.sh \
   scripts/rollback.sh \
+  scripts/healthcheck.sh \
   docs/INSTALL.md \
   docs/OPERATIONS.md \
   docs/PRODUCTION_CHECKLIST.md \
@@ -53,7 +54,14 @@ for path in \
   [[ -f "${root}/${path}" ]] || die "missing package entry: ${path}"
 done
 
-for path in bin/log-query-mcp bin/log-query-mcp-stdio scripts/install.sh scripts/uninstall.sh scripts/upgrade.sh scripts/rollback.sh; do
+for path in \
+  bin/log-query-mcp \
+  bin/log-query-mcp-stdio \
+  scripts/install.sh \
+  scripts/uninstall.sh \
+  scripts/upgrade.sh \
+  scripts/rollback.sh \
+  scripts/healthcheck.sh; do
   [[ -x "${root}/${path}" ]] || die "expected executable package entry: ${path}"
 done
 
