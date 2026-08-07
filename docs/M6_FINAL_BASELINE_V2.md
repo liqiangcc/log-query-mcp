@@ -3,7 +3,8 @@
 > 状态：repository implementation complete / final candidate CI externally blocked  
 > 日期：2026-08-08  
 > 分支：`feat/v2-m1-backend-config`  
-> Draft PR：#25
+> Draft PR：#25  
+> External blocker：Issue #23
 
 ## 1. 结论
 
@@ -24,7 +25,7 @@ M6-E Performance             IMPLEMENTED
 M6-F Production Readiness    DONE
 ```
 
-`IMPLEMENTED` / `DONE` 指仓库实现、测试入口和发布工具已经补齐。它不等价于最新 candidate commit 已经取得最终 GitHub Actions 全绿；Actions 当前仍被 Billing/Spending Limit 在 runner 启动前阻止，因此 Release Candidate Gate 为 **BLOCKED**。
+`IMPLEMENTED` / `DONE` 指仓库实现、测试入口、发布工具、生产文档和本地 Final Candidate Gate 已补齐。它不等价于最新 candidate commit 已经取得最终 GitHub Actions 全绿；Actions 当前仍被 Billing/Spending Limit 在 runner 启动前阻止，因此 Release Candidate Gate 为 **BLOCKED**。
 
 ## 2. 生产能力边界
 
@@ -109,13 +110,13 @@ The release package contains:
 - both production binaries；
 - v1/v2 example config；
 - systemd unit；
-- install / uninstall / upgrade / rollback scripts；
+- install / uninstall / healthcheck / upgrade / rollback scripts；
 - production docs and M6 baselines；
 - `BUILDINFO`；
 - internal `SHA256SUMS`；
 - outer archive `SHA256SUMS`。
 
-`scripts/validate_release_package.sh` validates package shape, executable entries, internal checksum, outer checksum and BUILDINFO/version consistency.
+`scripts/validate_release_package.sh` validates package shape, executable release helpers, internal checksum, outer checksum and BUILDINFO/version consistency.
 
 Release workflow uses least privilege:
 
@@ -126,7 +127,22 @@ publish job: contents: write only for tag
 
 Tag publication only happens after the verified package job succeeds.
 
-## 6. Upgrade / Rollback Readiness
+Repository-local Final Candidate validation is centralized in:
+
+```bash
+bash scripts/rc_check.sh
+```
+
+It runs shell syntax checks, Contracts, rustfmt, Clippy `-D warnings`, all Rust tests, release build, protocol-health failure matrix, upgrade/rollback failure matrix, release package creation and package validation. It deliberately does **not** pretend to replace the real SSH/SFTP multi-server live gate or target-production acceptance.
+
+## 6. Protocol Health / Upgrade / Rollback Readiness
+
+`scripts/healthcheck.sh` requires both:
+
+1. the systemd service to be active；
+2. MCP `initialize` to succeed with `jsonrpc=2.0`, `serverInfo`, and the expected `log-query-mcp` server identity。
+
+A running process with a broken MCP protocol therefore fails health validation.
 
 `scripts/upgrade.sh`:
 
@@ -135,22 +151,26 @@ Tag publication only happens after the verified package job succeeds.
 3. preserves production config during normal upgrade；
 4. uses same-directory temporary file + rename replacement；
 5. reloads/restarts service；
-6. runs health check；
+6. runs the systemd + MCP protocol health check；
 7. automatically invokes rollback after post-mutation failure。
 
-`scripts/rollback.sh` restores the exact pre-upgrade runtime state and performs restart + health check. A final static review found that ordinary `cp` during restore could lose the backed-up group ownership of service-readable files such as `root:log-query-mcp` config. This was fixed in commit `838782ec27316b4493083bc37dafd8445f8e975c` by preserving backup ownership during atomic restore.
+`scripts/rollback.sh` restores the exact pre-upgrade runtime state and requires the restored service to pass the same protocol-level health check.
 
-The isolated upgrade/rollback test was strengthened in commit `33c6e07c54a0d9729903020f6518e098e6d1e276` to verify config/unit modes. It was then executed outside GitHub Actions and passed all scenarios:
+A final static review found that ordinary restore copies could lose backed-up group ownership for service-readable files such as `root:log-query-mcp` config. This was fixed by preserving backup ownership during atomic restore. The isolated upgrade/rollback test also verifies config `0640` and unit `0644` metadata restoration.
+
+The isolated release lifecycle tests previously passed these scenarios outside GitHub Actions:
 
 - successful upgrade；
-- config preservation (`0640`)；
+- config preservation；
 - explicit rollback；
-- unit mode restoration (`0644`)；
 - restart-failure automatic rollback；
 - corrupt checksum fail-before-mutation；
-- tar.gz upgrade input。
+- tar.gz upgrade input；
+- package validator valid/corrupt behavior。
 
-The release package validator was also previously exercised with valid and deliberately corrupted inputs; corrupt integrity checks fail closed.
+Protocol health now also has an isolated failure matrix covering healthy response, inactive service, JSON-RPC error, unexpected server identity, transport failure and protocol-only test mode.
+
+The source tree lifecycle helpers and their shell test entry points were additionally normalized to executable Git modes in commit `ddb87133183c44af6164e30efca01115e708e610`, so source-tree execution and release-package executable expectations are consistent.
 
 ## 7. Documentation / Review Readiness
 
@@ -162,26 +182,29 @@ Production docs are aligned with v2:
 - `PRODUCTION_CHECKLIST.md`；
 - `RELEASE_READINESS_V2.md`；
 - `M6_PERFORMANCE_BASELINE_V2.md`；
-- `M6_SECURITY_FAULT_MATRIX_V2.md`。
+- `M6_SECURITY_FAULT_MATRIX_V2.md`；
+- this final baseline。
 
 Draft PR `#25` (`feat: add v2 remote SSH/SFTP log query backend`) is open against `main` and intentionally remains Draft while the candidate CI cannot run.
 
-## 8. External blocker
+## 8. Final Candidate Gate and external blocker
 
-A second rerun attempt on 2026-08-08 was again rejected before any runner step. Rust job `92936278060` reported:
+Rust, Contracts, SSH Transport and Release workflows support a rerun path for the same candidate. The repository-local `rc_check.sh` exists specifically so ordinary non-live checks can also be run without manufacturing a source change.
+
+The latest observed PR candidate `5926aa48f312d5875dd0650990aa4238676d0a9d` again failed **before any runner step**. Rust run `31200587991`, job `92939348162`, reported:
 
 ```text
 The job was not started because recent account payments have failed
 or your spending limit needs to be increased.
 ```
 
-Therefore this is **not a code/test failure**, but it also means the newest candidate commit has **not** received a valid final CI pass.
+This is **not a code/test failure**, but it also means the newest candidate has **not** received a valid final CI pass.
 
 Required external action:
 
 1. resolve GitHub Billing / Spending Limit；
 2. rerun candidate Rust / Contracts / SSH / Release gates；
-3. record concurrency metrics；
+3. record single/dual-server concurrency metrics；
 4. require all critical gates green；
 5. only then mark PR ready / merge / tag / publish。
 
@@ -196,17 +219,20 @@ tag / GitHub Release           BLOCKED by Final Gate
 production deployment          requires target environment acceptance
 ```
 
-No merge, tag or release must be forced while the final candidate gate cannot execute.
+No merge, tag or release must be forced while the final candidate gate cannot execute. Creating/merging the PR and creating a release tag remain separate publication actions requiring explicit authorization.
 
 ## 10. Final state
 
 ```text
 repository implementation       COMPLETE
+security/fault hardening        COMPLETE
 production docs                 COMPLETE
 release packaging               COMPLETE
+protocol health tooling         COMPLETE
 upgrade/rollback tooling        COMPLETE
-local release-script validation PASS
-rollback ownership hardening    PASS (local isolated validation)
+repository-local RC gate        COMPLETE
+lifecycle script executable bit COMPLETE
+local release-script validation PASS (recorded isolated evidence)
 historical M1-M6 live evidence  PASS
 Draft PR                        OPEN (#25)
 latest candidate CI             BLOCKED (GitHub Billing)
@@ -214,3 +240,5 @@ RC Ready                        NO, until candidate gates rerun green
 formal Release                  NOT CREATED
 production target acceptance    PENDING target environment
 ```
+
+There are no remaining known v2 repository design/implementation tasks. The remaining steps are verification/publication/environment actions gated by external GitHub Actions availability and explicit publication authorization.
