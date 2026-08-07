@@ -271,8 +271,9 @@ async fn missing_known_hosts_fails_closed() {
         3000,
         3000,
     );
-    let manager = SshConnectionManager::from_config(&config(vec![connection], "missing-known-hosts"))
-        .expect("connection manager should build");
+    let manager =
+        SshConnectionManager::from_config(&config(vec![connection], "missing-known-hosts"))
+            .expect("connection manager should build");
 
     assert_eq!(
         manager
@@ -363,7 +364,11 @@ async fn large_file_supports_bounded_offset_range_read() {
         .expect("reader should connect");
 
     let bytes = reader
-        .read_range(&required("M2_LARGE_FILE"), 5 * 1024 * 1024, 2 * 1024 * 1024)
+        .read_range(
+            &required("M2_LARGE_FILE"),
+            5 * 1024 * 1024,
+            2 * 1024 * 1024,
+        )
         .await
         .expect("large offset range should be readable");
     assert_eq!(bytes.len(), 2 * 1024 * 1024);
@@ -435,7 +440,8 @@ async fn network_disconnect_marks_reader_broken() {
         disconnect
             .send(())
             .expect("disconnect signal should reach proxy");
-        read.await.expect_err("network disconnect must fail the read")
+        read.await
+            .expect_err("network disconnect must fail the read")
     };
     assert!(matches!(
         error,
@@ -448,7 +454,9 @@ async fn network_disconnect_marks_reader_broken() {
             .expect_err("disconnected reader must remain broken"),
         SshTransportError::Broken
     );
-    proxy_task.await.expect("disconnect proxy task should finish");
+    proxy_task
+        .await
+        .expect("disconnect proxy task should finish");
 }
 
 #[tokio::test]
