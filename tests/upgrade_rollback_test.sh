@@ -98,7 +98,7 @@ package_root="${tmp}/log-query-mcp-v9.9.9-test"
 # 1. Normal upgrade keeps config, installs new binaries/unit, and leaves a usable rollback backup.
 reset_old_install
 make_package "${package_root}"
-"${repo_root}/scripts/upgrade.sh" "${package_root}"
+bash "${repo_root}/scripts/upgrade.sh" "${package_root}"
 [[ "$("${install_root}/bin/log-query-mcp")" == new ]]
 [[ "$(cat "${config_path}")" == '{"sentinel":"keep-me"}' ]]
 [[ "$(cat "${unit_path}")" == new-unit ]]
@@ -107,7 +107,7 @@ mapfile -t backups < <(find "${backup_root}" -mindepth 1 -maxdepth 1 -type d | s
 [[ "${#backups[@]}" -eq 1 ]]
 
 # 2. Explicit rollback restores the exact pre-upgrade binary/config/unit state.
-"${repo_root}/scripts/rollback.sh" "${backups[0]}"
+bash "${repo_root}/scripts/rollback.sh" "${backups[0]}"
 [[ "$("${install_root}/bin/log-query-mcp")" == old ]]
 [[ "$(cat "${config_path}")" == '{"sentinel":"keep-me"}' ]]
 [[ "$(cat "${unit_path}")" == old-unit ]]
@@ -117,7 +117,7 @@ mapfile -t backups < <(find "${backup_root}" -mindepth 1 -maxdepth 1 -type d | s
 reset_old_install
 make_package "${package_root}"
 touch "${fail_next_restart}"
-if "${repo_root}/scripts/upgrade.sh" "${package_root}"; then
+if bash "${repo_root}/scripts/upgrade.sh" "${package_root}"; then
   echo "expected upgrade to fail when restart fails" >&2
   exit 1
 fi
@@ -130,7 +130,7 @@ fi
 reset_old_install
 make_package "${package_root}"
 printf 'corruption\n' >>"${package_root}/bin/log-query-mcp"
-if "${repo_root}/scripts/upgrade.sh" "${package_root}"; then
+if bash "${repo_root}/scripts/upgrade.sh" "${package_root}"; then
   echo "expected checksum failure" >&2
   exit 1
 fi
@@ -143,7 +143,7 @@ reset_old_install
 make_package "${package_root}"
 archive="${tmp}/log-query-mcp-v9.9.9-test.tar.gz"
 tar -C "${tmp}" -czf "${archive}" "$(basename "${package_root}")"
-"${repo_root}/scripts/upgrade.sh" "${archive}"
+bash "${repo_root}/scripts/upgrade.sh" "${archive}"
 [[ "$("${install_root}/bin/log-query-mcp")" == new ]]
 [[ "$(cat "${config_path}")" == '{"sentinel":"keep-me"}' ]]
 
