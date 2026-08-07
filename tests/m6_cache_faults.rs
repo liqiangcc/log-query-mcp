@@ -37,7 +37,11 @@ fn externally_deleted_active_generation_fails_closed_and_recovery_rejects_store(
     let restart_error = CacheStore::open(temp.path(), limits())
         .expect_err("restart recovery must reject a manifest that references missing data");
     assert!(matches!(restart_error, CacheStoreError::Io(_)));
-    assert!(!restart_error.to_string().contains(&temp.path().to_string_lossy().into_owned()));
+    assert!(
+        !restart_error
+            .to_string()
+            .contains(&temp.path().to_string_lossy().into_owned())
+    );
 }
 
 #[test]
@@ -97,7 +101,10 @@ fn publish_generation(store: &CacheStore, bytes: &[u8]) {
             remote_size: len,
             cached_range: ByteRange::new(0, len).expect("cached range"),
             remote_mtime_millis: Some(1),
-            continuity_fingerprint: Some("sha256-v1:0:0:0000000000000000000000000000000000000000000000000000000000000000".to_owned()),
+            continuity_fingerprint: Some(
+                "sha256-v1:0:0:0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_owned(),
+            ),
             coverage: CacheCoverage::Full,
         })
         .expect("commit generation");
