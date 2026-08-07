@@ -40,7 +40,10 @@ atomic_restore() {
   mkdir -p "${parent}"
   tmp="$(mktemp "${parent}/.rollback.XXXXXX")"
   trap 'rm -f "${tmp:-}"' RETURN
-  cp -- "${source}" "${tmp}"
+  # Backups are created with cp -p. Preserve their ownership on restore so
+  # service-readable files such as root:log-query-mcp config.json do not become
+  # root:root after rollback.
+  cp -p -- "${source}" "${tmp}"
   chmod "${mode}" "${tmp}"
   sync -f "${tmp}" 2>/dev/null || true
   mv -f -- "${tmp}" "${destination}"
