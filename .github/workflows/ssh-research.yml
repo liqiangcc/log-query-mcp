@@ -1,7 +1,7 @@
 name: SSH Transport
 
 # This read-only workflow is the live gate for M2 transport, M4 sync, M5 remote query,
-# and M6 remote security boundaries.
+# M6 remote security boundaries, and M6 multi-server acceptance.
 on:
   push:
     branches:
@@ -24,6 +24,7 @@ on:
       - "tests/m4_sync_live.rs"
       - "tests/m5_remote_query_live.rs"
       - "tests/m6_remote_security_live.rs"
+      - "tests/m6_multi_server_live.rs"
       - "research/ssh-sftp-poc/**"
       - ".github/workflows/ssh-research.yml"
   workflow_dispatch:
@@ -45,7 +46,7 @@ jobs:
           sudo mkdir -p /run/sshd /tmp/log-query-mcp-ssh-poc
           sudo chown "$USER":"$(id -gn)" /tmp/log-query-mcp-ssh-poc
 
-      - name: Prepare SSH user and fixtures
+      - name: Prepare SSH users and fixtures
         run: |
           sudo useradd -m -s /bin/bash logreader
           echo 'logreader:test-password' | sudo chpasswd
@@ -56,6 +57,7 @@ jobs:
           printf 'old-history-that-must-not-be-silently-ignored\nRECENT partial\n' | sudo tee /home/logreader/logs/partial-live.log >/dev/null
           printf 'DIRMATCH included\nMIXED remote\n' | sudo tee /home/logreader/logs/query-dir/included.log >/dev/null
           printf 'DIRMATCH ignored\n' | sudo tee /home/logreader/logs/query-dir/ignored.txt >/dev/null
+          printf 'DUAL server-a\nMIXED3 server-a\n' | sudo tee /home/logreader/logs/multi.log >/dev/null
           echo 'denied' | sudo tee /home/logreader/logs/denied.log >/dev/null
           sudo dd if=/dev/zero of=/home/logreader/logs/large.log bs=1M count=8 status=none
           sudo mkfifo /home/logreader/logs/blocking.pipe
@@ -63,7 +65,7 @@ jobs:
           sudo chown -R logreader:logreader /home/logreader/logs
           sudo chown root:root /home/logreader/logs/denied.log
           sudo chmod 700 /home/logreader/.ssh
-          sudo chmod 444 /home/logreader/logs/application.log /home/logreader/logs/large.log
+          sudo chmod 444 /home/logreader/logs/application.log /home/logreader/logs/large.log /home/logreader/logs/multi.log
           sudo chmod 666 /home/logreader/logs/sync-live.log /home/logreader/logs/query-live.log /home/logreader/logs/partial-live.log
           sudo chmod 444 /home/logreader/logs/query-dir/included.log /home/logreader/logs/query-dir/ignored.txt
           sudo chmod 000 /home/logreader/logs/denied.log
@@ -71,11 +73,22 @@ jobs:
           sudo ln -s /etc/passwd /home/logreader/logs/query-dir/escape.log
           sudo chown -h logreader:logreader /home/logreader/logs/escape.log /home/logreader/logs/query-dir/escape.log
 
+          sudo useradd -m -s /bin/bash logreader_b
+          echo 'logreader_b:unused-password' | sudo chpasswd
+          sudo mkdir -p /home/logreader_b/.ssh /home/logreader_b/logs
+          printf 'DUAL server-b\nMIXED3 server-b\n' | sudo tee /home/logreader_b/logs/multi.log >/dev/null
+          sudo chown -R logreader_b:logreader_b /home/logreader_b/.ssh /home/logreader_b/logs
+          sudo chmod 700 /home/logreader_b/.ssh
+          sudo chmod 444 /home/logreader_b/logs/multi.log
+
           ssh-keygen -q -t ed25519 -N 'test-passphrase' -f /tmp/log-query-mcp-ssh-poc/client_key
           ssh-keygen -q -t ed25519 -N 'test-passphrase' -f /tmp/log-query-mcp-ssh-poc/wrong_client_key
           sudo cp /tmp/log-query-mcp-ssh-poc/client_key.pub /home/logreader/.ssh/authorized_keys
           sudo chown logreader:logreader /home/logreader/.ssh/authorized_keys
           sudo chmod 600 /home/logreader/.ssh/authorized_keys
+          sudo cp /tmp/log-query-mcp-ssh-poc/client_key.pub /home/logreader_b/.ssh/authorized_keys
+          sudo chown logreader_b:logreader_b /home/logreader_b/.ssh/authorized_keys
+          sudo chmod 600 /home/logreader_b/.ssh/authorized_keys
 
           sudo ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-ssh-poc/ssh_host_ed25519_key
           sudo tee /tmp/log-query-mcp-ssh-poc/sshd_config >/dev/null <<'EOF'
@@ -98,6 +111,28 @@ jobs:
 
           sudo /usr/sbin/sshd -f /tmp/log-query-mcp-ssh-poc/sshd_config -E /tmp/log-query-mcp-ssh-poc/sshd.log
           ssh-keyscan -t ed25519 -p 2222 127.0.0.1 > /tmp/log-query-mcp-ssh-poc/known_hosts
+
+          sudo ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-ssh-poc/ssh_host_b_ed25519_key
+          sudo tee /tmp/log-query-mcp-ssh-poc/sshd_b_config >/dev/null <<'EOF'
+          Port 2225
+          ListenAddress 127.0.0.1
+          HostKey /tmp/log-query-mcp-ssh-poc/ssh_host_b_ed25519_key
+          PidFile /tmp/log-query-mcp-ssh-poc/sshd_b.pid
+          PasswordAuthentication no
+          PubkeyAuthentication yes
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          StrictModes yes
+          AllowUsers logreader_b
+          AuthorizedKeysFile .ssh/authorized_keys
+          Subsystem sftp internal-sftp
+          LogLevel VERBOSE
+          EOF
+
+          sudo /usr/sbin/sshd -f /tmp/log-query-mcp-ssh-poc/sshd_b_config -E /tmp/log-query-mcp-ssh-poc/sshd_b.log
+          ssh-keyscan -t ed25519 -p 2225 127.0.0.1 > /tmp/log-query-mcp-ssh-poc/known_hosts_b
 
           ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-ssh-poc/wrong_host_key
           WRONG_KEY=$(cut -d' ' -f1,2 /tmp/log-query-mcp-ssh-poc/wrong_host_key.pub)
@@ -166,9 +201,25 @@ jobs:
           M5_REMOTE_DIRECTORY_ROOT: /home/logreader/logs/query-dir
         run: cargo test --test m6_remote_security_live -- --ignored --test-threads=1
 
+      - name: Verify M6 multi-server acceptance through two real SSH servers
+        env:
+          M2_SSH_PORT: "2222"
+          M2_SSH_PASSWORD: test-password
+          M2_KEY_PASSPHRASE: test-passphrase
+          M2_SSH_KEY_FILE: /tmp/log-query-mcp-ssh-poc/client_key
+          M2_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
+          M2_REMOTE_DIR: /home/logreader/logs
+          M6_SSH_B_PORT: "2225"
+          M6_SSH_B_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts_b
+          M6_REMOTE_B_DIR: /home/logreader_b/logs
+          M6_UNUSED_SSH_PORT: "2299"
+        run: cargo test --test m6_multi_server_live -- --ignored --test-threads=1
+
       - name: Check research POC remains compatible
         run: cargo check --manifest-path research/ssh-sftp-poc/Cargo.toml
 
-      - name: Show sshd log on failure
+      - name: Show sshd logs on failure
         if: failure()
-        run: sudo cat /tmp/log-query-mcp-ssh-poc/sshd.log || true
+        run: |
+          sudo cat /tmp/log-query-mcp-ssh-poc/sshd.log || true
+          sudo cat /tmp/log-query-mcp-ssh-poc/sshd_b.log || true
