@@ -3,8 +3,8 @@ use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
 use thiserror::Error;
 
 use crate::{
-    ConfigDocument, ConfigDocumentLoadError, LogQueryMcpServer, SourceRegistry, SourceRegistryError,
-    StatefulQueryError, StatefulQueryService, ToolError,
+    ConfigDocument, ConfigDocumentLoadError, LogQueryMcpServer, SourceRegistry,
+    SourceRegistryError, StatefulQueryError, StatefulQueryService, ToolError,
 };
 
 pub const CONFIG_ENV: &str = "LOG_QUERY_MCP_CONFIG";
