@@ -7,3 +7,11 @@ new = '''    pub(crate) fn open_configured_file(\n        &self,\n        source
 if text.count(old) != 1:
     raise SystemExit(f"open_configured_file: expected one match, got {text.count(old)}")
 path.write_text(text.replace(old, new))
+
+path = Path("src/stateful_query.rs")
+text = path.read_text()
+old = '''    let mut prefix_file = if timestamp_parser.is_some() {\n        Some(source.open_snapshot_file(&candidate.snapshot)?.into_file())\n    } else {'''
+new = '''    let mut prefix_file = if timestamp_parser.is_some() {\n        Some(\n            source\n                .open_snapshot_file(&candidate.snapshot)?\n                .into_file(),\n        )\n    } else {'''
+if text.count(old) != 1:
+    raise SystemExit(f"stateful prefix reader: expected one match, got {text.count(old)}")
+path.write_text(text.replace(old, new))
