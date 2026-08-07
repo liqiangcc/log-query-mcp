@@ -6,8 +6,8 @@ usage() {
 Usage: scripts/upgrade.sh <release-directory-or-tar.gz>
 
 Verifies the release package, creates a rollback backup, atomically replaces
-runtime files, restarts log-query-mcp, and automatically rolls back when the
-post-upgrade health check fails.
+runtime files, restarts log-query-mcp, verifies service + MCP protocol health,
+and automatically rolls back when a post-upgrade step fails.
 EOF
 }
 
@@ -31,6 +31,7 @@ backup_root="${LOG_QUERY_MCP_BACKUP_ROOT:-/var/lib/log-query-mcp/backups}"
 service_name="${LOG_QUERY_MCP_SERVICE_NAME:-log-query-mcp.service}"
 systemctl_bin="${LOG_QUERY_MCP_SYSTEMCTL:-systemctl}"
 healthcheck_cmd="${LOG_QUERY_MCP_HEALTHCHECK_CMD:-}"
+healthcheck_script="${LOG_QUERY_MCP_HEALTHCHECK_SCRIPT:-${script_dir}/healthcheck.sh}"
 rollback_script="${LOG_QUERY_MCP_ROLLBACK_SCRIPT:-${script_dir}/rollback.sh}"
 
 tmp_extract=""
@@ -69,6 +70,9 @@ done
 [[ -x "${package_root}/bin/log-query-mcp" ]] || die "release binary is not executable"
 [[ -x "${package_root}/bin/log-query-mcp-stdio" ]] || die "release stdio binary is not executable"
 [[ -f "${rollback_script}" ]] || die "rollback helper not found: ${rollback_script}"
+if [[ -z "${healthcheck_cmd}" ]]; then
+  [[ -f "${healthcheck_script}" ]] || die "health check helper not found: ${healthcheck_script}"
+fi
 
 [[ -x "${install_root}/bin/log-query-mcp" ]] || die "current installation is missing log-query-mcp"
 [[ -x "${install_root}/bin/log-query-mcp-stdio" ]] || die "current installation is missing log-query-mcp-stdio"
@@ -119,11 +123,25 @@ atomic_install() {
   trap - RETURN
 }
 
+run_healthcheck() {
+  if [[ -n "${healthcheck_cmd}" ]]; then
+    bash -c "${healthcheck_cmd}"
+  else
+    LOG_QUERY_MCP_SERVICE_NAME="${service_name}" \
+    LOG_QUERY_MCP_SYSTEMCTL="${systemctl_bin}" \
+      bash "${healthcheck_script}"
+  fi
+}
+
 rollback_on_failure() {
   local exit_code="$?"
   trap - ERR
   echo "upgrade: post-mutation step failed; rolling back from ${backup_dir}" >&2
-  if ! bash "${rollback_script}" "${backup_dir}"; then
+  if ! LOG_QUERY_MCP_SERVICE_NAME="${service_name}" \
+    LOG_QUERY_MCP_SYSTEMCTL="${systemctl_bin}" \
+    LOG_QUERY_MCP_HEALTHCHECK_CMD="${healthcheck_cmd}" \
+    LOG_QUERY_MCP_HEALTHCHECK_SCRIPT="${healthcheck_script}" \
+    bash "${rollback_script}" "${backup_dir}"; then
     echo "upgrade: automatic rollback also failed; manual recovery required from ${backup_dir}" >&2
   fi
   exit "${exit_code}"
@@ -137,16 +155,10 @@ atomic_install "${package_root}/systemd/log-query-mcp.service" "${unit_path}" 06
 
 # The production config is deliberately not replaced during upgrade. It is only backed up
 # so rollback can restore the exact pre-upgrade state if an external migration changed it.
-if command -v "${systemctl_bin}" >/dev/null 2>&1; then
-  "${systemctl_bin}" daemon-reload
-  "${systemctl_bin}" restart "${service_name}"
-fi
-
-if [[ -n "${healthcheck_cmd}" ]]; then
-  bash -c "${healthcheck_cmd}"
-elif command -v "${systemctl_bin}" >/dev/null 2>&1; then
-  "${systemctl_bin}" is-active --quiet "${service_name}"
-fi
+command -v "${systemctl_bin}" >/dev/null 2>&1 || die "systemctl command not found: ${systemctl_bin}"
+"${systemctl_bin}" daemon-reload
+"${systemctl_bin}" restart "${service_name}"
+run_healthcheck
 
 trap - ERR
 echo "upgrade: installed release from ${package_root}"
