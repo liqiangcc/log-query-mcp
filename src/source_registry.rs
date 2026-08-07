@@ -71,6 +71,15 @@ impl SourceFileSnapshot {
     }
 
     #[must_use]
+    pub fn has_complete_coverage(&self) -> bool {
+        match self.coverage.as_ref() {
+            None | Some(CacheCoverage::Full) => true,
+            Some(CacheCoverage::Tail { start_offset })
+            | Some(CacheCoverage::FromNow { start_offset }) => *start_offset == 0,
+        }
+    }
+
+    #[must_use]
     pub fn generation_pin(&self) -> Option<&GenerationPin> {
         self.generation_pin.as_ref()
     }

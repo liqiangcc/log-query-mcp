@@ -319,6 +319,12 @@ async fn build_candidates(
             return Err(QueryError::FileLimitExceeded);
         }
         let snapshots = source.query_snapshot_files(remaining).await?;
+        if snapshots
+            .iter()
+            .any(|snapshot| !snapshot.has_complete_coverage())
+        {
+            return Err(QueryError::CacheScopeExceeded);
+        }
         let timestamp_parser = source
             .timestamp_rule()
             .map(TimestampParser::new)
@@ -739,6 +745,9 @@ pub enum QueryError {
 
     #[error("scanner stopped without a safe continuation position")]
     UnsafeContinuation,
+
+    #[error("query cannot prove that the local cache covers the requested remote log scope")]
+    CacheScopeExceeded,
 
     #[error("query resource counter overflowed")]
     ResourceCounterOverflow,
