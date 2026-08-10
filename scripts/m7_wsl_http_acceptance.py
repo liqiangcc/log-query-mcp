@@ -50,6 +50,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-service-user", default="log-query-mcp")
     parser.add_argument("--systemctl-bin", default="systemctl")
     parser.add_argument("--tasklist-bin", default="tasklist.exe")
+    parser.add_argument(
+        "--expected-http-bin",
+        default="/opt/log-query-mcp/bin/log-query-mcp",
+        help="installed HTTP binary that the systemd MainPID must match by SHA256",
+    )
     parser.add_argument("--buildinfo", default="/opt/log-query-mcp/BUILDINFO")
     parser.add_argument("--evidence-dir", default="m7-wsl-evidence")
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
@@ -219,6 +224,26 @@ def systemd_snapshot(systemctl_bin: str, service_name: str, expected_user: str) 
     return {"active_state": "active", "user": expected_user, "main_pid": main_pid}
 
 
+def service_binary_evidence(main_pid: int, expected_bin: Path) -> dict[str, str]:
+    proc_exe = Path(f"/proc/{main_pid}/exe")
+    if not expected_bin.is_file():
+        raise AcceptanceError("EXPECTED_BINARY_UNREADABLE", "expected production HTTP binary is not a regular file")
+    try:
+        running_hash = sha256_file(proc_exe)
+        expected_hash = sha256_file(expected_bin)
+    except OSError as exc:
+        raise AcceptanceError("SERVICE_BINARY_UNREADABLE", "systemd service executable could not be hashed") from exc
+    if running_hash != expected_hash:
+        raise AcceptanceError(
+            "SERVICE_BINARY_MISMATCH",
+            "systemd MainPID executable does not match the expected candidate HTTP binary",
+        )
+    return {
+        "running_sha256": running_hash,
+        "expected_sha256": expected_hash,
+    }
+
+
 def windows_process_count(tasklist_bin: str, image_name: str) -> int:
     try:
         completed = subprocess.run(
@@ -257,7 +282,10 @@ def wait_for_helper_baseline(tasklist_bin: str, helper_image: str, baseline: int
 def parse_http_payload(body: bytes, content_type: str) -> dict[str, Any] | None:
     if not body.strip():
         return None
-    text = body.decode("utf-8", errors="strict")
+    try:
+        text = body.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise AcceptanceError("HTTP_BODY_ENCODING_INVALID", "MCP HTTP response is not UTF-8") from exc
     if "text/event-stream" in content_type.lower():
         candidates: list[dict[str, Any]] = []
         for line in text.splitlines():
@@ -289,6 +317,7 @@ class McpHttpClient:
         self.url = url
         self.timeout_seconds = timeout_seconds
         self.session_id: str | None = None
+        self.protocol_version: str | None = None
 
     def post(self, value: dict[str, Any], *, allow_empty: bool = False) -> dict[str, Any] | None:
         headers = {
@@ -297,6 +326,8 @@ class McpHttpClient:
         }
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
+        if self.protocol_version:
+            headers["MCP-Protocol-Version"] = self.protocol_version
         request = urllib.request.Request(
             self.url,
             data=json.dumps(value, separators=(",", ":")).encode("utf-8"),
@@ -401,6 +432,7 @@ def run_real(args: argparse.Namespace, config_path: Path, target: dict[str, Any]
         raise AcceptanceError("TIMEOUT_INVALID", "timeout must be positive")
 
     systemd = systemd_snapshot(args.systemctl_bin, args.service_name, args.expected_service_user)
+    service_binary = service_binary_evidence(systemd["main_pid"], Path(args.expected_http_bin))
     helper_before = windows_process_count(args.tasklist_bin, target["helper_image"])
     evidence: dict[str, Any] = {
         "acceptance": "m7-wsl-systemd-http",
@@ -419,6 +451,7 @@ def run_real(args: argparse.Namespace, config_path: Path, target: dict[str, Any]
         "keyword_sha256": sha256_text(args.keyword),
         "endpoint_sha256": sha256_text(args.url),
         "service": systemd,
+        "service_binary": service_binary,
         "buildinfo": read_buildinfo(Path(args.buildinfo)),
         "helper_process_count_before": helper_before,
         "checks": {},
@@ -438,6 +471,10 @@ def run_real(args: argparse.Namespace, config_path: Path, target: dict[str, Any]
         server_info = initialized["result"].get("serverInfo")
         if not isinstance(server_info, dict) or server_info.get("name") != "log-query-mcp":
             raise AcceptanceError("WRONG_MCP_SERVER", "HTTP endpoint is not log-query-mcp")
+        negotiated_protocol = initialized["result"].get("protocolVersion")
+        if negotiated_protocol != PROTOCOL_VERSION:
+            raise AcceptanceError("MCP_PROTOCOL_INVALID", "MCP endpoint negotiated an unexpected protocol version")
+        client.protocol_version = negotiated_protocol
         evidence["checks"]["initialize"] = "PASS"
 
         client.notify_initialized()
