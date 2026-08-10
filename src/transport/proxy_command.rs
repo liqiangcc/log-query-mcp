@@ -5,6 +5,7 @@ use std::{
     task::{Context, Poll},
 };
 
+use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf},
     process::{Child, ChildStdin, ChildStdout, Command},
@@ -16,6 +17,22 @@ use crate::SshConnectionConfig;
 
 const MAX_PROXY_STDERR_BYTES: usize = 64 * 1024;
 const PROXY_STDERR_READ_BUFFER_BYTES: usize = 4096;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub(crate) enum ProxyCommandConnectError {
+    #[error("proxy command is not configured")]
+    NotConfigured,
+    #[error("proxy command argument is invalid")]
+    InvalidArgument,
+    #[error("proxy command program was not found")]
+    ProgramNotFound,
+    #[error("proxy command program is not executable")]
+    PermissionDenied,
+    #[error("proxy command could not be started")]
+    SpawnFailed,
+    #[error("proxy command stdio pipe is unavailable")]
+    PipeUnavailable,
+}
 
 pub(crate) struct ProxyCommandStream {
     stdin: ChildStdin,
@@ -75,10 +92,11 @@ impl Drop for ProxyCommandStream {
 
 pub(crate) fn connect_proxy_command(
     connection: &SshConnectionConfig,
-) -> io::Result<ProxyCommandStream> {
-    let proxy = connection.proxy.as_ref().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "proxy command is not configured")
-    })?;
+) -> Result<ProxyCommandStream, ProxyCommandConnectError> {
+    let proxy = connection
+        .proxy
+        .as_ref()
+        .ok_or(ProxyCommandConnectError::NotConfigured)?;
 
     let mut command = Command::new(&proxy.program);
     for argument in &proxy.args {
@@ -90,16 +108,19 @@ pub(crate) fn connect_proxy_command(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    let mut child = command.spawn()?;
-    let stdin = child.stdin.take().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::BrokenPipe, "proxy command stdin is unavailable")
-    })?;
-    let stdout = child.stdout.take().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::BrokenPipe, "proxy command stdout is unavailable")
-    })?;
-    let stderr = child.stderr.take().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::BrokenPipe, "proxy command stderr is unavailable")
-    })?;
+    let mut child = command.spawn().map_err(classify_spawn_error)?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or(ProxyCommandConnectError::PipeUnavailable)?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or(ProxyCommandConnectError::PipeUnavailable)?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or(ProxyCommandConnectError::PipeUnavailable)?;
     let stderr_task = tokio::spawn(async move {
         drain_bounded_stderr(stderr).await;
     });
@@ -110,6 +131,14 @@ pub(crate) fn connect_proxy_command(
         child: Some(child),
         stderr_task: Some(stderr_task),
     })
+}
+
+fn classify_spawn_error(error: io::Error) -> ProxyCommandConnectError {
+    match error.kind() {
+        io::ErrorKind::NotFound => ProxyCommandConnectError::ProgramNotFound,
+        io::ErrorKind::PermissionDenied => ProxyCommandConnectError::PermissionDenied,
+        _ => ProxyCommandConnectError::SpawnFailed,
+    }
 }
 
 async fn drain_bounded_stderr(mut stderr: tokio::process::ChildStderr) {
@@ -130,14 +159,17 @@ async fn drain_bounded_stderr(mut stderr: tokio::process::ChildStderr) {
     }
 }
 
-fn expand_argument(argument: &str, host: &str, port: u16) -> io::Result<String> {
+fn expand_argument(
+    argument: &str,
+    host: &str,
+    port: u16,
+) -> Result<String, ProxyCommandConnectError> {
     match argument {
         "{host}" => Ok(host.to_owned()),
         "{port}" => Ok(port.to_string()),
-        value if value.contains('{') || value.contains('}') => Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "unsupported proxy command placeholder",
-        )),
+        value if value.contains('{') || value.contains('}') => {
+            Err(ProxyCommandConnectError::InvalidArgument)
+        }
         value => Ok(value.to_owned()),
     }
 }
@@ -160,7 +192,29 @@ mod tests {
             expand_argument("--stdio", "10.20.30.40", 2222).expect("literal should pass"),
             "--stdio"
         );
-        assert!(expand_argument("{username}", "10.20.30.40", 2222).is_err());
-        assert!(expand_argument("tcp://{host}:{port}", "10.20.30.40", 2222).is_err());
+        assert_eq!(
+            expand_argument("{username}", "10.20.30.40", 2222),
+            Err(ProxyCommandConnectError::InvalidArgument)
+        );
+        assert_eq!(
+            expand_argument("tcp://{host}:{port}", "10.20.30.40", 2222),
+            Err(ProxyCommandConnectError::InvalidArgument)
+        );
+    }
+
+    #[test]
+    fn classifies_spawn_errors_without_exposing_os_details() {
+        assert_eq!(
+            classify_spawn_error(io::Error::from(io::ErrorKind::NotFound)),
+            ProxyCommandConnectError::ProgramNotFound
+        );
+        assert_eq!(
+            classify_spawn_error(io::Error::from(io::ErrorKind::PermissionDenied)),
+            ProxyCommandConnectError::PermissionDenied
+        );
+        assert_eq!(
+            classify_spawn_error(io::Error::from(io::ErrorKind::Other)),
+            ProxyCommandConnectError::SpawnFailed
+        );
     }
 }
