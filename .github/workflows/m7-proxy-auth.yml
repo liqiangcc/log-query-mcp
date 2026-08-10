@@ -45,6 +45,7 @@ jobs:
       - name: Prepare ProxyCommand key-auth fixture
         run: |
           sudo useradd -m -s /bin/bash logreader
+          echo 'logreader:unused-password' | sudo chpasswd
           sudo mkdir -p /home/logreader/.ssh /home/logreader/logs
           printf 'hello world from m7 proxy key auth\n' | sudo tee /home/logreader/logs/application.log >/dev/null
           sudo chown -R logreader:logreader /home/logreader/logs
