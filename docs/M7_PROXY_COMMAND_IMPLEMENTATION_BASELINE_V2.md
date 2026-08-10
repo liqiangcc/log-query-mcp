@@ -1,6 +1,6 @@
 # Log Query MCP v2 M7 ProxyCommand Implementation Baseline
 
-> 状态：Core + failure-classification implementation present / CI and live validation blocked  
+> 状态：Core + expanded fault harness present / CI and live validation blocked  
 > 日期：2026-08-10  
 > Draft PR：#25  
 > 设计：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
@@ -10,27 +10,22 @@
 
 ## 1. 当前实现范围
 
-M7 已从设计阶段进入实际 Transport + Fault Model 实现阶段。
+M7 当前已具备：
 
-当前代码已经具备：
-
-- v2 配置中的可选 `SshConnectionConfig.proxy`。
-- `proxy.type=command`。
-- `program + args[]` 直接进程启动模型，不构造 Shell command string。
-- 仅允许完整 argv 项 `{host}` / `{port}` Placeholder。
-- `SshStreamConnector` 将 Direct TCP 与 ProxyCommand 底层 stream 分离。
-- Direct TCP 与 ProxyCommand 都通过 `russh::client::connect_stream` 建立 SSH。
-- ProxyCommand 通过 `tokio::process::Command` 启动管理员配置的本地 helper。
-- child stdin/stdout 作为 SSH raw byte stream。
-- strict Host Key Verification、Authentication、SFTP、Cache、Sync、Query 层保持独立。
-- `kill_on_drop(true)` + `start_kill()` + Tokio `wait()` reaper 的 fail-closed child cleanup baseline。
-- stderr 独立异步 drain，内存 capture 上限 64 KiB，超限后继续 drain 但不继续增长。
-- captured stderr 不写日志、不返回 Public Error。
-- ProxyCommand 启动/stream/timeout 已有稳定内部 transport 分类。
+- optional admin-only `SshConnectionConfig.proxy` / `type=command`。
+- direct `program + args[]` spawn，无 Shell command string。
+- only whole-argument `{host}` / `{port}` placeholders。
+- `SshStreamConnector` 分离 Direct TCP 与 ProxyCommand。
+- Direct / ProxyCommand 都进入 `russh::client::connect_stream`。
+- ProxyCommand child stdin/stdout = SSH raw byte stream。
+- strict Host Key Verification、Authentication、SFTP、Cache、Sync、Query 层不变。
+- `kill_on_drop + start_kill + async wait/reap` child cleanup baseline。
+- stderr 独立 drain，capture 上限 64 KiB，不返回 raw stderr。
+- stable ProxyCommand startup/stream/timeout internal classifications。
+- success live harness。
+- expanded process/auth/timeout/cancellation/active-session/mixed-transport failure harness。
 
 ## 2. 关注分离
-
-实现继续保持：
 
 ```text
 ProxyCommand = local byte-stream adapter
@@ -41,25 +36,11 @@ Query Engine = search
 MCP          = AI-facing log API
 ```
 
-`src/transport/proxy_command.rs` 只负责：
-
-```text
-validated config
-      ↓
-local child process
-      ↓
-stdin / stdout
-      ↓
-AsyncRead + AsyncWrite
-```
-
-它不负责 remote shell、remote command、remote path selection、log search、cache、sync、credential resolution 或 host-key policy。
+`src/transport/proxy_command.rs` 只负责本地 child process 与 stdin/stdout stream，不负责 remote shell、remote command、remote paths、credentials、cache、sync 或 query。
 
 ## 3. Failure Classification
 
-ProxyCommand 现在不会把所有失败都折叠为普通 `ConnectFailed`。
-
-稳定内部 Transport 分类包括：
+稳定内部分类：
 
 ```text
 ProxyCommandNotFound
@@ -69,136 +50,136 @@ ProxyCommandStreamFailed
 ProxyCommandTimeout
 ```
 
-边界保持：
+边界：
 
-- 配置错误仍然是 `InvalidConfiguration`。
-- Host Key mismatch 仍然是 `HostKeyVerificationFailed`。
-- SSH Authentication 失败仍然是 `AuthenticationFailed`。
-- Direct TCP 仍使用原 `ConnectFailed` / `ConnectTimeout`。
-- AI-facing Tool Error contract 没有增加 ProxyCommand 可控字段，也没有暴露 raw OS error/stderr。
+- wrong host key → `HostKeyVerificationFailed`。
+- wrong SSH credential → `AuthenticationFailed`。
+- active session transport 消失 → SFTP operation fail，然后 reader latch 为 `Broken`。
+- Direct TCP 仍使用原 Direct 错误。
+- AI-facing error contract 不暴露 raw OS error/stderr，也没有新增 command input。
 
-## 4. Timeout / Lifecycle 当前语义
+## 4. Lifecycle / stderr
 
-`connect_timeout_millis` 继续作为单一建连 deadline，覆盖 ProxyCommand stream establishment + SSH handshake。
+`connect_timeout_millis` 继续覆盖 stream establishment + SSH handshake。
 
-ProxyCommand child 被 stream 所有：
-
-```text
-ProxyCommandStream
-├── ChildStdin
-├── ChildStdout
-├── Child
-└── stderr drain task
-```
-
-stream Drop 时：
+ProxyCommand stream Drop：
 
 ```text
-abort stderr task
+abort stderr drain
 → start_kill child
-→ Tokio runtime 可用时 spawn wait/reap task
-→ kill_on_drop 作为最终 guard
+→ async wait/reap when runtime available
+→ kill_on_drop final guard
 ```
-
-Failure Matrix harness 已增加 timeout/cancellation 下的 PID 观测，并验证 cancellation 后全局 SSH semaphore 应可继续被正常 Proxy connection 使用。真实证据仍需 runner 执行。
-
-## 5. stderr 边界
-
-stdout 是 SSH protocol stream，绝不进入日志系统。
 
 stderr：
 
-- 使用 pipe 独立排空，避免 helper 因 stderr pipe 写满而阻塞。
-- 最多在内存中保留 64 KiB。
-- 超过上限后继续排空但不继续增长。
-- 不写日志、不进入 Public Error、不返回 MCP Client。
-
-Failure Matrix 使用 128 KiB stderr flood helper，证明目标行为是“仍受 connect timeout 控制并回收 child”，而不是被 stderr pipe 卡死。
-
-## 6. 已落地的主要提交
-
 ```text
-8f9c6c3  ProxyCommand machine JSON Schema
-3c3a1a1  Rust ProxyCommand config/runtime validation
-8abd4bd  Direct SSH stream abstraction
-39aec36  ProxyCommand process stream adapter
-538b500  bounded stderr + child lifecycle hardening
-08e6867  classify ProxyCommand startup failures
-35d2322  classify ProxyCommand transport failures
-3fd1ec7  ProxyCommand failure-matrix tests
-efd07da  dedicated M7 ProxyCommand failure workflow
-3844653  scope orphan-process check to Proxy helper PIDs only
+pipe drain independently
+capture <= 64 KiB
+continue draining beyond the cap
+never expose raw stderr
 ```
 
-## 7. Live / Failure Harness
+## 5. Expanded Failure Harness
 
-已经存在两条独立 M7 gates：
-
-```text
-M7 ProxyCommand
-M7 ProxyCommand Failures
-```
-
-成功链路 gate 覆盖：
-
-```text
-ProxyCommand → OpenSSH → known_hosts → password auth → SFTP read
-wrong host key → fail closed
-```
-
-Failure gate 当前覆盖 harness：
+`.github/workflows/m7-proxy-command-failures.yml` 当前包含以下 harness：
 
 ```text
 program not found
-permission denied / non-executable helper
+permission denied
 early exit / stdout EOF
 stderr flood + connect timeout
-cancellation + child reap + semaphore release
+timeout child reap
+cancellation child reap
+cancellation semaphore release
+wrong password through real ProxyCommand
+AuthenticationFailed preservation
+auth-failure child reap
+active ProxyCommand crash after SSH/SFTP establishment
+SFTP failure + Broken latch after transport loss
+stalled ProxyCommand + active Direct SSH isolation
+workflow orphan-helper assertions
 ```
 
-剩余主要 fault evidence：
+active-session crash 使用 controlled single-process TCP proxy fixture：
 
 ```text
-authentication failure through ProxyCommand
-active-session proxy crash / network disconnect
-SFTP failure through ProxyCommand
-mixed Direct + Proxy isolation
+stdin/stdout ↔ TCP target
+PID file
+CI-only trigger file
+```
+
+trigger 只用于故障注入，不属于生产配置或 MCP API。
+
+## 6. Mixed Direct / Proxy Transport Evidence Harness
+
+当前已实现 transport-level harness：
+
+```text
+max_concurrent_ssh_connections = 2
+Proxy path occupies one permit and stalls
+Direct path occupies second permit and reads SFTP successfully
+Proxy task is cancelled/reaped
+Direct path reads SFTP successfully again
+```
+
+这证明目标语义是：
+
+```text
+shared global concurrency budget
++ per-connection failure isolation
+```
+
+仍需补 SourceRegistry / Query Engine 层的 Local + Direct + multiple Proxy mixed query evidence。
+
+## 7. 主要新增提交
+
+```text
+08e6867  classify ProxyCommand startup failures
+35d2322  classify ProxyCommand transport failures
+3fd1ec7  initial ProxyCommand failure-matrix tests
+efd07da  dedicated M7 failure workflow
+3844653  fix orphan PID scope
+de8349f  expand auth/crash/mixed transport tests
+bb0ae0b  expand active failure CI fixture
+b4d547c  expand Failure Matrix documentation
+0d77ebb  update M7 TODO state
 ```
 
 ## 8. 当前验证状态
 
-GitHub Actions 仍受 Issue #23 的 Billing / Spending Limit 外部阻塞影响。
+GitHub Actions Billing / Spending Limit 仍是外部 blocker。
 
-`M7 ProxyCommand Failures` 已被 GitHub 正确识别并触发。候选 `efd07da701bc3e18a89c3204a797d32e01229982` 的 PR run `31372138200` 中，job `proxy-command-failures` 结束为 failure，但 `steps=null`：runner 没有执行任何一步。
-
-因此当前必须记录为：
+因此当前状态：
 
 ```text
-implementation present           YES
-failure classification           IMPLEMENTED
-success live harness             IMPLEMENTED
-failure-matrix harness           IMPLEMENTED (partial matrix)
-compile evidence                 NO
-rustfmt/clippy evidence          NO
-failure-matrix execution         BLOCKED
-Direct SSH regression            NO NEW PASS EVIDENCE
-ProxyCommand live SSH            NOT VALIDATED
-WSL acceptance                   NOT VALIDATED
-RC ready                         NO
+implementation present                 YES
+failure classification                 IMPLEMENTED
+success live harness                   IMPLEMENTED
+expanded failure harness               IMPLEMENTED
+Direct+Proxy isolation harness         IMPLEMENTED
+compile/rustfmt/clippy evidence         NO CURRENT PASS
+failure harness execution              BLOCKED
+Direct SSH regression                  NO NEW PASS EVIDENCE
+ProxyCommand live SSH                  NOT VALIDATED
+full mixed query                       NOT VALIDATED
+WSL acceptance                         NOT VALIDATED
+performance regression                 NOT VALIDATED
+RC ready                               NO
 ```
 
-这些 workflow failure 不能解释为代码测试失败，也不能解释为 PASS。
+`steps=null` 的 workflow run 既不能视为已知代码失败，也不能视为 PASS。
 
 ## 9. 下一阶段
 
-下一步重点：
+实现工作下一步应从 Transport fault harness 转向上层集成：
 
-1. 补 authentication failure through ProxyCommand。
-2. 补 active-session proxy crash / disconnect，并验证 reader fail/broken 与 child cleanup。
-3. 建立 Direct + Proxy mixed transport/isolation gate。
-4. 验证同一 global SSH semaphore 同时约束 Direct/Proxy。
-5. Billing 恢复后真正执行 Success + Failure 两条 M7 gates。
-6. 最后执行真实 WSL → Windows Host → Remote SSH acceptance 与性能回归。
+1. 补 Local + Direct Remote + Proxy Remote 的 SourceRegistry / Query Engine mixed query。
+2. 验证一个 Proxy remote failure 不影响其他 Local/Direct/Proxy source。
+3. 补 server restart through ProxyCommand 与 stale-cache fail-closed 回归。
+4. 补 success gate 的 private/encrypted key 与 Sync/Cache/Query 链路。
+5. Billing 恢复后运行全部真实 gates。
+6. 最后执行 WSL → Windows Host → Remote SSH acceptance 与性能回归。
 
 ## 10. 当前完成定义
 
@@ -206,19 +187,19 @@ RC ready                         NO
 M7 design                         DONE
 ADR                               DONE (0012)
 config schema/runtime             DONE
-config fixtures                   DONE
 stream abstraction                IMPLEMENTED / CI BLOCKED
 ProxyCommand core connector       IMPLEMENTED / CI BLOCKED
 child cleanup baseline            IMPLEMENTED / CI BLOCKED
 bounded stderr drain              IMPLEMENTED / CI BLOCKED
 failure classification            IMPLEMENTED / CI BLOCKED
 ProxyCommand live harness         IMPLEMENTED / EXECUTION BLOCKED
-failure matrix harness            PARTIAL / EXECUTION BLOCKED
-mixed Direct+Proxy isolation      TODO
+failure matrix harness            EXPANDED / EXECUTION BLOCKED
+Direct+Proxy transport isolation  IMPLEMENTED / EXECUTION BLOCKED
+full mixed query                  TODO
 WSL acceptance                    TODO
 performance regression            TODO
 release docs/final gates          TODO
 RC ready                          NO
 ```
 
-在真实 gates 通过以前，不应把 M7 标记为 production-ready，也不应把 PR #25 转为 Ready。
+真实 gates 通过前，不应把 M7 标记 production-ready，也不应把 PR #25 转为 Ready。
