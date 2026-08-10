@@ -82,7 +82,7 @@ never expose raw stderr
 
 ## 5. Expanded Failure Harness
 
-`.github/workflows/m7-proxy-command-failures.yml` 当前包含以下 harness：
+`.github/workflows/m7-proxy-command-failures.yml` 当前包含：
 
 ```text
 program not found
@@ -109,11 +109,9 @@ PID file
 CI-only trigger file
 ```
 
-trigger 只用于故障注入，不属于生产配置或 MCP API。
+trigger 只用于测试故障注入，不属于生产配置或 MCP API。
 
 ## 6. Mixed Direct / Proxy Transport Evidence Harness
-
-当前已实现 transport-level harness：
 
 ```text
 max_concurrent_ssh_connections = 2
@@ -123,12 +121,7 @@ Proxy task is cancelled/reaped
 Direct path reads SFTP successfully again
 ```
 
-这证明目标语义是：
-
-```text
-shared global concurrency budget
-+ per-connection failure isolation
-```
+目标语义：shared global concurrency budget + per-connection failure isolation。
 
 仍需补 SourceRegistry / Query Engine 层的 Local + Direct + multiple Proxy mixed query evidence。
 
@@ -150,7 +143,14 @@ b4d547c  expand Failure Matrix documentation
 
 GitHub Actions Billing / Spending Limit 仍是外部 blocker。
 
-因此当前状态：
+expanded harness candidate `dd3310b7250824bbfc259c80bc16f30e2d2d52fd` 触发 `M7 ProxyCommand Failures` run `31373870218`，其 `proxy-command-failures` job 为：
+
+```text
+result = failure
+steps  = null
+```
+
+runner 未执行任何 step。因此当前状态：
 
 ```text
 implementation present                 YES
@@ -168,11 +168,11 @@ performance regression                 NOT VALIDATED
 RC ready                               NO
 ```
 
-`steps=null` 的 workflow run 既不能视为已知代码失败，也不能视为 PASS。
+`steps=null` 既不能视为已知代码失败，也不能视为 PASS。
 
 ## 9. 下一阶段
 
-实现工作下一步应从 Transport fault harness 转向上层集成：
+实现工作下一步从 Transport fault harness 转向上层集成：
 
 1. 补 Local + Direct Remote + Proxy Remote 的 SourceRegistry / Query Engine mixed query。
 2. 验证一个 Proxy remote failure 不影响其他 Local/Direct/Proxy source。
