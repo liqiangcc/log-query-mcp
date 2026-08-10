@@ -118,7 +118,9 @@ jobs:
       - name: Assert helper processes are gone
         if: always()
         run: |
-          for pid_file in /tmp/log-query-mcp-m7-proxy-failures/*.pid; do
+          for pid_file in \
+            /tmp/log-query-mcp-m7-proxy-failures/timeout.pid \
+            /tmp/log-query-mcp-m7-proxy-failures/cancel.pid; do
             [[ -e "$pid_file" ]] || continue
             pid="$(cat "$pid_file")"
             if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
