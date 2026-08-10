@@ -1,38 +1,38 @@
 # Log Query MCP v2 M7 ProxyCommand Implementation Baseline
 
-> 状态：Core + fault + mixed-query + restart + generation + auth + sync harness present / CI and live validation blocked  
+> 状态：Core + functional + performance harness present / CI and live validation blocked  
 > 日期：2026-08-10  
 > Draft PR：#25  
 > 设计：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
 > TODO：[`PROXY_COMMAND_TODO_V2.md`](./PROXY_COMMAND_TODO_V2.md)  
 > Failure Matrix：[`M7_PROXY_COMMAND_FAILURE_MATRIX_V2.md`](./M7_PROXY_COMMAND_FAILURE_MATRIX_V2.md)  
-> Restart Gate：[`M7_PROXY_RESTART_GATE_V2.md`](./M7_PROXY_RESTART_GATE_V2.md)  
-> Generation Gate：[`M7_PROXY_GENERATION_GATE_V2.md`](./M7_PROXY_GENERATION_GATE_V2.md)  
 > Auth Gate：[`M7_PROXY_AUTH_GATE_V2.md`](./M7_PROXY_AUTH_GATE_V2.md)  
 > Sync Gate：[`M7_PROXY_SYNC_GATE_V2.md`](./M7_PROXY_SYNC_GATE_V2.md)  
+> Restart Gate：[`M7_PROXY_RESTART_GATE_V2.md`](./M7_PROXY_RESTART_GATE_V2.md)  
+> Generation Gate：[`M7_PROXY_GENERATION_GATE_V2.md`](./M7_PROXY_GENERATION_GATE_V2.md)  
+> Performance Gate：[`M7_PROXY_PERFORMANCE_GATE_V2.md`](./M7_PROXY_PERFORMANCE_GATE_V2.md)  
 > ADR：[`adr/0012-use-proxy-command-as-ssh-stream-transport.md`](./adr/0012-use-proxy-command-as-ssh-stream-transport.md)
 
 ## 1. 当前实现范围
 
 M7 当前已经具备：
 
-- admin-only `SshConnectionConfig.proxy` / `type=command`。
-- direct `program + args[]` spawn，无 Shell command string。
-- only whole-argument `{host}` / `{port}` placeholders。
-- `SshStreamConnector` 分离 Direct TCP 与 ProxyCommand。
-- Direct / ProxyCommand 都进入 `russh::client::connect_stream`。
-- ProxyCommand child stdin/stdout = SSH raw byte stream。
-- strict Host Key Verification、Authentication、SFTP、Cache、Sync、Query 层不变。
-- fail-closed child cleanup + bounded stderr drain。
-- stable ProxyCommand startup/stream/timeout internal classifications。
-- success live harness。
-- expanded process/auth/timeout/cancellation/active-session failure harness。
-- Direct + Proxy transport isolation harness。
-- SourceRegistry / StatefulQueryService 的 Local + Direct + Proxy mixed-query harness。
-- ProxyCommand server-restart / stale-cache fail-closed / recovery harness。
-- Proxy source cursor / match_ref / generation pin consistency harness。
-- ProxyCommand 无口令 private-key 与 encrypted private-key + passphrase auth harness。
-- ProxyCommand full / tail / from_now / incremental / truncate / same-path rotation Sync harness。
+- admin-only `SshConnectionConfig.proxy` / `type=command`；
+- direct `program + args[]` spawn，无 Shell command string；
+- whole-argument `{host}` / `{port}` placeholders；
+- `SshStreamConnector` 分离 Direct TCP 与 ProxyCommand；
+- Direct / ProxyCommand 都进入 `russh::client::connect_stream`；
+- child stdin/stdout = SSH raw byte stream；
+- strict Host Key Verification、Authentication、SFTP、Sync、Cache、Query 边界不变；
+- fail-closed child cleanup + bounded stderr drain；
+- stable ProxyCommand startup/stream/timeout classifications；
+- password / private key / encrypted private key success harness；
+- full / tail / from_now / incremental / truncate / rotation Sync harness；
+- startup/auth/timeout/cancellation/active-crash failure harness；
+- Direct + Proxy isolation、Local + Direct + Proxy mixed-query harness；
+- server restart / stale-cache fail-closed / recovery harness；
+- cursor / match_ref / generation consistency harness；
+- Direct vs Proxy paired performance harness，包含 M6 large-file profiles、300 range reads、mixed concurrency 和 helper cleanup。
 
 ## 2. 关注分离
 
@@ -46,9 +46,9 @@ Query Engine = search
 MCP          = AI-facing log API
 ```
 
-M7 没有让 ProxyCommand 参与 remote path、credential、cache、sync 或 query 业务逻辑。Transport fault、Auth、Sync、mixed query、restart/stale-cache、generation consistency 分别使用独立 test/workflow。
+M7 没有让 ProxyCommand 参与 remote path、credential、cache、sync 或 query 业务逻辑。Fault、Auth、Sync、Mixed Query、Restart、Generation、Performance 分别使用独立 test/workflow。
 
-## 3. Failure / Lifecycle Baseline
+## 3. Transport / Failure Baseline
 
 稳定内部分类：
 
@@ -62,209 +62,160 @@ ProxyCommandTimeout
 
 边界保持：
 
-- wrong host key → `HostKeyVerificationFailed`。
-- wrong credential → `AuthenticationFailed`。
-- active transport loss → SFTP failure，reader latch `Broken`。
-- raw OS error / stderr 不进入 AI-facing error。
+- wrong host key → `HostKeyVerificationFailed`；
+- wrong credential → `AuthenticationFailed`；
+- active transport loss → SFTP failure，reader latch `Broken`；
+- raw OS error / stderr 不进入 AI-facing error；
+- Direct TCP 继续使用原 Direct 错误；
+- ProxyCommand 不新增 MCP tool、remote exec、write、upload、delete 或 arbitrary remote path。
 
-Failure harness 已覆盖 startup、early EOF、stderr flood、timeout、cancellation、child reap、semaphore release、wrong-password、active proxy crash 和 Direct+Proxy isolation。
+## 4. Auth / Sync Baseline
 
-## 4. Key Authentication Baseline
-
-独立：
+Auth 独立 gate：
 
 ```text
 tests/m7_proxy_auth_live.rs
 .github/workflows/m7-proxy-auth.yml
-docs/M7_PROXY_AUTH_GATE_V2.md
+```
+
+覆盖 unencrypted Ed25519 与 encrypted Ed25519 + `passphrase_secret_ref`，两者都经过 ProxyCommand → strict known_hosts → SSH public-key auth → read-only SFTP。passphrase 保持在 SecretResolver/SSH 层。
+
+Sync 独立 gate：
+
+```text
+tests/m7_proxy_sync_live.rs
+.github/workflows/m7-proxy-sync.yml
 ```
 
 覆盖：
 
 ```text
-unencrypted Ed25519 private key
-encrypted Ed25519 private key + passphrase_secret_ref
+full -> InitialBootstrap
+incremental growth -> Appended / same generation
+tail(bytes) -> Tail coverage
+from_now -> history excluded, future append same generation
+truncate -> RemoteTruncated new generation
+same-path same-size replacement -> ContinuityMismatch new generation
 ```
 
-两者都经过：
+## 5. Query / Recovery Baseline
+
+已有独立 harness：
 
 ```text
-ProxyCommand → SSH handshake → strict known_hosts → public-key auth → SFTP → stat/read_range
+M7 Mixed Query
+M7 Proxy Restart
+M7 Proxy Generation
 ```
 
-passphrase 仍由现有 SecretResolver 解析，不进入 ProxyCommand argv/stdin/stderr。
+证明：
 
-`M7 Proxy Auth` candidate `9abb48c20801ffb0fce63ada609716652f37d88d` 的 run `31378855432` 中，`proxy-auth-live` 为 `steps=null`。
+- one request 可以返回 Local + Direct + Proxy 三源；
+- failed Proxy 不污染后续 healthy source 查询；
+- outage 时 `allow_stale_on_error=false` 不返回 stale success；
+- restart 后重新同步并恢复；
+- old cursor 持有 frozen candidate snapshot；
+- fresh query 进入新 generation；
+- existing match_ref 持有 source/file + generation pin；
+- `get_log_context` 对 existing match_ref 可完全 cache-only。
 
-## 5. Sync Semantics Baseline
+## 6. Performance Regression Baseline
 
-独立：
+新增：
 
 ```text
-tests/m7_proxy_sync_live.rs
-.github/workflows/m7-proxy-sync.yml
-docs/M7_PROXY_SYNC_GATE_V2.md
+tests/m7_proxy_performance_live.rs
+.github/workflows/m7-proxy-performance.yml
+docs/M7_PROXY_PERFORMANCE_GATE_V2.md
 ```
 
-覆盖的 M4 不变量：
+### Transport micro-benchmark
+
+同一 OpenSSH fixture 下记录：
 
 ```text
-full bootstrap
-→ NewGeneration(InitialBootstrap)
-
-incremental growth
-→ Appended
-→ same generation
-
-tail(bytes)
-→ Tail { start_offset }
-→ only configured tail is queryable/cache payload
-
-from_now
-→ FromNow { start_offset = initial remote size }
-→ history excluded
-→ later append stays on same generation
-
-truncate
-→ NewGeneration(RemoteTruncated)
-
-same-path same-size replacement
-→ continuity fingerprint mismatch
-→ NewGeneration(ContinuityMismatch)
+5 x Direct open/read/close
+5 x Proxy  open/read/close
+300 x Proxy read_range on one SFTP session
+2 x Direct + 2 x Proxy concurrent open/read/close
 ```
 
-`M7 Proxy Sync` candidate `9abb48c20801ffb0fce63ada609716652f37d88d` 的 run `31378855371` 中，`proxy-sync-live` 为 `steps=null`。
+输出 paired transport metrics，不预设武断的绝对毫秒阈值。
 
-## 6. Mixed Query Integration Baseline
+### Large-file paired profiles
 
-独立：
+每个 profile 都依次运行 Direct 与 Proxy：
 
 ```text
-tests/m7_mixed_query_live.rs
-.github/workflows/m7-mixed-query.yml
+100 MiB full + 1 MiB append
+1 GiB full + 100 MiB append
+10 GiB logical tail(64 MiB) + 1 MiB append
 ```
 
-Harness 已实现：
-
-- one request 返回 Local + Direct + Proxy 三个 source；
-- bad Proxy source 显式 `REMOTE_UNAVAILABLE`；
-- bad Proxy failure 后同一个 query service 仍能查询 Local + Direct + healthy Proxy。
-
-## 7. Restart / Stale-Cache Baseline
-
-独立：
+继续断言 M6 资源不变量：
 
 ```text
-tests/m7_proxy_restart_live.rs
-.github/workflows/m7-proxy-restart.yml
-docs/M7_PROXY_RESTART_GATE_V2.md
+cold bootstrap remote read = cached payload + bounded continuity probe
+unchanged remote read <= 64 KiB
+incremental remote read <= payload + 2 x 64 KiB
+cache-local scan remote bytes = 0
 ```
 
-三阶段语义：
+workflow 还在 transport benchmark、每个 large profile 和收尾阶段检查 `/usr/bin/nc 127.0.0.1 2235` 不得残留。
 
-```text
-Phase 1
-ProxyCommand → SSH/SFTP → bootstrap cache → query PASS
+M6 historical Direct evidence 仍作为比较参考，但不是 M7 PASS threshold。
 
-Phase 2
-stop sshd
-→ on-query refresh fails
-→ REMOTE_UNAVAILABLE
-→ allow_stale_on_error=false prevents stale-success response
-→ last valid generation remains stored locally
-
-Phase 3
-restart sshd
-→ ProxyCommand reconnects
-→ append detected/synchronized
-→ cache advances
-→ query recovers
-```
-
-## 8. Cursor / MatchRef / Generation Baseline
-
-独立：
-
-```text
-tests/m7_proxy_generation_live.rs
-.github/workflows/m7-proxy-generation.yml
-docs/M7_PROXY_GENERATION_GATE_V2.md
-```
-
-验证：
-
-```text
-old cursor = frozen candidate snapshot
-fresh query = refreshed generation
-match_ref = source/file + pinned generation
-get_context(existing ref) = cache-only
-```
-
-A/B 两个 Proxy source 用于验证 replacement 后不存在 generation drift 或 cross-source crossover。
-
-## 9. 当前验证状态
+## 7. 当前验证状态
 
 GitHub Actions Billing / Spending Limit 仍是外部 blocker。
 
-新增 gates 已被 GitHub 识别：
+最新 Performance harness 已被 GitHub 识别：
 
 ```text
-M7 Proxy Auth
-run 31378855432
-job proxy-auth-live
-result failure
-steps null
-
-M7 Proxy Sync
-run 31378855371
-job proxy-sync-live
-result failure
-steps null
+workflow = M7 Proxy Performance
+run      = 31380836168
+head     = 8d116de693f2ee05381b429944e4f5033533c150
+job      = proxy-performance
+result   = failure
+steps    = null
 ```
 
-runner 未执行任何 step。
+runner 没有执行任何 step，因此没有 M7 性能数字。
 
-因此当前必须记录：
+其他 M7 gates 也仍缺当前候选的真实 PASS evidence。当前必须记录：
 
 ```text
 implementation present                 YES
-failure classification                 IMPLEMENTED
-success live harness                   IMPLEMENTED
-private/encrypted key harness          IMPLEMENTED
-sync-mode semantics harness            IMPLEMENTED
-expanded failure harness               IMPLEMENTED
-Direct+Proxy isolation harness         IMPLEMENTED
-full mixed-query harness               IMPLEMENTED
-restart/stale-cache harness            IMPLEMENTED
-generation-consistency harness         IMPLEMENTED
+functional harnesses                   IMPLEMENTED
+performance harness                    IMPLEMENTED
 compile/rustfmt/clippy evidence         NO CURRENT PASS
 M7 workflow execution                  BLOCKED
 Direct SSH regression                  NO NEW PASS EVIDENCE
 ProxyCommand live SSH                  NOT VALIDATED
 Proxy key auth                         NOT VALIDATED
 Proxy sync semantics                   NOT VALIDATED
-mixed query                            NOT VALIDATED
-restart/stale-cache                    NOT VALIDATED
-generation consistency                 NOT VALIDATED
+mixed/restart/generation               NOT VALIDATED
+M7 performance metrics                 NONE
 WSL acceptance                         NOT VALIDATED
-performance regression                 NOT VALIDATED
 RC ready                               NO
 ```
 
 `steps=null` 既不能视为已知代码失败，也不能视为 PASS。
 
-## 10. 下一阶段
+## 8. 下一阶段
 
-Transport、fault、Auth、Sync、mixed-query、restart/stale-cache、generation consistency 的 harness 已基本闭合。下一步优先：
+核心代码与功能/性能 harness 已基本闭合。下一步优先转向 release integration：
 
-1. 增加 ProxyCommand connection setup latency 与 Direct 对照。
-2. 复用 M6 性能基线覆盖 100 MiB full / 1 GiB full / 10 GiB logical tail。
-3. 验证 incremental append bounded transfer、Direct + Proxy concurrency、300 range reads。
-4. 更新 README / INSTALL / OPERATIONS / PRODUCTION_CHECKLIST / v2 examples / rc_check。
-5. Billing 恢复后执行所有当前 candidate gates。
-6. 最后执行真实 WSL → Windows Host → Remote SSH acceptance。
+1. README 增加 ProxyCommand / WSL 场景与安全边界；
+2. INSTALL 增加 WSL → Windows helper 依赖和部署方式；
+3. OPERATIONS 增加 ProxyCommand diagnostics/error categories；
+4. PRODUCTION_CHECKLIST 增加 ProxyCommand security/lifecycle/performance acceptance；
+5. v2 example config 增加 Direct + Proxy example；
+6. `rc_check.sh` 纳入 M7 非 live contract/static checks；
+7. Billing 恢复后执行当前 candidate 所有 gates；
+8. 最后执行真实 WSL → Windows Host → Remote SSH acceptance。
 
-## 11. 当前完成定义
+## 9. 当前完成定义
 
 ```text
 M7 design                         DONE
@@ -274,17 +225,13 @@ stream abstraction                IMPLEMENTED / CI BLOCKED
 ProxyCommand core connector       IMPLEMENTED / CI BLOCKED
 child cleanup + stderr            IMPLEMENTED / CI BLOCKED
 failure classification            IMPLEMENTED / CI BLOCKED
-ProxyCommand live harness         IMPLEMENTED / EXECUTION BLOCKED
-private/encrypted key harness     IMPLEMENTED / EXECUTION BLOCKED
-sync-mode semantics harness       IMPLEMENTED / EXECUTION BLOCKED
+functional live harnesses         IMPLEMENTED / EXECUTION BLOCKED
 failure matrix harness            EXPANDED / EXECUTION BLOCKED
-Direct+Proxy transport isolation  IMPLEMENTED / EXECUTION BLOCKED
-full mixed query                  IMPLEMENTED / EXECUTION BLOCKED
-restart/stale-cache harness       IMPLEMENTED / EXECUTION BLOCKED
-generation-consistency harness    IMPLEMENTED / EXECUTION BLOCKED
+mixed/restart/generation harness  IMPLEMENTED / EXECUTION BLOCKED
+performance regression harness    IMPLEMENTED / EXECUTION BLOCKED
+release docs/integration          TODO
 WSL acceptance                    TODO
-performance regression            TODO
-release docs/final gates          TODO
+final gates                       TODO
 RC ready                          NO
 ```
 
