@@ -23,6 +23,8 @@ use tokio::{
 
 use crate::{AppConfigV2, EnvSecretResolver, SecretResolver, SshAuthType, SshConnectionConfig};
 
+use super::proxy_command::connect_proxy_command;
+
 pub const MAX_READ_RANGE_BYTES: usize = 4 * 1024 * 1024;
 const S_IFMT: u32 = 0o170000;
 const S_IFREG: u32 = 0o100000;
@@ -44,7 +46,10 @@ impl SshStreamConnector {
         connection: &SshConnectionConfig,
     ) -> Result<BoxedSshStream, SshTransportError> {
         if connection.proxy.is_some() {
-            return Err(SshTransportError::InvalidConfiguration);
+            let stream = connect_proxy_command(connection)
+                .await
+                .map_err(|_| SshTransportError::ConnectFailed)?;
+            return Ok(Box::new(stream));
         }
         DirectConnector.connect(connection).await
     }
