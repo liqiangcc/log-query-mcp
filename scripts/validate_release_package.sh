@@ -48,6 +48,7 @@ for path in \
   scripts/m7_wsl_acceptance.sh \
   scripts/m7_wsl_http_acceptance.py \
   scripts/verify_m7_evidence.py \
+  scripts/m7_real_target_manifest.py \
   scripts/m7_real_target_acceptance.sh \
   docs/INSTALL.md \
   docs/OPERATIONS.md \
@@ -85,6 +86,7 @@ for path in \
   scripts/m7_wsl_acceptance.sh \
   scripts/m7_wsl_http_acceptance.py \
   scripts/verify_m7_evidence.py \
+  scripts/m7_real_target_manifest.py \
   scripts/m7_real_target_acceptance.sh; do
   [[ -x "${root}/${path}" ]] || die "expected executable package entry: ${path}"
 done
@@ -130,7 +132,8 @@ bash -n "${root}/scripts/m7_real_target_acceptance.sh" || die "packaged M7 real-
 python3 -m py_compile \
   "${root}/scripts/m7_wsl_acceptance.py" \
   "${root}/scripts/m7_wsl_http_acceptance.py" \
-  "${root}/scripts/verify_m7_evidence.py" || \
+  "${root}/scripts/verify_m7_evidence.py" \
+  "${root}/scripts/m7_real_target_manifest.py" || \
   die "packaged M7 acceptance Python tooling has invalid syntax"
 python3 "${root}/scripts/m7_wsl_acceptance.py" \
   --validate-config-only \
@@ -150,9 +153,39 @@ version="$(awk -F= '$1 == "version" {print $2}' "${root}/BUILDINFO")"
 expected_prefix="log-query-mcp-v${version}-"
 [[ "$(basename "${root}")" == "${expected_prefix}"* ]] || die "package directory and BUILDINFO version disagree"
 
-grep -q '^git_commit=' "${root}/BUILDINFO" || die "BUILDINFO missing git_commit"
+grep -Eq '^git_commit=[0-9a-f]{40,64}$' "${root}/BUILDINFO" || die "BUILDINFO missing a traceable git_commit"
 grep -q '^target=' "${root}/BUILDINFO" || die "BUILDINFO missing target"
 grep -q '^rustc=' "${root}/BUILDINFO" || die "BUILDINFO missing rustc"
 grep -q '^built_at_utc=' "${root}/BUILDINFO" || die "BUILDINFO missing built_at_utc"
+
+manifest="${tmp}/m7-real-target-run.json"
+python3 "${root}/scripts/m7_real_target_manifest.py" start \
+  --manifest "${manifest}" \
+  --config "${root}/examples/log-query-mcp.v2.remote.json" \
+  --source-id synthetic-proxy-source \
+  --keyword synthetic-marker \
+  --buildinfo "${root}/BUILDINFO" \
+  --stdio-bin "${root}/bin/log-query-mcp-stdio" \
+  --http-bin "${root}/bin/log-query-mcp" || \
+  die "packaged M7 run manifest failed to initialize"
+for gate in A B C D; do
+  python3 "${root}/scripts/m7_real_target_manifest.py" gate-pass \
+    --manifest "${manifest}" --gate "${gate}" || \
+    die "packaged M7 run manifest failed gate lifecycle"
+done
+python3 "${root}/scripts/m7_real_target_manifest.py" pass --manifest "${manifest}" || \
+  die "packaged M7 run manifest failed PASS lifecycle"
+python3 - "${manifest}" <<'PY'
+import json
+import sys
+from pathlib import Path
+value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert value.get("schema") == "log-query-mcp-m7-real-target-run-v1"
+assert value.get("status") == "PASS"
+assert value.get("completed_gates") == ["A", "B", "C", "D"]
+assert value.get("keyword") is None
+assert value.get("keyword_sha256")
+assert value.get("buildinfo", {}).get("git_commit")
+PY
 
 echo "validate_release_package: package is complete and checksums are valid"
