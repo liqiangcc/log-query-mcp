@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40,64}$")
 EXPECTED_TOOLS = ["get_log_context", "list_log_sources", "search_logs"]
 ALLOWED_PROXY_ARG_SHAPE = {"{host}", "{port}", "<literal>"}
 FORBIDDEN_KEYS = {
@@ -74,6 +75,16 @@ def require_timestamp(value: Any, name: str) -> None:
     require(parsed.tzinfo is not None, f"{name} must include timezone")
 
 
+def require_buildinfo_commit(value: Any, name: str) -> str:
+    require(isinstance(value, dict), f"{name}.buildinfo must be present")
+    commit = value.get("git_commit")
+    require(
+        isinstance(commit, str) and GIT_COMMIT_RE.fullmatch(commit) is not None,
+        f"{name}.buildinfo.git_commit must identify the packaged candidate",
+    )
+    return commit
+
+
 def require_proxy_arg_shape(value: Any, name: str) -> None:
     require(isinstance(value, list) and bool(value), f"{name} must be a non-empty array")
     require(all(isinstance(item, str) for item in value), f"{name} must contain only strings")
@@ -114,6 +125,7 @@ def verify_stdio(value: dict[str, Any]) -> None:
     require_sha(value.get("stdio_binary_sha256"), "stdio.stdio_binary_sha256")
     require_sha(value.get("target_host_sha256"), "stdio.target_host_sha256")
     require_sha(value.get("keyword_sha256"), "stdio.keyword_sha256")
+    require_buildinfo_commit(value.get("buildinfo"), "stdio")
     require_proxy_arg_shape(value.get("proxy_args_shape"), "stdio.proxy_args_shape")
     require(isinstance(value.get("source_id"), str) and bool(value["source_id"]), "stdio source_id missing")
     require(isinstance(value.get("connection_id"), str) and bool(value["connection_id"]), "stdio connection_id missing")
@@ -141,6 +153,7 @@ def verify_http(value: dict[str, Any]) -> None:
     require_sha(value.get("logical_host_sha256"), "http.logical_host_sha256")
     require_sha(value.get("keyword_sha256"), "http.keyword_sha256")
     require_sha(value.get("endpoint_sha256"), "http.endpoint_sha256")
+    require_buildinfo_commit(value.get("buildinfo"), "http")
     require_proxy_arg_shape(value.get("proxy_argv_shape"), "http.proxy_argv_shape")
     require(isinstance(value.get("source_id"), str) and bool(value["source_id"]), "HTTP source_id missing")
     require(isinstance(value.get("connection_id"), str) and bool(value["connection_id"]), "HTTP connection_id missing")
@@ -178,15 +191,15 @@ def verify_pair(stdio: dict[str, Any], http: dict[str, Any]) -> None:
     )
     for stdio_key, http_key in pairs:
         require(stdio.get(stdio_key) == http.get(http_key), f"stdio/HTTP evidence mismatch: {stdio_key}/{http_key}")
-    stdio_commit = stdio.get("buildinfo", {}).get("git_commit") if isinstance(stdio.get("buildinfo"), dict) else None
-    http_commit = http.get("buildinfo", {}).get("git_commit") if isinstance(http.get("buildinfo"), dict) else None
-    if stdio_commit and http_commit:
-        require(stdio_commit == http_commit, "stdio/HTTP BUILDINFO git_commit mismatch")
+    stdio_commit = require_buildinfo_commit(stdio.get("buildinfo"), "stdio")
+    http_commit = require_buildinfo_commit(http.get("buildinfo"), "http")
+    require(stdio_commit == http_commit, "stdio/HTTP BUILDINFO git_commit mismatch")
 
 
 def synthetic_pair() -> tuple[dict[str, Any], dict[str, Any]]:
     h = "a" * 64
     candidate = "b" * 64
+    commit = "c" * 40
     stdio = {
         "schema": "log-query-mcp-m7-wsl-acceptance-v1",
         "started_at_utc": "2026-08-10T11:00:00+00:00",
@@ -202,7 +215,7 @@ def synthetic_pair() -> tuple[dict[str, Any], dict[str, Any]]:
         "config_sha256": h,
         "stdio_binary_sha256": candidate,
         "keyword_sha256": h,
-        "buildinfo": {"git_commit": "deadbeef"},
+        "buildinfo": {"git_commit": commit},
         "helper_process_count_before": 1,
         "helper_process_count_after": 1,
         "direct_wsl_tcp_reachable": False,
@@ -232,7 +245,7 @@ def synthetic_pair() -> tuple[dict[str, Any], dict[str, Any]]:
         "endpoint_sha256": h,
         "service": {"active_state": "active", "user": "log-query-mcp", "main_pid": 123},
         "service_binary": {"running_sha256": candidate, "expected_sha256": candidate},
-        "buildinfo": {"git_commit": "deadbeef"},
+        "buildinfo": {"git_commit": commit},
         "helper_process_count_before": 1,
         "helper_process_count_after": 1,
         "checks": {
@@ -250,6 +263,7 @@ def synthetic_pair() -> tuple[dict[str, Any], dict[str, Any]]:
 def self_test() -> None:
     stdio, http = synthetic_pair()
     verify_pair(stdio, http)
+
     broken = copy.deepcopy(http)
     broken["checks"]["search_logs"] = "FAIL"
     try:
@@ -258,6 +272,7 @@ def self_test() -> None:
         pass
     else:
         raise EvidenceError("self-test failed to reject a broken HTTP evidence record")
+
     leaked = copy.deepcopy(stdio)
     leaked["match_ref"] = "must-never-be-persisted"
     try:
@@ -266,6 +281,7 @@ def self_test() -> None:
         pass
     else:
         raise EvidenceError("self-test failed to reject a sensitive evidence key")
+
     raw_argv = copy.deepcopy(stdio)
     raw_argv["proxy_args_shape"] = ["--proxy-type", "corporate-secret-token", "{host}", "{port}"]
     try:
@@ -274,6 +290,24 @@ def self_test() -> None:
         pass
     else:
         raise EvidenceError("self-test failed to reject unredacted ProxyCommand argv")
+
+    missing_commit = copy.deepcopy(stdio)
+    missing_commit["buildinfo"] = {}
+    try:
+        verify_pair(missing_commit, http)
+    except EvidenceError:
+        pass
+    else:
+        raise EvidenceError("self-test failed to reject missing candidate git_commit")
+
+    mismatched_commit = copy.deepcopy(http)
+    mismatched_commit["buildinfo"]["git_commit"] = "d" * 40
+    try:
+        verify_pair(stdio, mismatched_commit)
+    except EvidenceError:
+        pass
+    else:
+        raise EvidenceError("self-test failed to reject candidate git_commit mismatch")
 
 
 def main() -> int:
