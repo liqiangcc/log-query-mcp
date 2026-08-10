@@ -1,6 +1,6 @@
 # Log Query MCP v2 M7 ProxyCommand 实施 TODO
 
-> 状态：Design/contract complete / implementation pending  
+> 状态：Config contract implemented / stream abstraction pending  
 > 日期：2026-08-10  
 > 设计：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
 > ADR：[`adr/0012-use-proxy-command-as-ssh-stream-transport.md`](./adr/0012-use-proxy-command-as-ssh-stream-transport.md)  
@@ -19,7 +19,7 @@ M7 必须继续遵守现有 v2 安全模型：
 - Direct TCP 继续作为无 `proxy` 配置时的默认 Transport。
 - 失败继续 fail-closed，不静默使用 stale cache。
 
-## 1. M7-0 Design / Contract — DONE
+## 1. M7-0 Design / Contract — CONFIG LAYER IMPLEMENTED
 
 - [x] 编写 `PROXY_COMMAND_TRANSPORT_V2.md`。
 - [x] 新增 ADR-0012，冻结 ProxyCommand 只作为 SSH 字节流 Transport。
@@ -28,10 +28,15 @@ M7 必须继续遵守现有 v2 安全模型：
 - [x] 定义禁止 Shell command string、credential argv 注入和 AI 动态代理配置。
 - [x] 定义 child-process 生命周期、stderr bound/redaction 和 fail-closed 原则。
 - [ ] 同步修正 `PROXY_COMMAND_TRANSPORT_V2.md` 中历史 ADR 建议编号，从 ADR-0011 对齐为 ADR-0012。
-- [ ] 更新机器可读 `schemas/log-query-mcp-config-v2.schema.json`。
-- [ ] 更新 Rust v2 config structs/runtime validator。
+- [x] 更新机器可读 `schemas/log-query-mcp-config-v2.schema.json`。
+- [x] 更新 Rust v2 config structs/runtime validator。
+- [x] 增加 valid ProxyCommand contract fixture。
+- [x] 增加 unknown placeholder / unknown field invalid fixtures。
+- [x] Rust config unit tests覆盖合法 ProxyCommand、未知 placeholder、未知字段。
 
-后两项属于实现入口，完成后 M7-0 contract 才可标记完全冻结。
+当前机器 Schema 与 Rust config 已接受 `proxy.type=command`；实际 ProxyCommand transport 尚未实现，因此配置存在不代表已经能够通过代理建立 SSH 连接。
+
+最新 candidate 的 Rust/Contracts workflow 仍在 runner 启动前失败，job `steps=[]`，属于现有 GitHub Actions Billing 外部阻塞；上述配置改动尚未获得 CI PASS 证据。
 
 ## 2. M7-1 Stream Abstraction
 
@@ -61,14 +66,14 @@ multi-server
 
 ## 3. M7-2 Config / ProxyCommand Connector
 
-- [ ] JSON Schema 增加可选 `SshConnectionConfig.proxy`。
-- [ ] Rust Config 增加 `ProxyCommandConfig`。
-- [ ] `proxy.type` 首期只允许 `command`。
-- [ ] `program` 非空并有硬长度上限。
-- [ ] `args` 最多 64 项，单项有硬长度上限。
-- [ ] Placeholder 只允许完整 argv 项 `{host}` / `{port}`。
-- [ ] 未知 Placeholder 启动时 fail-fast。
-- [ ] 不支持 `{username}` / credential / source/path / expression。
+- [x] JSON Schema 增加可选 `SshConnectionConfig.proxy`。
+- [x] Rust Config 增加 `ProxyCommandConfig`。
+- [x] `proxy.type` 首期只允许 `command`。
+- [x] `program` 非空并有硬长度上限。
+- [x] `args` 最多 64 项，单项有硬长度上限。
+- [x] Placeholder 只允许完整 argv 项 `{host}` / `{port}`。
+- [x] 未知 Placeholder 启动时 fail-fast。
+- [x] 不支持 `{username}` / credential / source/path / expression。
 - [ ] 使用 `tokio::process::Command` 或等价 Tokio-native process API。
 - [ ] 直接 `program + argv[]` spawn，不构造 Shell command string。
 - [ ] child stdin/stdout 适配为 SSH raw stream。
@@ -231,7 +236,7 @@ no unexplained material regression
 - [ ] `PRODUCTION_CHECKLIST.md` 增加 ProxyCommand 安全验收。
 - [ ] v2 example config 增加 Direct 和 Proxy 两种示例。
 - [ ] Release package 包含最新 Schema / example / docs。
-- [ ] `scripts/validate_contracts.py` 覆盖 ProxyCommand schema。
+- [x] `scripts/validate_contracts.py` 自动覆盖新增 ProxyCommand valid/invalid fixtures。
 - [ ] `scripts/rc_check.sh` 覆盖新增非-live contract/tests。
 
 ## 9. Final Gate
@@ -259,8 +264,9 @@ GitHub Actions Billing blocker 仍需解除，但即使 Billing 恢复，也必�
 M7 design                         DONE
 ADR                               DONE (0012)
 config target contract            DONE
-machine schema                    TODO
-runtime config                    TODO
+machine schema                    DONE
+runtime config                    DONE
+config contract fixtures          DONE
 stream abstraction                TODO
 proxy connector                   TODO
 lifecycle/security                TODO
