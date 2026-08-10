@@ -46,7 +46,7 @@ impl AsyncWrite for ProxyCommandStream {
     }
 }
 
-pub(crate) async fn connect_proxy_command(
+pub(crate) fn connect_proxy_command(
     connection: &SshConnectionConfig,
 ) -> io::Result<ProxyCommandStream> {
     let proxy = connection.proxy.as_ref().ok_or_else(|| {
