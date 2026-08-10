@@ -44,6 +44,7 @@ for path in \
   scripts/upgrade.sh \
   scripts/rollback.sh \
   scripts/healthcheck.sh \
+  scripts/m7_wsl_acceptance.py \
   docs/INSTALL.md \
   docs/OPERATIONS.md \
   docs/PRODUCTION_CHECKLIST.md \
@@ -57,6 +58,7 @@ for path in \
   docs/M7_PROXY_RESTART_GATE_V2.md \
   docs/M7_PROXY_GENERATION_GATE_V2.md \
   docs/M7_PROXY_PERFORMANCE_GATE_V2.md \
+  docs/M7_WSL_ACCEPTANCE_V2.md \
   docs/M6_PERFORMANCE_BASELINE_V2.md \
   docs/M6_FINAL_BASELINE_V2.md \
   docs/RELEASE_READINESS_V2.md \
@@ -72,7 +74,8 @@ for path in \
   scripts/uninstall.sh \
   scripts/upgrade.sh \
   scripts/rollback.sh \
-  scripts/healthcheck.sh; do
+  scripts/healthcheck.sh \
+  scripts/m7_wsl_acceptance.py; do
   [[ -x "${root}/${path}" ]] || die "expected executable package entry: ${path}"
 done
 
@@ -101,13 +104,22 @@ for connection in proxy_connections:
     proxy = connection["proxy"]
     if not proxy.get("program"):
         raise SystemExit("ProxyCommand example program must be non-empty")
-    for argument in proxy.get("args", []):
+    args = proxy.get("args", [])
+    if "{host}" not in args or "{port}" not in args:
+        raise SystemExit("ProxyCommand WSL example must contain {host} and {port}")
+    for argument in args:
         if "{" in argument or "}" in argument:
             if argument not in {"{host}", "{port}"}:
                 raise SystemExit("ProxyCommand example contains an unsupported placeholder")
 if "ProxyCommandConfig" not in schema.get("$defs", {}):
     raise SystemExit("packaged v2 schema is missing ProxyCommandConfig")
 PY
+
+python3 "${root}/scripts/m7_wsl_acceptance.py" \
+  --validate-config-only \
+  --config "${root}/examples/log-query-mcp.v2.remote.json" \
+  --source-id inventory-remote-via-host >/dev/null || \
+  die "packaged M7 WSL acceptance client failed static config validation"
 
 version="$(awk -F= '$1 == "version" {print $2}' "${root}/BUILDINFO")"
 [[ -n "${version}" ]] || die "BUILDINFO does not contain version"
