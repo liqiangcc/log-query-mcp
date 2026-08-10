@@ -165,6 +165,8 @@ def verify_http(value: dict[str, Any]) -> None:
 
 
 def verify_pair(stdio: dict[str, Any], http: dict[str, Any]) -> None:
+    reject_sensitive_keys(stdio)
+    reject_sensitive_keys(http)
     verify_stdio(stdio)
     verify_http(http)
     pairs = (
