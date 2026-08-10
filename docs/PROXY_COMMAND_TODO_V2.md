@@ -1,6 +1,6 @@
 # Log Query MCP v2 M7 ProxyCommand 实施 TODO
 
-> 状态：Core + fault + mixed-query + restart + generation + auth + sync harness implemented / CI & live validation blocked  
+> 状态：Core + functional + performance harness implemented / CI & live validation blocked  
 > 日期：2026-08-10  
 > 设计：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
 > 实现基线：[`M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md`](./M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md)  
@@ -9,6 +9,7 @@
 > Generation Gate：[`M7_PROXY_GENERATION_GATE_V2.md`](./M7_PROXY_GENERATION_GATE_V2.md)  
 > Auth Gate：[`M7_PROXY_AUTH_GATE_V2.md`](./M7_PROXY_AUTH_GATE_V2.md)  
 > Sync Gate：[`M7_PROXY_SYNC_GATE_V2.md`](./M7_PROXY_SYNC_GATE_V2.md)  
+> Performance Gate：[`M7_PROXY_PERFORMANCE_GATE_V2.md`](./M7_PROXY_PERFORMANCE_GATE_V2.md)  
 > ADR：[`adr/0012-use-proxy-command-as-ssh-stream-transport.md`](./adr/0012-use-proxy-command-as-ssh-stream-transport.md)  
 > Draft PR：#25
 
@@ -53,8 +54,7 @@
 
 ## 4. M7-3 Lifecycle / Failure Classification — IMPLEMENTED / EVIDENCE BLOCKED
 
-- [x] `ProxyCommandNotFound` / `ProxyCommandPermissionDenied` / `ProxyCommandStartFailed`。
-- [x] `ProxyCommandStreamFailed` / `ProxyCommandTimeout`。
+- [x] stable ProxyCommand startup / stream / timeout classifications。
 - [x] wrong host key 保留 `HostKeyVerificationFailed`。
 - [x] auth failure 保留 `AuthenticationFailed`。
 - [x] timeout/cancellation PID cleanup + semaphore release harness。
@@ -64,47 +64,25 @@
 - [x] workflow-level orphan helper assertion。
 - [ ] actual PASS evidence — **BLOCKED by Billing**。
 
-## 5. M7-4 Success / Failure / Restart / Generation / Auth / Sync Gates
+## 5. M7-4 Functional Gates — HARNESS IMPLEMENTED / EXECUTION BLOCKED
 
-### Success Live Gate
+### Success / Auth / Sync
 
 - [x] real OpenSSH + `/usr/bin/nc {host} {port}`。
 - [x] password auth / strict known_hosts / wrong-host-key / bounded SFTP read harness。
-- [x] Remote Query through Cache — mixed-query harness implemented。
-- [x] unencrypted private key auth — dedicated Auth gate implemented。
-- [x] encrypted private key + passphrase — dedicated Auth gate implemented。
-- [x] full / tail / from_now sync — dedicated Sync gate implemented。
-- [x] incremental append / rotation / truncate — dedicated Sync gate implemented。
+- [x] unencrypted private key auth。
+- [x] encrypted private key + passphrase。
+- [x] full / tail / from_now sync。
+- [x] incremental append / rotation / truncate。
 - [ ] actual PASS evidence — **BLOCKED by Billing**。
 
-### Proxy Key Authentication Gate — HARNESS IMPLEMENTED / EXECUTION BLOCKED
+独立 gates：
 
-独立 gate：`.github/workflows/m7-proxy-auth.yml`
-
-- [x] 无口令 Ed25519 private key。
-- [x] encrypted Ed25519 private key + `passphrase_secret_ref`。
-- [x] `PasswordAuthentication no` / `PubkeyAuthentication yes` fixture。
-- [x] strict known_hosts 保持在 SSH 层。
-- [x] 两种 key auth 都执行 SFTP `stat` + `read_range`。
-- [x] passphrase 不进入 ProxyCommand argv/stdin/stderr。
-- [ ] Auth gate actual PASS — **BLOCKED by Billing**。
-
-`M7 Proxy Auth` candidate `9abb48c20801ffb0fce63ada609716652f37d88d` 的 run `31378855432` 中，job `proxy-auth-live` 为 `steps=null`。
-
-### Proxy Sync Semantics Gate — HARNESS IMPLEMENTED / EXECUTION BLOCKED
-
-独立 gate：`.github/workflows/m7-proxy-sync.yml`
-
-- [x] `full` bootstrap → `InitialBootstrap`。
-- [x] incremental append → same generation。
-- [x] `tail(bytes)` coverage + later append。
-- [x] `from_now` excludes history + later append。
-- [x] truncate → `RemoteTruncated` new generation。
-- [x] same-path/same-size replacement → `ContinuityMismatch` new generation。
-- [x] cache payload/content assertions。
-- [ ] Sync gate actual PASS — **BLOCKED by Billing**。
-
-`M7 Proxy Sync` candidate `9abb48c20801ffb0fce63ada609716652f37d88d` 的 run `31378855371` 中，job `proxy-sync-live` 为 `steps=null`。
+```text
+M7 ProxyCommand
+M7 Proxy Auth
+M7 Proxy Sync
+```
 
 ### Failure Matrix
 
@@ -116,43 +94,32 @@
 - [x] stalled Proxy + active Direct isolation。
 - [x] workflow orphan-process assertion。
 
-### Restart / Stale-Cache Gate — HARNESS IMPLEMENTED / EXECUTION BLOCKED
+### Restart / Stale Cache
 
-独立 gate：`.github/workflows/m7-proxy-restart.yml`
+- [x] bootstrap through ProxyCommand。
+- [x] sshd outage → `REMOTE_UNAVAILABLE`。
+- [x] `allow_stale_on_error=false` 不返回 stale success。
+- [x] 保留最后有效 generation 用于恢复。
+- [x] restart + append resync / generation advance。
+- [ ] actual PASS evidence — **BLOCKED by Billing**。
 
-- [x] Phase 1：通过 ProxyCommand bootstrap cache。
-- [x] Phase 2：停止 sshd 后 on-query refresh 显式 `REMOTE_UNAVAILABLE`。
-- [x] Phase 2：`allow_stale_on_error=false` 不把最后有效 cache 作为成功查询结果返回。
-- [x] Phase 2：最后有效 cache generation 保留用于恢复。
-- [x] Phase 3：重启 sshd 后 ProxyCommand reconnect。
-- [x] Phase 3：追加内容重新同步并推进 cache generation。
-- [ ] restart/stale-cache gate actual PASS — **BLOCKED by Billing**。
+### Cursor / MatchRef / Generation
 
-### Cursor / MatchRef Generation Gate — HARNESS IMPLEMENTED / EXECUTION BLOCKED
-
-独立 gate：`.github/workflows/m7-proxy-generation.yml`
-
-- [x] Proxy source A 首页产生 cursor。
-- [x] cursor 创建后远端 append。
-- [x] 旧 cursor 第二页仍读取首次 query 的 frozen snapshot，不看到 append 后内容。
-- [x] fresh query 看到 append 后的新 generation。
-- [x] Source A / Source B 分别生成独立 match_ref。
-- [x] Source A replacement 后 fresh query 进入 replacement generation。
-- [x] existing Source A match_ref 仍读取 replacement 前 pinned generation。
-- [x] Source B match_ref 保持 Source B source/file/generation，不串到 Source A。
-- [x] 暂时移走 known_hosts 后 existing match_ref context 仍 cache-only 可读。
-- [ ] generation-consistency gate actual PASS — **BLOCKED by Billing**。
+- [x] old cursor 保持 frozen snapshot。
+- [x] fresh query 看到新 generation。
+- [x] Source A / B match_ref 不串 source/file。
+- [x] Source A replacement 后 old match_ref 保持 pinned old generation。
+- [x] known_hosts 不可用时 existing match_ref context 仍 cache-only 可读。
+- [ ] actual PASS evidence — **BLOCKED by Billing**。
 
 ## 6. M7-5 Mixed Transport / Query — HARNESS IMPLEMENTED / EXECUTION BLOCKED
 
-独立 gate：`.github/workflows/m7-mixed-query.yml`
-
 - [x] transport-level Direct + stalled Proxy isolation。
 - [x] Direct/Proxy shared global SSH semaphore。
-- [x] `Local + Direct + Proxy` SourceRegistry / StatefulQueryService mixed query。
-- [x] 一个 failed Proxy remote 显式 `REMOTE_UNAVAILABLE`。
+- [x] `Local + Direct + Proxy` mixed query。
+- [x] failed Proxy 显式 `REMOTE_UNAVAILABLE`。
 - [x] failed Proxy 后 Local + Direct + healthy Proxy 仍可继续 query。
-- [x] cursor/match_ref generation consistency through Proxy source — dedicated harness implemented。
+- [x] cursor/match_ref generation consistency through Proxy source。
 - [ ] actual PASS evidence — **BLOCKED by Billing**。
 
 ## 7. WSL Acceptance
@@ -164,17 +131,26 @@
 - [ ] direct path 确认不可用。
 - [ ] child cleanup PASS。
 
-## 8. M7-6 Performance / Regression
+## 8. M7-6 Performance / Regression — HARNESS IMPLEMENTED / EXECUTION BLOCKED
 
-- [ ] Direct connection setup regression。
-- [ ] ProxyCommand setup latency。
-- [ ] 100 MiB full bootstrap。
-- [ ] 1 GiB full bootstrap。
-- [ ] 10 GiB logical tail。
-- [ ] incremental append bounded transfer。
-- [ ] Direct + Proxy concurrency。
-- [ ] 300 range reads regression。
-- [ ] no deadlock / process leak / unbounded buffering。
+独立 gate：`.github/workflows/m7-proxy-performance.yml`
+
+- [x] Direct 5-session connection setup measurement harness。
+- [x] ProxyCommand 5-session setup latency measurement harness。
+- [x] 100 MiB full：Direct + Proxy paired profile。
+- [x] 1 GiB full：Direct + Proxy paired profile。
+- [x] 10 GiB logical tail(64 MiB)：Direct + Proxy paired profile。
+- [x] unchanged continuity probe <= 64 KiB assertion。
+- [x] incremental append bounded transfer assertion。
+- [x] cache-local scan = 0 remote bytes assertion。
+- [x] 2 Direct + 2 Proxy concurrency harness。
+- [x] ProxyCommand 300 range reads regression harness。
+- [x] normal-path orphan `/usr/bin/nc` assertions after benchmark phases。
+- [x] metrics + `/usr/bin/time -v` + environment + disk evidence artifact wiring。
+- [ ] actual performance metrics — **BLOCKED by Billing**。
+- [ ] no unexplained performance/resource regression — **NO CURRENT EVIDENCE**。
+
+`M7 Proxy Performance` candidate `8d116de693f2ee05381b429944e4f5033533c150` 的 run `31380836168` 中，job `proxy-performance` 为 `steps=null`。
 
 ## 9. M7-7 Documentation / Release
 
@@ -201,8 +177,8 @@
 - [ ] M7 Proxy restart/stale-cache gate PASS。
 - [ ] M7 Proxy generation-consistency gate PASS。
 - [ ] M7 mixed-query gate PASS。
+- [ ] M7 Proxy performance gate PASS。
 - [ ] WSL acceptance PASS / traceable target evidence。
-- [ ] Performance PASS。
 - [ ] Release/package/lifecycle PASS。
 - [ ] no unexplained critical failure。
 
@@ -218,16 +194,15 @@ stream abstraction                IMPLEMENTED / CI BLOCKED
 ProxyCommand connector            IMPLEMENTED / CI BLOCKED
 child cleanup + stderr            IMPLEMENTED / CI BLOCKED
 failure classification            IMPLEMENTED / CI BLOCKED
-success live harness              IMPLEMENTED / EXECUTION BLOCKED
+functional live harnesses         IMPLEMENTED / EXECUTION BLOCKED
 private/encrypted key harness     IMPLEMENTED / EXECUTION BLOCKED
 sync-mode semantics harness       IMPLEMENTED / EXECUTION BLOCKED
 failure matrix harness            EXPANDED / EXECUTION BLOCKED
 restart/stale-cache harness       IMPLEMENTED / EXECUTION BLOCKED
 generation-consistency harness    IMPLEMENTED / EXECUTION BLOCKED
-Direct+Proxy transport isolation  IMPLEMENTED / EXECUTION BLOCKED
-full mixed query                  IMPLEMENTED / EXECUTION BLOCKED
+Direct+Proxy isolation / mixed    IMPLEMENTED / EXECUTION BLOCKED
+performance regression harness    IMPLEMENTED / EXECUTION BLOCKED
 WSL acceptance                    TODO
-performance regression            TODO
 release docs/final gates          TODO
 RC ready                          NO
 ```
