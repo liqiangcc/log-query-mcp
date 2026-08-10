@@ -1,3 +1,4 @@
+mod proxy_command;
 mod ssh;
 
 pub use ssh::{
