@@ -1,6 +1,6 @@
 # Log Query MCP v2 M7 ProxyCommand 实施 TODO
 
-> 状态：Core + failure classification + partial fault harness implemented / CI & live validation blocked  
+> 状态：Core + expanded fault harness implemented / CI & live validation blocked  
 > 日期：2026-08-10  
 > 设计：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
 > 实现基线：[`M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md`](./M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md)  
@@ -63,11 +63,13 @@
 
 ### Lifecycle harness
 
-- [x] timeout 路径 PID cleanup assertion 已实现。
-- [x] cancellation 路径 PID cleanup assertion 已实现。
-- [x] cancellation 后 global SSH semaphore release assertion 已实现。
-- [x] stderr flood >64 KiB fixture 已实现。
-- [x] workflow-level orphan helper assertion 已实现。
+- [x] timeout PID cleanup assertion。
+- [x] cancellation PID cleanup assertion。
+- [x] cancellation 后 global SSH semaphore release assertion。
+- [x] stderr flood >64 KiB fixture。
+- [x] authentication failure 后 tracked proxy child cleanup assertion。
+- [x] active-session proxy crash 后 SFTP fail-closed / Broken latch assertion。
+- [x] workflow-level orphan helper assertion。
 - [ ] 上述测试真实 PASS evidence — **BLOCKED by Billing**。
 
 ## 5. M7-4 Success Live Gate — HARNESS IMPLEMENTED / EXECUTION BLOCKED
@@ -90,7 +92,7 @@
 - [ ] incremental append / rotation / truncate。
 - [ ] Remote Query through cache。
 
-## 6. M7-4 Failure Matrix — PARTIAL HARNESS IMPLEMENTED / EXECUTION BLOCKED
+## 6. M7-4 Failure Matrix — EXPANDED HARNESS IMPLEMENTED / EXECUTION BLOCKED
 
 独立 gate：`.github/workflows/m7-proxy-command-failures.yml`
 
@@ -103,24 +105,27 @@
 - [x] cancellation。
 - [x] cancellation child reap。
 - [x] cancellation semaphore release。
+- [x] wrong password through ProxyCommand 保留 `AuthenticationFailed`。
+- [x] auth failure 后 proxy child reap。
+- [x] active ProxyCommand crash during established SSH/SFTP session。
+- [x] active network disconnect/SFTP operation failure through ProxyCommand。
+- [x] broken reader subsequent operation returns `Broken`。
+- [x] stalled ProxyCommand 与 active Direct SSH transport isolation。
 - [x] workflow final orphan-process assertion。
 
-待补：
+仍待补：
 
-- [ ] wrong password through ProxyCommand。
-- [ ] active ProxyCommand crash during SFTP session。
-- [ ] network disconnect through ProxyCommand。
-- [ ] SFTP operation failure through ProxyCommand。
 - [ ] server restart through ProxyCommand。
-- [ ] silent stale-cache fallback rejection evidence。
+- [ ] silent stale-cache fallback rejection evidence at Sync/Backend layer。
+- [ ] full multi-remote query isolation above transport layer。
 
-当前 `M7 ProxyCommand Failures` workflow 已被 GitHub 正确识别。候选 `efd07da701bc3e18a89c3204a797d32e01229982` 的 PR run `31372138200` job `proxy-command-failures` 为 `steps=null`，说明 runner 未启动。
+所有当前 failure harness 的真实 PASS evidence 仍被 Billing blocker 阻塞。
 
 ## 7. M7-5 Mixed Transport / WSL Acceptance
 
 ### Mixed Transport
 
-至少覆盖：
+目标最终覆盖：
 
 ```text
 Local Source
@@ -129,10 +134,12 @@ ProxyCommand Remote B
 ProxyCommand Remote C
 ```
 
-- [ ] mixed query。
-- [ ] Proxy server failure isolation。
-- [ ] Direct/Proxy 共用 global SSH semaphore。
+- [x] Transport-level Direct + stalled Proxy isolation harness 已实现。
+- [x] Direct/Proxy 使用同一 global SSH semaphore 的 harness 已实现。
+- [ ] full mixed query through SourceRegistry/Query Engine。
+- [ ] 一个 Proxy remote failure 不影响其他 Remote/Local query。
 - [ ] cursor/match_ref generation consistency。
+- [ ] actual PASS evidence — **BLOCKED by Billing**。
 
 ### WSL Acceptance
 
@@ -202,8 +209,9 @@ child cleanup baseline            IMPLEMENTED / CI BLOCKED
 bounded stderr                    IMPLEMENTED / CI BLOCKED
 failure classification            IMPLEMENTED / CI BLOCKED
 success live harness              IMPLEMENTED / EXECUTION BLOCKED
-failure matrix harness            PARTIAL / EXECUTION BLOCKED
-mixed Direct+Proxy                TODO
+failure matrix harness            EXPANDED / EXECUTION BLOCKED
+Direct+Proxy transport isolation  IMPLEMENTED / EXECUTION BLOCKED
+full mixed query                  TODO
 WSL acceptance                    TODO
 performance regression            TODO
 release docs/final gates          TODO
