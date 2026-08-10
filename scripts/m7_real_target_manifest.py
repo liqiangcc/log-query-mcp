@@ -17,6 +17,7 @@ import hashlib
 import json
 import re
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -185,6 +186,79 @@ def finish_pass(args: argparse.Namespace) -> None:
     write_manifest(path, value)
 
 
+def expect_manifest_error(action: Any, message: str) -> None:
+    try:
+        action()
+    except ManifestError:
+        return
+    raise ManifestError(message)
+
+
+def self_test() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        config = root / "config.json"
+        stdio_bin = root / "stdio"
+        http_bin = root / "http"
+        buildinfo = root / "BUILDINFO"
+        config.write_text('{"version":2}\n', encoding="utf-8")
+        stdio_bin.write_bytes(b"stdio-candidate")
+        http_bin.write_bytes(b"http-candidate")
+        buildinfo.write_text(
+            "version=0.1.0\n"
+            "target=x86_64-unknown-linux-gnu\n"
+            f"git_commit={'c' * 40}\n"
+            "git_ref=self-test\n"
+            "built_at_utc=2026-08-10T00:00:00Z\n"
+            "rustc=rustc-self-test\n",
+            encoding="utf-8",
+        )
+
+        def start_args(path: Path) -> argparse.Namespace:
+            return argparse.Namespace(
+                manifest=str(path),
+                config=str(config),
+                source_id="proxy-source",
+                keyword="synthetic-marker-plaintext",
+                buildinfo=str(buildinfo),
+                stdio_bin=str(stdio_bin),
+                http_bin=str(http_bin),
+            )
+
+        pass_manifest = root / "pass.json"
+        start(start_args(pass_manifest))
+        for gate in VALID_GATES:
+            gate_pass(argparse.Namespace(manifest=str(pass_manifest), gate=gate))
+        finish_pass(argparse.Namespace(manifest=str(pass_manifest)))
+        passed = load_manifest(pass_manifest)
+        if passed.get("status") != "PASS" or passed.get("completed_gates") != list(VALID_GATES):
+            raise ManifestError("self-test PASS lifecycle failed")
+        serialized = pass_manifest.read_text(encoding="utf-8")
+        if "synthetic-marker-plaintext" in serialized or '"keyword"' in serialized:
+            raise ManifestError("self-test detected marker plaintext in run manifest")
+
+        fail_manifest = root / "fail.json"
+        start(start_args(fail_manifest))
+        gate_pass(argparse.Namespace(manifest=str(fail_manifest), gate="A"))
+        expect_manifest_error(
+            lambda: gate_pass(argparse.Namespace(manifest=str(fail_manifest), gate="C")),
+            "self-test failed to reject out-of-order gate PASS",
+        )
+        expect_manifest_error(
+            lambda: fail(argparse.Namespace(manifest=str(fail_manifest), gate="B", exit_code=0)),
+            "self-test failed to reject zero failure exit code",
+        )
+        fail(argparse.Namespace(manifest=str(fail_manifest), gate="B", exit_code=17))
+        failed = load_manifest(fail_manifest)
+        if (
+            failed.get("status") != "FAIL"
+            or failed.get("completed_gates") != ["A"]
+            or failed.get("failed_gate") != "B"
+            or failed.get("gate_exit_code") != 17
+        ):
+            raise ManifestError("self-test FAIL lifecycle failed")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Maintain redacted M7 real-target run manifest")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -210,6 +284,8 @@ def parse_args() -> argparse.Namespace:
     pass_parser = sub.add_parser("pass")
     pass_parser.add_argument("--manifest", required=True)
 
+    sub.add_parser("self-test")
+
     return parser.parse_args()
 
 
@@ -224,6 +300,9 @@ def main() -> int:
             fail(args)
         elif args.command == "pass":
             finish_pass(args)
+        elif args.command == "self-test":
+            self_test()
+            print("m7_real_target_manifest: SELF_TEST_PASS (synthetic only; not real-target evidence)")
         else:
             raise ManifestError("unknown command")
         return 0
