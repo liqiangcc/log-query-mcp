@@ -94,6 +94,7 @@ for script in install.sh uninstall.sh upgrade.sh rollback.sh healthcheck.sh; do
 done
 [[ -f scripts/m7_wsl_acceptance.py ]] || die "missing M7 WSL acceptance client"
 [[ -f scripts/m7_wsl_acceptance.sh ]] || die "missing M7 WSL acceptance service-identity wrapper"
+[[ -f scripts/m7_wsl_http_acceptance.py ]] || die "missing M7 WSL systemd HTTP acceptance client"
 
 rm -rf "${out_dir:?}/${package_name}"
 mkdir -p "${out_dir}/${package_name}/bin"
@@ -109,6 +110,7 @@ for script in install.sh uninstall.sh upgrade.sh rollback.sh healthcheck.sh; do
 done
 install -D -m 0755 scripts/m7_wsl_acceptance.py "${out_dir}/${package_name}/scripts/m7_wsl_acceptance.py"
 install -D -m 0755 scripts/m7_wsl_acceptance.sh "${out_dir}/${package_name}/scripts/m7_wsl_acceptance.sh"
+install -D -m 0755 scripts/m7_wsl_http_acceptance.py "${out_dir}/${package_name}/scripts/m7_wsl_http_acceptance.py"
 install -D -m 0644 README.md "${out_dir}/${package_name}/README.md"
 
 for doc in \
