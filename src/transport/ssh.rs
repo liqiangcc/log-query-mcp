@@ -23,7 +23,7 @@ use tokio::{
 
 use crate::{AppConfigV2, EnvSecretResolver, SecretResolver, SshAuthType, SshConnectionConfig};
 
-use super::proxy_command::connect_proxy_command;
+use super::proxy_command::{ProxyCommandConnectError, connect_proxy_command};
 
 pub const MAX_READ_RANGE_BYTES: usize = 4 * 1024 * 1024;
 const S_IFMT: u32 = 0o170000;
@@ -46,8 +46,7 @@ impl SshStreamConnector {
         connection: &SshConnectionConfig,
     ) -> Result<BoxedSshStream, SshTransportError> {
         if connection.proxy.is_some() {
-            let stream = connect_proxy_command(connection)
-                .map_err(|_| SshTransportError::ConnectFailed)?;
+            let stream = connect_proxy_command(connection).map_err(map_proxy_connect_error)?;
             return Ok(Box::new(stream));
         }
         DirectConnector.connect(connection).await
@@ -192,6 +191,7 @@ impl SshReadTransport {
     ) -> Result<Self, SshTransportError> {
         let connect_timeout = Duration::from_millis(connection.connect_timeout_millis);
         let operation_timeout = Duration::from_millis(connection.operation_timeout_millis);
+        let using_proxy = connection.proxy.is_some();
         let ssh_config = client::Config {
             inactivity_timeout: Some(operation_timeout),
             keepalive_interval: connection.keepalive_seconds.map(Duration::from_secs),
@@ -209,10 +209,16 @@ impl SshReadTransport {
             let stream = connector.connect(&connection).await?;
             client::connect_stream(Arc::new(ssh_config), stream, handler)
                 .await
-                .map_err(map_connect_error)
+                .map_err(|error| map_connect_error(error, using_proxy))
         })
         .await
-        .map_err(|_| SshTransportError::ConnectTimeout)??;
+        .map_err(|_| {
+            if using_proxy {
+                SshTransportError::ProxyCommandTimeout
+            } else {
+                SshTransportError::ConnectTimeout
+            }
+        })??;
 
         authenticate(
             &mut session,
@@ -465,6 +471,16 @@ pub enum SshTransportError {
     ConnectTimeout,
     #[error("SSH connection failed")]
     ConnectFailed,
+    #[error("ProxyCommand program was not found")]
+    ProxyCommandNotFound,
+    #[error("ProxyCommand program is not executable")]
+    ProxyCommandPermissionDenied,
+    #[error("ProxyCommand could not be started")]
+    ProxyCommandStartFailed,
+    #[error("ProxyCommand SSH byte stream failed")]
+    ProxyCommandStreamFailed,
+    #[error("ProxyCommand SSH connection timed out")]
+    ProxyCommandTimeout,
     #[error("SSH host key verification failed")]
     HostKeyVerificationFailed,
     #[error("SSH authentication failed")]
@@ -487,9 +503,25 @@ pub enum SshTransportError {
     InvalidReadRange,
 }
 
-fn map_connect_error(error: SshHandlerError) -> SshTransportError {
+fn map_proxy_connect_error(error: ProxyCommandConnectError) -> SshTransportError {
+    match error {
+        ProxyCommandConnectError::NotConfigured | ProxyCommandConnectError::InvalidArgument => {
+            SshTransportError::InvalidConfiguration
+        }
+        ProxyCommandConnectError::ProgramNotFound => SshTransportError::ProxyCommandNotFound,
+        ProxyCommandConnectError::PermissionDenied => {
+            SshTransportError::ProxyCommandPermissionDenied
+        }
+        ProxyCommandConnectError::SpawnFailed | ProxyCommandConnectError::PipeUnavailable => {
+            SshTransportError::ProxyCommandStartFailed
+        }
+    }
+}
+
+fn map_connect_error(error: SshHandlerError, using_proxy: bool) -> SshTransportError {
     match error {
         SshHandlerError::HostKeyVerificationFailed => SshTransportError::HostKeyVerificationFailed,
+        SshHandlerError::Ssh(_) if using_proxy => SshTransportError::ProxyCommandStreamFailed,
         SshHandlerError::Ssh(_) => SshTransportError::ConnectFailed,
     }
 }
@@ -572,5 +604,25 @@ mod tests {
     fn sftp_timeout_rounds_up_to_seconds() {
         assert_eq!(sftp_timeout_seconds(Duration::from_millis(100)), 1);
         assert_eq!(sftp_timeout_seconds(Duration::from_millis(1_001)), 2);
+    }
+
+    #[test]
+    fn maps_proxy_startup_errors_to_stable_transport_categories() {
+        assert_eq!(
+            map_proxy_connect_error(ProxyCommandConnectError::ProgramNotFound),
+            SshTransportError::ProxyCommandNotFound
+        );
+        assert_eq!(
+            map_proxy_connect_error(ProxyCommandConnectError::PermissionDenied),
+            SshTransportError::ProxyCommandPermissionDenied
+        );
+        assert_eq!(
+            map_proxy_connect_error(ProxyCommandConnectError::SpawnFailed),
+            SshTransportError::ProxyCommandStartFailed
+        );
+        assert_eq!(
+            map_proxy_connect_error(ProxyCommandConnectError::InvalidArgument),
+            SshTransportError::InvalidConfiguration
+        );
     }
 }
