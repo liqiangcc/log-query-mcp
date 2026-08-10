@@ -49,8 +49,6 @@
 
 ## 4. M7-3 Lifecycle / Failure Classification — IMPLEMENTED / EVIDENCE BLOCKED
 
-### Stable internal classification
-
 - [x] `ProxyCommandNotFound`。
 - [x] `ProxyCommandPermissionDenied`。
 - [x] `ProxyCommandStartFailed`。
@@ -59,73 +57,59 @@
 - [x] wrong host key 保留 `HostKeyVerificationFailed`。
 - [x] auth failure 保留 `AuthenticationFailed`。
 - [x] Direct errors 不改为 ProxyCommand errors。
-- [x] 不向 AI 暴露 raw OS error / raw stderr。
-
-### Lifecycle harness
-
-- [x] timeout PID cleanup assertion。
-- [x] cancellation PID cleanup assertion。
-- [x] cancellation 后 global SSH semaphore release assertion。
-- [x] stderr flood >64 KiB fixture。
-- [x] authentication failure 后 tracked proxy child cleanup assertion。
-- [x] active-session proxy crash 后 SFTP fail-closed / Broken latch assertion。
+- [x] timeout/cancellation PID cleanup harness。
+- [x] cancellation semaphore release harness。
+- [x] stderr flood >64 KiB harness。
+- [x] authentication failure child cleanup harness。
+- [x] active-session crash → SFTP failure → Broken latch harness。
 - [x] workflow-level orphan helper assertion。
-- [ ] 上述测试真实 PASS evidence — **BLOCKED by Billing**。
+- [ ] actual PASS evidence — **BLOCKED by Billing**。
 
 ## 5. M7-4 Success Live Gate — HARNESS IMPLEMENTED / EXECUTION BLOCKED
 
-独立 gate：`.github/workflows/m7-proxy-command.yml`
-
 - [x] real OpenSSH fixture。
 - [x] `/usr/bin/nc {host} {port}` stdio ProxyCommand。
-- [x] password auth test harness。
+- [x] password auth harness。
 - [x] strict known_hosts success harness。
 - [x] wrong host key fail-closed harness。
 - [x] SFTP bounded range-read harness。
-- [ ] actual PASS evidence — **BLOCKED by Billing**。
-
-后续成功链路仍需扩展：
-
 - [ ] private key auth。
 - [ ] encrypted private key + passphrase。
 - [ ] full/tail/from_now sync。
 - [ ] incremental append / rotation / truncate。
 - [ ] Remote Query through cache。
+- [ ] actual PASS evidence — **BLOCKED by Billing**。
 
 ## 6. M7-4 Failure Matrix — EXPANDED HARNESS IMPLEMENTED / EXECUTION BLOCKED
 
 独立 gate：`.github/workflows/m7-proxy-command-failures.yml`
 
-已实现 harness：
-
 - [x] program not found。
-- [x] permission denied / non-executable program。
+- [x] permission denied。
 - [x] early exit / stdout EOF。
-- [x] stderr flood bounded + connect timeout。
-- [x] cancellation。
-- [x] cancellation child reap。
-- [x] cancellation semaphore release。
-- [x] wrong password through ProxyCommand 保留 `AuthenticationFailed`。
-- [x] auth failure 后 proxy child reap。
-- [x] active ProxyCommand crash during established SSH/SFTP session。
-- [x] active network disconnect/SFTP operation failure through ProxyCommand。
-- [x] broken reader subsequent operation returns `Broken`。
-- [x] stalled ProxyCommand 与 active Direct SSH transport isolation。
-- [x] workflow final orphan-process assertion。
+- [x] stderr flood + connect timeout。
+- [x] cancellation / child reap / semaphore release。
+- [x] wrong password through ProxyCommand → `AuthenticationFailed`。
+- [x] auth failure proxy child reap。
+- [x] active ProxyCommand crash after SSH/SFTP establishment。
+- [x] active network disconnect / SFTP failure。
+- [x] reader fail-closed Broken latch。
+- [x] stalled Proxy + active Direct isolation。
+- [x] workflow orphan-process assertion。
 
 仍待补：
 
 - [ ] server restart through ProxyCommand。
-- [ ] silent stale-cache fallback rejection evidence at Sync/Backend layer。
-- [ ] full multi-remote query isolation above transport layer。
+- [ ] stale-cache fallback rejection at Sync/Backend layer。
+- [ ] multi-remote query isolation above transport layer。
 
-所有当前 failure harness 的真实 PASS evidence 仍被 Billing blocker 阻塞。
+expanded harness candidate `dd3310b7250824bbfc259c80bc16f30e2d2d52fd` 的 `M7 ProxyCommand Failures` run `31373870218` job `proxy-command-failures` 为 `steps=null`，runner 未启动。
 
 ## 7. M7-5 Mixed Transport / WSL Acceptance
 
 ### Mixed Transport
 
-目标最终覆盖：
+最终目标：
 
 ```text
 Local Source
@@ -134,21 +118,14 @@ ProxyCommand Remote B
 ProxyCommand Remote C
 ```
 
-- [x] Transport-level Direct + stalled Proxy isolation harness 已实现。
-- [x] Direct/Proxy 使用同一 global SSH semaphore 的 harness 已实现。
+- [x] transport-level Direct + stalled Proxy isolation harness。
+- [x] Direct/Proxy shared global SSH semaphore harness。
 - [ ] full mixed query through SourceRegistry/Query Engine。
 - [ ] 一个 Proxy remote failure 不影响其他 Remote/Local query。
 - [ ] cursor/match_ref generation consistency。
 - [ ] actual PASS evidence — **BLOCKED by Billing**。
 
 ### WSL Acceptance
-
-目标：
-
-```text
-WSL direct path unavailable
-Windows host path available
-```
 
 - [ ] WSL `log-query-mcp` → Windows executable ProxyCommand → Remote SSH。
 - [ ] `list_log_sources` PASS。
@@ -173,7 +150,7 @@ Windows host path available
 
 - [ ] README ProxyCommand usage。
 - [ ] INSTALL WSL/helper dependency。
-- [ ] OPERATIONS Proxy process diagnostics/error categories。
+- [ ] OPERATIONS Proxy diagnostics/error categories。
 - [ ] PRODUCTION_CHECKLIST ProxyCommand security acceptance。
 - [ ] v2 example config Direct + Proxy examples。
 - [ ] Release package includes latest Schema/examples/docs。
