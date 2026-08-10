@@ -1,11 +1,12 @@
 # Log Query MCP v2 M7 ProxyCommand 实施 TODO
 
-> 状态：Core + fault + mixed-query + restart harness implemented / CI & live validation blocked  
+> 状态：Core + fault + mixed-query + restart + generation harness implemented / CI & live validation blocked  
 > 日期：2026-08-10  
 > 设计：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
 > 实现基线：[`M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md`](./M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md)  
 > Failure Matrix：[`M7_PROXY_COMMAND_FAILURE_MATRIX_V2.md`](./M7_PROXY_COMMAND_FAILURE_MATRIX_V2.md)  
 > Restart Gate：[`M7_PROXY_RESTART_GATE_V2.md`](./M7_PROXY_RESTART_GATE_V2.md)  
+> Generation Gate：[`M7_PROXY_GENERATION_GATE_V2.md`](./M7_PROXY_GENERATION_GATE_V2.md)  
 > ADR：[`adr/0012-use-proxy-command-as-ssh-stream-transport.md`](./adr/0012-use-proxy-command-as-ssh-stream-transport.md)  
 > Draft PR：#25
 
@@ -61,7 +62,7 @@
 - [x] workflow-level orphan helper assertion。
 - [ ] actual PASS evidence — **BLOCKED by Billing**。
 
-## 5. M7-4 Success / Failure / Restart Gates
+## 5. M7-4 Success / Failure / Restart / Generation Gates
 
 ### Success Live Gate
 
@@ -98,6 +99,23 @@
 
 `M7 Proxy Restart` candidate `c0f9b819dd94190397dde9cd60e89a19ddd7cd50` 的 PR run `31374965163` 中，job `proxy-restart-live` 为 `steps=null`。
 
+### Cursor / MatchRef Generation Gate — HARNESS IMPLEMENTED / EXECUTION BLOCKED
+
+独立 gate：`.github/workflows/m7-proxy-generation.yml`
+
+- [x] Proxy source A 首页产生 cursor。
+- [x] cursor 创建后远端 append。
+- [x] 旧 cursor 第二页仍读取首次 query 的 frozen snapshot，不看到 append 后内容。
+- [x] fresh query 看到 append 后的新 generation。
+- [x] Source A / Source B 分别生成独立 match_ref。
+- [x] Source A replacement 后 fresh query 进入 replacement generation。
+- [x] existing Source A match_ref 仍读取 replacement 前 pinned generation。
+- [x] Source B match_ref 保持 Source B source/file/generation，不串到 Source A。
+- [x] 暂时移走 known_hosts 后 existing match_ref context 仍 cache-only 可读。
+- [ ] generation-consistency gate actual PASS — **BLOCKED by Billing**。
+
+`M7 Proxy Generation` candidate `90c45a56820774208f42c6c198deda253c3016d9` 的 PR run `31378377040` 中，job `proxy-generation-live` 为 `steps=null`。
+
 ## 6. M7-5 Mixed Transport / Query — HARNESS IMPLEMENTED / EXECUTION BLOCKED
 
 独立 gate：`.github/workflows/m7-mixed-query.yml`
@@ -116,7 +134,7 @@ failed ProxyCommand Remote
 - [x] `Local + Direct + Proxy` SourceRegistry / StatefulQueryService mixed query。
 - [x] 一个 failed Proxy remote 显式 `REMOTE_UNAVAILABLE`。
 - [x] failed Proxy 后 Local + Direct + healthy Proxy 仍可继续 query。
-- [ ] cursor/match_ref generation consistency through Proxy source。
+- [x] cursor/match_ref generation consistency through Proxy source — dedicated harness implemented。
 - [ ] actual PASS evidence — **BLOCKED by Billing**。
 
 ## 7. WSL Acceptance
@@ -161,6 +179,7 @@ failed ProxyCommand Remote
 - [ ] M7 ProxyCommand success gate PASS。
 - [ ] M7 ProxyCommand failure gate PASS。
 - [ ] M7 Proxy restart/stale-cache gate PASS。
+- [ ] M7 Proxy generation-consistency gate PASS。
 - [ ] M7 mixed-query gate PASS。
 - [ ] WSL acceptance PASS / traceable target evidence。
 - [ ] Performance PASS。
@@ -181,10 +200,10 @@ child cleanup + stderr            IMPLEMENTED / CI BLOCKED
 failure classification            IMPLEMENTED / CI BLOCKED
 success live harness              IMPLEMENTED / EXECUTION BLOCKED
 failure matrix harness            EXPANDED / EXECUTION BLOCKED
-restart/stale-cache harness        IMPLEMENTED / EXECUTION BLOCKED
+restart/stale-cache harness       IMPLEMENTED / EXECUTION BLOCKED
+generation-consistency harness    IMPLEMENTED / EXECUTION BLOCKED
 Direct+Proxy transport isolation  IMPLEMENTED / EXECUTION BLOCKED
 full mixed query                  IMPLEMENTED / EXECUTION BLOCKED
-cursor/match_ref proxy evidence   TODO
 WSL acceptance                    TODO
 performance regression            TODO
 release docs/final gates          TODO
