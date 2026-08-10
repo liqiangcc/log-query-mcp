@@ -1,0 +1,231 @@
+name: M7 Proxy Performance
+
+on:
+  # Keep the large benchmark off ordinary product pushes. Changes to the benchmark harness itself
+  # produce one evidence run; release candidates can be rerun explicitly with workflow_dispatch.
+  push:
+    branches:
+      - "feat/v2-m1-backend-config"
+    paths:
+      - "tests/m7_proxy_performance_live.rs"
+      - ".github/workflows/m7-proxy-performance.yml"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Benchmark profile"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - 100mb-full
+          - 1gb-full
+          - 10gb-tail
+
+permissions:
+  contents: read
+
+jobs:
+  proxy-performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install benchmark dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server netcat-openbsd time
+          sudo mkdir -p /run/sshd /tmp/log-query-mcp-m7-perf/remote
+          sudo chown -R "$USER":"$(id -gn)" /tmp/log-query-mcp-m7-perf
+          chmod 755 /tmp/log-query-mcp-m7-perf /tmp/log-query-mcp-m7-perf/remote
+          test -x /usr/bin/nc
+
+      - name: Prepare read-only OpenSSH benchmark server
+        run: |
+          sudo useradd -m -s /bin/bash logreader
+          echo 'logreader:test-password' | sudo chpasswd
+
+          sudo ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-m7-perf/ssh_host_ed25519_key
+          sudo tee /tmp/log-query-mcp-m7-perf/sshd_config >/dev/null <<'EOF'
+          Port 2235
+          ListenAddress 127.0.0.1
+          HostKey /tmp/log-query-mcp-m7-perf/ssh_host_ed25519_key
+          PidFile /tmp/log-query-mcp-m7-perf/sshd.pid
+          PasswordAuthentication yes
+          PubkeyAuthentication no
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          StrictModes yes
+          AllowUsers logreader
+          Subsystem sftp internal-sftp
+          LogLevel ERROR
+          EOF
+
+          sudo /usr/sbin/sshd -f /tmp/log-query-mcp-m7-perf/sshd_config -E /tmp/log-query-mcp-m7-perf/sshd.log
+          ssh-keyscan -t ed25519 -p 2235 127.0.0.1 > /tmp/log-query-mcp-m7-perf/known_hosts
+
+      - name: Record benchmark environment
+        run: |
+          {
+            echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "runner_image=${ImageOS:-unknown}"
+            echo "runner_arch=${RUNNER_ARCH:-unknown}"
+            rustc --version
+            cargo --version
+            /usr/bin/nc -h 2>&1 | head -n 2 || true
+            uname -a
+            findmnt -T /tmp
+            df -hT /tmp
+            lscpu
+          } | tee /tmp/log-query-mcp-m7-perf/environment.txt
+
+      - name: Check M7 performance harness
+        run: |
+          cargo fmt --all -- --check
+          cargo check --locked --test m7_proxy_performance_live
+
+      - name: Benchmark Direct vs Proxy setup, range reads, and concurrency
+        env:
+          M7_PERF_SSH_PORT: "2235"
+          M7_PERF_SSH_PASSWORD: test-password
+          M7_PERF_KNOWN_HOSTS: /tmp/log-query-mcp-m7-perf/known_hosts
+          M7_PERF_PROXY_PROGRAM: /usr/bin/nc
+          M7_PERF_REMOTE_DIR: /tmp/log-query-mcp-m7-perf/remote
+          M7_PERF_LOCAL_SMALL_FILE: /tmp/log-query-mcp-m7-perf/remote/transport.log
+          M7_PERF_TRANSPORT_CACHE_ROOT: /tmp/log-query-mcp-m7-perf/transport-cache
+        run: |
+          set -euo pipefail
+          cargo test --release --locked --test m7_proxy_performance_live \
+            transport_setup_range_reads_and_mixed_concurrency \
+            -- --ignored --exact --nocapture \
+            2>&1 | tee /tmp/log-query-mcp-m7-perf/transport-output.log
+          grep 'M7_TRANSPORT_PERF_METRIC' /tmp/log-query-mcp-m7-perf/transport-output.log \
+            | tee /tmp/log-query-mcp-m7-perf/transport-metrics.jsonl
+          sleep 1
+          if ps -eo pid,args | awk '$0 ~ /[n]c 127\.0\.0\.1 2235/ {print; found=1} END {exit found ? 1 : 0}'; then
+            :
+          else
+            echo "orphan ProxyCommand helper detected after transport benchmark" >&2
+            exit 1
+          fi
+
+      - name: Run selected Direct and Proxy large-file profiles
+        env:
+          M7_PERF_SSH_PORT: "2235"
+          M7_PERF_SSH_PASSWORD: test-password
+          M7_PERF_KNOWN_HOSTS: /tmp/log-query-mcp-m7-perf/known_hosts
+          M7_PERF_PROXY_PROGRAM: /usr/bin/nc
+          M7_PERF_LOCAL_FILE: /tmp/log-query-mcp-m7-perf/remote/performance.log
+          M7_PERF_REMOTE_DIR: /tmp/log-query-mcp-m7-perf/remote
+          REQUESTED_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.profile || 'all' }}
+        run: |
+          set -euo pipefail
+
+          assert_no_proxy_helpers() {
+            sleep 1
+            if ps -eo pid,args | awk '$0 ~ /[n]c 127\.0\.0\.1 2235/ {print; found=1} END {exit found ? 1 : 0}'; then
+              :
+            else
+              echo "orphan ProxyCommand helper detected" >&2
+              exit 1
+            fi
+          }
+
+          configure_profile() {
+            local profile="$1"
+            case "$profile" in
+              100mb-full)
+                export M7_PERF_PROFILE="$profile"
+                export M7_PERF_BOOTSTRAP=full
+                export M7_PERF_SIZE_BYTES=104857600
+                export M7_PERF_TAIL_BYTES=0
+                export M7_PERF_APPEND_BYTES=1048576
+                ;;
+              1gb-full)
+                export M7_PERF_PROFILE="$profile"
+                export M7_PERF_BOOTSTRAP=full
+                export M7_PERF_SIZE_BYTES=1073741824
+                export M7_PERF_TAIL_BYTES=0
+                export M7_PERF_APPEND_BYTES=104857600
+                ;;
+              10gb-tail)
+                export M7_PERF_PROFILE="$profile"
+                export M7_PERF_BOOTSTRAP=tail
+                export M7_PERF_SIZE_BYTES=10737418240
+                export M7_PERF_TAIL_BYTES=67108864
+                export M7_PERF_APPEND_BYTES=1048576
+                ;;
+              *)
+                echo "unknown benchmark profile: $profile" >&2
+                exit 2
+                ;;
+            esac
+          }
+
+          run_transport_profile() {
+            local transport="$1"
+            local profile="$2"
+            export M7_PERF_TRANSPORT="$transport"
+            export M7_PERF_CACHE_ROOT="/tmp/log-query-mcp-m7-perf/cache-${profile}-${transport}"
+            rm -rf "$M7_PERF_CACHE_ROOT"
+            rm -f "$M7_PERF_LOCAL_FILE"
+            echo "===== M7 benchmark: $profile / $transport ====="
+            /usr/bin/time -v -o "/tmp/log-query-mcp-m7-perf/${profile}-${transport}-time.txt" \
+              cargo test --release --locked --test m7_proxy_performance_live sync_and_scan_profile \
+                -- --ignored --exact --nocapture \
+              2>&1 | tee "/tmp/log-query-mcp-m7-perf/${profile}-${transport}-output.log"
+            grep 'M7_PERF_METRIC' "/tmp/log-query-mcp-m7-perf/${profile}-${transport}-output.log" \
+              | tee "/tmp/log-query-mcp-m7-perf/${profile}-${transport}-metrics.jsonl"
+            df -hT /tmp | tee "/tmp/log-query-mcp-m7-perf/${profile}-${transport}-disk.txt"
+            assert_no_proxy_helpers
+          }
+
+          run_profile() {
+            local profile="$1"
+            configure_profile "$profile"
+            run_transport_profile direct "$profile"
+            run_transport_profile proxy "$profile"
+          }
+
+          if [[ "$REQUESTED_PROFILE" == "all" ]]; then
+            run_profile 100mb-full
+            run_profile 1gb-full
+            run_profile 10gb-tail
+          else
+            run_profile "$REQUESTED_PROFILE"
+          fi
+
+      - name: Assert no ProxyCommand helper remains
+        if: always()
+        run: |
+          sleep 1
+          if ps -eo pid,args | awk '$0 ~ /[n]c 127\.0\.0\.1 2235/ {print; found=1} END {exit found ? 1 : 0}'; then
+            echo "no orphan ProxyCommand helper"
+          else
+            echo "orphan ProxyCommand helper detected" >&2
+            exit 1
+          fi
+
+      - name: Upload M7 performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m7-proxy-performance-${{ github.run_id }}
+          path: |
+            /tmp/log-query-mcp-m7-perf/environment.txt
+            /tmp/log-query-mcp-m7-perf/transport-metrics.jsonl
+            /tmp/log-query-mcp-m7-perf/transport-output.log
+            /tmp/log-query-mcp-m7-perf/*-metrics.jsonl
+            /tmp/log-query-mcp-m7-perf/*-time.txt
+            /tmp/log-query-mcp-m7-perf/*-disk.txt
+            /tmp/log-query-mcp-m7-perf/*-output.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Show sshd log on failure
+        if: failure()
+        run: sudo cat /tmp/log-query-mcp-m7-perf/sshd.log || true
