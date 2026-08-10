@@ -24,6 +24,7 @@ from typing import Any
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 EXPECTED_TOOLS = ["get_log_context", "list_log_sources", "search_logs"]
+ALLOWED_PROXY_ARG_SHAPE = {"{host}", "{port}", "<literal>"}
 FORBIDDEN_KEYS = {
     "password",
     "passphrase",
@@ -73,6 +74,13 @@ def require_timestamp(value: Any, name: str) -> None:
     require(parsed.tzinfo is not None, f"{name} must include timezone")
 
 
+def require_proxy_arg_shape(value: Any, name: str) -> None:
+    require(isinstance(value, list) and bool(value), f"{name} must be a non-empty array")
+    require(all(isinstance(item, str) for item in value), f"{name} must contain only strings")
+    require(all(item in ALLOWED_PROXY_ARG_SHAPE for item in value), f"{name} contains unredacted ProxyCommand argv")
+    require("{host}" in value and "{port}" in value, f"{name} must retain host/port placeholders")
+
+
 def reject_sensitive_keys(value: Any, path: str = "$") -> None:
     if isinstance(value, dict):
         for key, child in value.items():
@@ -106,6 +114,7 @@ def verify_stdio(value: dict[str, Any]) -> None:
     require_sha(value.get("stdio_binary_sha256"), "stdio.stdio_binary_sha256")
     require_sha(value.get("target_host_sha256"), "stdio.target_host_sha256")
     require_sha(value.get("keyword_sha256"), "stdio.keyword_sha256")
+    require_proxy_arg_shape(value.get("proxy_args_shape"), "stdio.proxy_args_shape")
     require(isinstance(value.get("source_id"), str) and bool(value["source_id"]), "stdio source_id missing")
     require(isinstance(value.get("connection_id"), str) and bool(value["connection_id"]), "stdio connection_id missing")
     require(value.get("direct_wsl_tcp_reachable") is False, "stdio evidence does not prove Direct TCP gap")
@@ -132,6 +141,7 @@ def verify_http(value: dict[str, Any]) -> None:
     require_sha(value.get("logical_host_sha256"), "http.logical_host_sha256")
     require_sha(value.get("keyword_sha256"), "http.keyword_sha256")
     require_sha(value.get("endpoint_sha256"), "http.endpoint_sha256")
+    require_proxy_arg_shape(value.get("proxy_argv_shape"), "http.proxy_argv_shape")
     require(isinstance(value.get("source_id"), str) and bool(value["source_id"]), "HTTP source_id missing")
     require(isinstance(value.get("connection_id"), str) and bool(value["connection_id"]), "HTTP connection_id missing")
     service = value.get("service")
@@ -186,7 +196,7 @@ def synthetic_pair() -> tuple[dict[str, Any], dict[str, Any]]:
         "target_port": 22,
         "auth_type": "password",
         "proxy_program_basename": "ncat.exe",
-        "proxy_args_shape": ["{host}", "{port}"],
+        "proxy_args_shape": ["--proxy-type", "<literal>", "{host}", "{port}"],
         "config_sha256": h,
         "stdio_binary_sha256": candidate,
         "keyword_sha256": h,
@@ -215,7 +225,7 @@ def synthetic_pair() -> tuple[dict[str, Any], dict[str, Any]]:
         "target_port": 22,
         "auth_type": "password",
         "helper_image": "ncat.exe",
-        "proxy_argv_shape": ["{host}", "{port}"],
+        "proxy_argv_shape": ["<literal>", "<literal>", "{host}", "{port}"],
         "keyword_sha256": h,
         "endpoint_sha256": h,
         "service": {"active_state": "active", "user": "log-query-mcp", "main_pid": 123},
@@ -254,6 +264,14 @@ def self_test() -> None:
         pass
     else:
         raise EvidenceError("self-test failed to reject a sensitive evidence key")
+    raw_argv = copy.deepcopy(stdio)
+    raw_argv["proxy_args_shape"] = ["--proxy-type", "corporate-secret-token", "{host}", "{port}"]
+    try:
+        verify_pair(raw_argv, http)
+    except EvidenceError:
+        pass
+    else:
+        raise EvidenceError("self-test failed to reject unredacted ProxyCommand argv")
 
 
 def main() -> int:
