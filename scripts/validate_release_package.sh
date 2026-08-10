@@ -48,6 +48,7 @@ for path in \
   scripts/m7_wsl_acceptance.sh \
   scripts/m7_wsl_http_acceptance.py \
   scripts/verify_m7_evidence.py \
+  scripts/m7_real_target_acceptance.sh \
   docs/INSTALL.md \
   docs/OPERATIONS.md \
   docs/PRODUCTION_CHECKLIST.md \
@@ -83,7 +84,8 @@ for path in \
   scripts/m7_wsl_acceptance.py \
   scripts/m7_wsl_acceptance.sh \
   scripts/m7_wsl_http_acceptance.py \
-  scripts/verify_m7_evidence.py; do
+  scripts/verify_m7_evidence.py \
+  scripts/m7_real_target_acceptance.sh; do
   [[ -x "${root}/${path}" ]] || die "expected executable package entry: ${path}"
 done
 
@@ -124,6 +126,7 @@ if "ProxyCommandConfig" not in schema.get("$defs", {}):
 PY
 
 bash -n "${root}/scripts/m7_wsl_acceptance.sh" || die "packaged M7 WSL acceptance wrapper has invalid shell syntax"
+bash -n "${root}/scripts/m7_real_target_acceptance.sh" || die "packaged M7 real-target orchestrator has invalid shell syntax"
 python3 -m py_compile \
   "${root}/scripts/m7_wsl_acceptance.py" \
   "${root}/scripts/m7_wsl_http_acceptance.py" \
