@@ -8,15 +8,17 @@
 
 本 Runbook 是 M7 ProxyCommand 的真实目标执行入口。仓库中的 Linux CI、静态配置校验、synthetic evidence self-test 都不能替代本流程。
 
-最终必须获得两份来自同一 candidate、同一配置、同一 ProxyCommand source、同一 acceptance marker 的真实证据：
+最终必须获得同一次 run 的三类可追踪记录：
 
 ```text
+run-level manifest
++
 service-identity stdio evidence
 +
 production systemd HTTP evidence
 ```
 
-然后使用 `scripts/verify_m7_evidence.py` 离线验证这两份证据的一致性与去敏契约。
+其中 `m7-real-target-run.json` 负责记录 candidate/config/marker hash 与 A→B→C→D gate 状态；两份 component evidence 负责证明实际 ProxyCommand/SSH/SFTP/MCP 行为。最后使用 `scripts/verify_m7_evidence.py` 离线验证两份 component evidence 的一致性与去敏契约。
 
 ## 2. 固定边界
 
@@ -27,7 +29,8 @@ production systemd HTTP evidence
 - strict known_hosts 仍绑定逻辑 SSH host/port；
 - SecretResolver 继续负责 password/private-key passphrase；
 - acceptance tooling 不创建远端 marker，不获得远程写权限；
-- evidence 不保存 Secret、日志正文、match_ref、raw stderr 或 logical host 明文。
+- evidence 不保存 Secret、日志正文、match_ref、raw stderr 或 logical host 明文；
+- run manifest 不保存 marker 明文，只保存 SHA256。
 
 ## 3. 验收前冻结 candidate
 
@@ -40,7 +43,9 @@ sha256sum /opt/log-query-mcp/bin/log-query-mcp-stdio
 sha256sum /etc/log-query-mcp/config.json
 ```
 
-验收期间不要升级 binary、修改 config、切换 Proxy helper 或改变 selected source。若 candidate/config 发生变化，两份 evidence 必须全部重新执行。
+正式 release package 必须携带可追踪的 `BUILDINFO.git_commit`。Final Acceptance 不接受缺失、`unknown` 或 stdio/HTTP evidence 不一致的 git commit。
+
+验收期间不要升级 binary、修改 config、切换 Proxy helper 或改变 selected source。若 candidate/config 发生变化，两份 component evidence 与 run manifest 必须全部重新执行。
 
 ## 4. Windows / 网络前置检查
 
@@ -113,7 +118,7 @@ export M7_ACCEPTANCE_MARKER='<known-marker>'
 export M7_EVIDENCE_DIR='/var/lib/log-query-mcp/m7-wsl-evidence'
 ```
 
-marker 不是 Secret，但最终 evidence 只保存其 SHA256。
+marker 不是 Secret，但最终 evidence/run manifest 只保存其 SHA256。
 
 ### 7.1 推荐：单命令执行四个 Gate
 
@@ -123,7 +128,7 @@ marker 不是 Secret，但最终 evidence 只保存其 SHA256。
 scripts/m7_real_target_acceptance.sh
 ```
 
-它不实现新的验收逻辑，只按固定顺序调用已有 Gate：
+它不实现新的业务验收逻辑，只按固定顺序调用已有 Gate：
 
 ```text
 Gate A service-identity stdio
@@ -153,13 +158,35 @@ sudo --preserve-env \
 ${M7_EVIDENCE_DIR}/run-<UTC>-<pid>/
 ```
 
-并要求 Gate A 和 Gate C 各自产生且只产生一份 evidence。Gate D 对这两份文件交叉验证成功后，wrapper 才输出：
+在 Gate A 开始前先创建：
+
+```text
+m7-real-target-run.json
+```
+
+run manifest 记录：
+
+```text
+status
+source_id
+config SHA256
+marker/keyword SHA256
+stdio binary SHA256
+HTTP binary SHA256
+BUILDINFO metadata + git_commit
+completed_gates
+failed_gate + gate_exit_code（失败时）
+```
+
+不记录 marker 明文、logical host、Proxy argv、Secret、日志正文、match_ref 或 raw stderr。
+
+Gate A 和 Gate C 各自产生且只产生一份 component evidence。Gate D 对这两份文件交叉验证成功，并且 manifest 已按 A→B→C→D 顺序记录完成后，wrapper 才输出：
 
 ```text
 m7_real_target_acceptance: PASS
 ```
 
-任一 Gate 失败时立即停止，并保留已经生成的 evidence，不做自动重试、不删除现场、不修改生产配置。
+任一 Gate 失败时立即停止。即使某个 component 在 preflight 阶段失败、尚未来得及生成自己的 FAIL evidence，run manifest 仍记录失败 gate 与非零退出码。wrapper 不做自动重试、不删除现场、不修改生产配置。
 
 下面的逐 Gate 命令仍然保留，用于故障定位和审计。
 
@@ -194,7 +221,15 @@ get_log_context(match_ref)                 PASS
 helper count returns to baseline           PASS
 ```
 
-失败时保留 FAIL evidence，不要手工修改成 PASS。
+stdio evidence 中的 Proxy argv 只允许保留结构形状：
+
+```text
+{host}
+{port}
+<literal>
+```
+
+不得保存 literal argv 原值。
 
 ## 9. Gate B：production healthcheck
 
@@ -233,9 +268,19 @@ get_log_context(match_ref)                 PASS
 Windows helper cleanup                     PASS
 ```
 
-## 11. 找到两份 evidence
+如果 systemd/binary/tasklist 等 HTTP component preflight 在其 component evidence 建立前失败，单命令 wrapper 的 run manifest 仍会记录 `failed_gate=C` 与非零 `gate_exit_code`。
 
-如果使用单命令 wrapper，两份 evidence 已被隔离在同一个 `run-*` 目录中，不需要人工从历史文件中挑选。
+## 11. 找到本次 evidence
+
+单命令 wrapper 会把本次记录隔离在同一个 `run-*` 目录：
+
+```text
+m7-real-target-run.json
+m7-wsl-acceptance-*.json
+m7-wsl-http-acceptance-*.json
+```
+
+成功 run 必须三者同时存在；失败 run 至少应保留 run manifest，并保留失败前已经生成的 component evidence。
 
 手工逐 Gate 模式下可执行：
 
@@ -274,33 +319,38 @@ Verifier 会分别验证两种 evidence contract，再验证两份 evidence 的�
 - connection_id 一致；
 - marker SHA256 一致；
 - logical target host SHA256 一致；
-- BUILDINFO git commit 在双方均存在时一致；
+- 双方必须存在合法、可追踪的 BUILDINFO git commit，并且完全一致；
+- Proxy argv evidence 只包含 `{host}` / `{port}` / `<literal>`；
 - stdio Direct-path gap 为真；
 - 两边三工具与 helper cleanup 都 PASS；
 - systemd running binary 与 expected candidate hash 一致；
 - evidence 中不存在约定禁止的敏感字段键。
 
-## 13. `--self-test` 的含义
+## 13. Synthetic self-test 的含义
 
 仓库/CI/package validator 可以执行：
 
 ```bash
 python3 scripts/verify_m7_evidence.py --self-test
+python3 scripts/m7_real_target_manifest.py self-test
 ```
 
-它只使用 synthetic in-memory evidence，用于证明 verifier 自身能接受合法记录并拒绝明显坏记录/敏感字段。
+前者验证 evidence pair verifier 能接受合法记录并拒绝敏感字段、raw Proxy argv、缺失/不一致 candidate commit 等坏记录。
 
-它的输出即使是 PASS，也**绝不代表** WSL、Windows helper、SSH/SFTP、systemd 或生产网络已经通过。
+后者验证 run manifest 的 PASS lifecycle、FAIL lifecycle、乱序 gate 拒绝、`exit_code=0` 拒绝、marker 去明文以及原子更新状态机。
+
+这些 synthetic self-test 即使 PASS，也**绝不代表** WSL、Windows helper、SSH/SFTP、systemd 或生产网络已经通过。
 
 ## 14. Evidence 保存
 
-建议将本次两份 JSON 与以下非敏感元数据一起归档到内部测试记录：
+建议将本次 run 目录中的三类记录与以下非敏感元数据一起归档到内部测试记录：
 
 ```text
 operator
 timestamp
 environment/candidate identifier
 BUILDINFO git_commit
+run manifest SHA256
 stdio evidence SHA256
 HTTP evidence SHA256
 verify_m7_evidence output
@@ -312,11 +362,12 @@ verify_m7_evidence output
 
 任意 Gate FAIL：
 
-1. 保留原始去敏 FAIL evidence；
-2. 按稳定 failure_code 分类；
-3. 修复环境或代码；
-4. candidate/config 若变化，重新执行 Gate A/B/C/D；
-5. 不复用旧 PASS evidence 给新 candidate。
+1. 保留 `m7-real-target-run.json`；
+2. 保留已经产生的去敏 component FAIL/PASS evidence；
+3. 根据 manifest 的 `failed_gate/gate_exit_code` 与 component 的稳定 failure_code 分类；
+4. 修复环境或代码；
+5. candidate/config 若变化，重新执行 Gate A/B/C/D；
+6. 不复用旧 PASS evidence 给新 candidate。
 
 不要通过以下方式绕过失败：
 
@@ -334,6 +385,7 @@ verify_m7_evidence output
 Real target 只在以下同时成立时完成：
 
 ```text
+run manifest                         PASS / A,B,C,D complete
 Gate A service-identity stdio        PASS
 Gate B production healthcheck        PASS
 Gate C systemd HTTP Proxy source     PASS
