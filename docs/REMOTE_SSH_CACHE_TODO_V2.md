@@ -1,11 +1,13 @@
 # Log Query MCP v2 Remote SSH/Cache 实施 TODO
 
-> 状态：Repository implementation complete / Final RC CI blocked by GitHub Actions Billing  
-> 日期：2026-08-08  
+> 状态：M0-M6 implementation complete / M7 ProxyCommand planned / Final RC not ready  
+> 日期：2026-08-10  
 > 总方案：[`REMOTE_SSH_CACHE_DESIGN_V2.md`](./REMOTE_SSH_CACHE_DESIGN_V2.md)  
-> 最终基线：[`M6_FINAL_BASELINE_V2.md`](./M6_FINAL_BASELINE_V2.md)  
+> ProxyCommand 方案：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
+> M7 TODO：[`PROXY_COMMAND_TODO_V2.md`](./PROXY_COMMAND_TODO_V2.md)  
+> M6 最终基线：[`M6_FINAL_BASELINE_V2.md`](./M6_FINAL_BASELINE_V2.md)  
 > Draft PR：#25  
-> External blocker：Issue #23
+> External CI blocker：Issue #23
 
 ## 0. 冻结原则
 
@@ -19,6 +21,7 @@ v2 全部实现继续遵守：
 - 默认 fail-closed，不静默使用 stale cache。
 - Tail/FromNow 覆盖不足必须返回 `CACHE_SCOPE_EXCEEDED`，不能制造假阴性。
 - SSH 是内部 Transport，不是业务 API。
+- ProxyCommand 若启用，也只能作为 SSH raw byte stream Transport，不能成为通用命令执行能力。
 - Cache generation + snapshot length 是 Remote cursor / match_ref 的稳定边界。
 
 ## 1. M0～M5 — DONE
@@ -73,7 +76,7 @@ Concurrency：
 
 基线：[`M6_PERFORMANCE_BASELINE_V2.md`](./M6_PERFORMANCE_BASELINE_V2.md)
 
-## 4. M6-F Production Readiness — DONE
+## 4. M6-F Production Readiness — DONE FOR PRE-M7 BASELINE
 
 ### Release / package
 
@@ -98,72 +101,105 @@ Concurrency：
 
 - [x] `scripts/rc_check.sh` runs all repository-local non-live gates in one command。
 - [x] Rust、Contracts、SSH Transport、Release expose manual rerun paths；M6 Performance already exposes profile-based `workflow_dispatch`。
-- [x] README / INSTALL / OPERATIONS / PRODUCTION_CHECKLIST / RELEASE_READINESS / M6_FINAL aligned with v2。
-- [x] Draft PR #25 updated with final production-readiness scope。
+- [x] README / INSTALL / OPERATIONS / PRODUCTION_CHECKLIST / RELEASE_READINESS / M6_FINAL aligned with pre-M7 v2 baseline。
+- [x] Draft PR #25 updated with pre-M7 production-readiness scope。
 
 Release contract：[`RELEASE_READINESS_V2.md`](./RELEASE_READINESS_V2.md)
 
-## 5. Final Gate — EXTERNALLY BLOCKED
+> M7 修改 SSH Transport 后，上述 release/readiness 文档和验证证据必须重新对齐，不能直接把 pre-M7 结果作为最终 RC。
 
-Latest verified repository head before the final baseline-only update:
+## 5. M7 ProxyCommand — DESIGN ACCEPTED / IMPLEMENTATION PENDING
+
+目标：支持 WSL / Container 等环境通过宿主机或管理员指定 helper 建立 SSH 底层字节流，同时不扩大 Log Query MCP 的命令权限。
+
+设计与决策：
+
+- [x] `PROXY_COMMAND_TRANSPORT_V2.md` 已提交。
+- [x] ADR-0012 已接受：ProxyCommand 只作为 SSH Stream Transport。
+- [x] `CONFIG_SCHEMA_V2.md` 已定义目标 ProxyCommand 配置契约。
+- [x] 独立 `PROXY_COMMAND_TODO_V2.md` 已建立。
+
+实现入口：
+
+- [ ] 修正 ProxyCommand 设计文档中的历史 ADR 编号引用为 ADR-0012。
+- [ ] 更新机器 JSON Schema。
+- [ ] 更新 Rust config/runtime validator。
+- [ ] 抽取 Direct/Proxy 共用 SSH stream connector。
+- [ ] 实现 ProxyCommand process stdin/stdout stream。
+- [ ] 实现 timeout/cancellation/child cleanup/bounded stderr/redaction。
+- [ ] Direct SSH 全量 regression。
+- [ ] ProxyCommand SSH/SFTP live gate。
+- [ ] Multi-server + failure isolation。
+- [ ] WSL → Windows Host → Remote SSH acceptance。
+- [ ] large-file / concurrency / process-leak regression。
+- [ ] README / INSTALL / OPERATIONS / release docs 对齐。
+- [ ] 完整 Final RC Gate 重跑。
+
+详细阶段与验收项见 [`PROXY_COMMAND_TODO_V2.md`](./PROXY_COMMAND_TODO_V2.md)。
+
+## 6. Final Gate — NOT READY
+
+### 6.1 既有外部阻塞
+
+pre-M7 candidate 的 GitHub Actions 仍存在 Billing/Spending Limit 外部阻塞。历史候选运行在 runner 启动前被拒绝，这不是已知代码失败，但也不能标记为 PASS。
+
+Canonical external blocker：Issue #23。
+
+### 6.2 M7 引入后的新边界
+
+在接受 M7 ProxyCommand 后，即使 Billing 恢复，也不能直接把旧 candidate 标成 RC READY。
+
+原因：
 
 ```text
-d38337b855d59649cb0143f515238510b992b2e4
+M7 changes SSH transport/config/security/process lifecycle
+↓
+old candidate evidence is not the final candidate
+↓
+M7 implementation must complete
+↓
+new candidate must rerun all critical gates
 ```
 
-On that exact head GitHub created these PR candidate runs:
+最终必须完成：
 
-```text
-Rust      31200874586
-Contracts 31200875744
-Release   31200875028
-```
-
-All required package/test jobs were rejected **before runner execution**. Rust and Contracts jobs had `steps=[]`; Release package had `steps=[]` and its dependent publish job was correctly skipped. GitHub's annotation states:
-
-```text
-The job was not started because recent account payments have failed
-or your spending limit needs to be increased.
-```
-
-因此这不是已知代码失败，但也绝不能标成 PASS。
-
-Canonical blocker：Issue #23。
-
-Billing 恢复后剩余的是验证动作，不是继续开发：
-
-- [ ] run `bash scripts/rc_check.sh` on the candidate source/environment and record result。
+- [ ] M7 implementation complete。
+- [ ] `bash scripts/rc_check.sh` on final candidate PASS。
 - [ ] candidate Rust Gate PASS。
 - [ ] candidate Contracts Gate PASS。
-- [ ] candidate SSH live Gate PASS，记录 single/dual concurrency metrics。
+- [ ] candidate Direct + Proxy SSH live Gate PASS。
+- [ ] candidate M6/M7 security/fault Gate PASS。
+- [ ] candidate WSL acceptance evidence recorded。
+- [ ] candidate single/dual/mixed concurrency metrics recorded。
 - [ ] candidate Release Gate PASS（shell syntax / smoke / protocol health / lifecycle / package validation）。
-- [ ] 若 transport/sync/performance 相关代码相对成功 large-file evidence 有变化，则重跑 M6 Performance；否则记录可追溯复用理由。
+- [ ] M7 transport change 后重跑相关 large-file Performance。
 - [ ] 确认没有 unexplained critical failure，然后才可把 RC 标成 Ready。
 
-## 6. 发布 / 环境动作
+## 7. 发布 / 环境动作
 
-这些不是仓库剩余实现任务：
-
-- [x] Draft PR #25 已创建，保持 Draft。
-- [ ] Mark PR Ready / merge main — Final Gate 全绿后且需显式授权。
+- [x] Draft PR #25 已创建，继续保持 Draft。
+- [ ] Mark PR Ready / merge main — **M7 + Final Gate 全绿后且需显式授权**。
 - [ ] 创建 `v{Cargo.toml version}` tag — Final Gate 全绿后且需显式授权。
 - [ ] GitHub Release — tag workflow，Final Gate 未绿时禁止发布。
-- [ ] 目标生产服务器 INSTALL / Remote / AI-client / upgrade / rollback 人工验收 — 必须在真实目标环境执行。
+- [ ] 目标生产服务器 INSTALL / Remote / ProxyCommand / AI-client / upgrade / rollback 人工验收 — 必须在真实目标环境执行。
 
-## 7. 最终判断
+## 8. 当前判断
 
 ```text
-known v2 repository design work        0 remaining
-known v2 implementation work           0 remaining
-security/fault implementation          COMPLETE
-performance harness implementation     COMPLETE
-production/release tooling             COMPLETE
-production documentation               COMPLETE
-Draft PR                               OPEN (#25)
-latest candidate CI                    BLOCKED externally (Billing)
-RC Ready                               NO
-formal Release                         NOT CREATED
-production target acceptance           PENDING target environment
+M0-M6 design/implementation             COMPLETE
+pre-M7 security/fault implementation    COMPLETE
+pre-M7 performance harness              COMPLETE
+pre-M7 production/release tooling       COMPLETE
+M7 ProxyCommand design                  COMPLETE
+M7 ADR/config target contract           COMPLETE
+M7 implementation                       PENDING
+M7 WSL acceptance                       PENDING
+final candidate regression              PENDING
+GitHub Actions Billing                  BLOCKED externally
+Draft PR                                OPEN (#25)
+RC Ready                                NO
+formal Release                          NOT CREATED
+production target acceptance            PENDING target environment
 ```
 
-继续修改业务代码不会解决当前阻塞，只会制造新的 candidate。下一步应是解除 Issue #23 的外部 Billing 阻塞并执行 Final Gate；随后才进入受控的 Ready/merge/tag/release/生产验收流程。
+当前正确下一步不再是直接等待 Billing：应先完成 M7 ProxyCommand 的实现与验证准备；Billing 恢复后在最终 M7 candidate 上执行完整 Final Gate，然后再进入受控的 Ready / merge / tag / release / 生产验收流程。
