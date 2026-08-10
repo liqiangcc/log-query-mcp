@@ -148,7 +148,8 @@ for doc in \
   fi
 done
 
-git_commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+git_commit="$(git rev-parse HEAD 2>/dev/null)" || die "unable to resolve release git commit"
+[[ "${git_commit}" =~ ^[0-9a-f]{40,64}$ ]] || die "release git commit is not traceable"
 git_ref="$(git describe --always --dirty --tags 2>/dev/null || echo unknown)"
 built_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 rustc_version="$(rustc --version)"
