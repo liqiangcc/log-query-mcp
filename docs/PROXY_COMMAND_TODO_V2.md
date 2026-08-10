@@ -1,8 +1,9 @@
 # Log Query MCP v2 M7 ProxyCommand 实施 TODO
 
-> 状态：Stream abstraction implemented / Direct regression CI blocked  
+> 状态：Core connector/lifecycle baseline implemented / CI & live validation blocked  
 > 日期：2026-08-10  
 > 设计：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
+> 实现基线：[`M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md`](./M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md)  
 > ADR：[`adr/0012-use-proxy-command-as-ssh-stream-transport.md`](./adr/0012-use-proxy-command-as-ssh-stream-transport.md)  
 > 配置契约：[`CONFIG_SCHEMA_V2.md`](./CONFIG_SCHEMA_V2.md)  
 > Draft PR：#25
@@ -32,15 +33,13 @@ M7 必须继续遵守现有 v2 安全模型：
 - [x] 更新 Rust v2 config structs/runtime validator。
 - [x] 增加 valid ProxyCommand contract fixture。
 - [x] 增加 unknown placeholder / unknown field invalid fixtures。
-- [x] Rust config unit tests覆盖合法 ProxyCommand、未知 placeholder、未知字段。
+- [x] Rust config unit tests 覆盖合法 ProxyCommand、未知 placeholder、未知字段。
 
-当前机器 Schema 与 Rust config 已接受 `proxy.type=command`；实际 ProxyCommand transport 尚未实现，因此配置存在不代表已经能够通过代理建立 SSH 连接。
-
-最新 candidate 的 Rust/Contracts workflow 仍在 runner 启动前失败，job `steps=[]`，属于现有 GitHub Actions Billing 外部阻塞；上述配置改动尚未获得 CI PASS 证据。
+机器 Schema 与 Rust config 已接受 `proxy.type=command`，并已接入实际 ProxyCommand stream connector；但 CI / live validation 仍被外部 Billing blocker 阻塞，因此不能把当前候选标记为 PASS。
 
 ## 2. M7-1 Stream Abstraction — IMPLEMENTED / REGRESSION BLOCKED
 
-目标：先抽离“如何建立 SSH 底层 stream”，不改变 Direct 行为。
+目标：抽离“如何建立 SSH 底层 stream”，同时保持 Direct 行为。
 
 - [x] 新增窄 `SshStreamConnector` / 等价抽象。
 - [x] 将现有 Direct TCP 连接迁移到 `DirectConnector`。
@@ -51,7 +50,7 @@ M7 必须继续遵守现有 v2 安全模型：
 
 实现提交：`8abd4bdae5b2322a73745005ec2fe0a245f1321b`。
 
-重构使用一个总 `connect_timeout` 覆盖 Direct TCP connect + SSH handshake，避免拆分后把 deadline 意外扩成两倍；Host Key Verification 仍使用逻辑目标 `connection.host/port`。
+重构使用一个总 `connect_timeout` 覆盖 Direct TCP connect + SSH handshake；Host Key Verification 仍使用逻辑目标 `connection.host/port`。
 
 验收仍需实际执行：
 
@@ -68,9 +67,7 @@ multi-server
 300 range-read regression
 ```
 
-根据冻结顺序，在上述 Direct regression 得到真实 PASS 证据前，不把 M7-2 ProxyCommand connector 标记为已验证。
-
-## 3. M7-2 Config / ProxyCommand Connector
+## 3. M7-2 Config / ProxyCommand Connector — IMPLEMENTED / CI BLOCKED
 
 - [x] JSON Schema 增加可选 `SshConnectionConfig.proxy`。
 - [x] Rust Config 增加 `ProxyCommandConfig`。
@@ -80,41 +77,49 @@ multi-server
 - [x] Placeholder 只允许完整 argv 项 `{host}` / `{port}`。
 - [x] 未知 Placeholder 启动时 fail-fast。
 - [x] 不支持 `{username}` / credential / source/path / expression。
-- [ ] 使用 `tokio::process::Command` 或等价 Tokio-native process API。
-- [ ] 直接 `program + argv[]` spawn，不构造 Shell command string。
-- [ ] child stdin/stdout 适配为 SSH raw stream。
-- [ ] 使用 `russh` stream-based connect，复用现有 Handler/Auth/SFTP。
+- [x] 使用 `tokio::process::Command`。
+- [x] 直接 `program + argv[]` spawn，不构造 Shell command string。
+- [x] child stdin/stdout 适配为 SSH raw stream。
+- [x] 使用 `russh` stream-based connect，复用现有 Handler/Auth/SFTP。
 
-## 4. M7-3 Lifecycle / Security
+主要实现：
+
+```text
+src/transport/proxy_command.rs
+src/transport/ssh.rs
+src/transport/mod.rs
+Cargo.toml (tokio process feature)
+```
+
+当前仅能标记为 implementation present；Rust / SSH Transport workflow 仍未真正启动 runner，因此没有 compile/live PASS 证据。
+
+## 4. M7-3 Lifecycle / Security — BASELINE IMPLEMENTED / FAULT EVIDENCE PENDING
 
 ### Process 生命周期
 
-- [ ] connect timeout 覆盖 spawn + SSH stream connect/handshake。
-- [ ] Query/Sync cancellation 能终止并 wait child。
-- [ ] SSH handshake 失败后清理 child。
-- [ ] Authentication/SFTP 初始化失败后清理 child。
-- [ ] 正常 SSH close 后回收 child。
-- [ ] Proxy early exit / stdout EOF 快速失败，不无限等待。
-- [ ] 无 orphan process。
-- [ ] 无 leaked SSH semaphore permit。
+- [x] Proxy stream Drop 时执行 fail-closed `start_kill()`，并保留 `kill_on_drop(true)` guard。
+- [x] Tokio runtime 可用时异步 `wait()` 回收 child。
+- [ ] connect timeout / cancellation / handshake failure / auth failure / SFTP failure 下的 cleanup live evidence。
+- [ ] Proxy early exit / stdout EOF 快速失败的稳定错误分类。
+- [ ] 无 orphan process 的 fault-matrix evidence。
+- [ ] 无 leaked SSH semaphore permit 的 fault-matrix evidence。
 
 ### stdout / stderr
 
-- [ ] stdout 仅作为协议流，不进入日志系统。
-- [ ] stderr 使用 bounded collector，建议上限 64 KiB。
-- [ ] stderr 超限截断。
-- [ ] Public Error 不返回 raw stderr。
-- [ ] 日志不输出 credential、SecretResolver value、private key content。
-- [ ] 日志避免输出完整敏感 argv；最多记录 program basename / connection_id / category / exit code。
+- [x] stdout 仅作为 SSH protocol stream，不进入日志系统。
+- [x] stderr 使用独立异步 drain。
+- [x] stderr 内存 capture 上限 64 KiB；超过后继续 drain 但不继续增长。
+- [x] captured stderr 当前不返回 Public Error、不写日志。
+- [ ] 稳定且去敏后的 Proxy failure diagnostic category。
+- [ ] stderr flood live test。
 
 ### 权限边界
 
-- [ ] MCP 请求 schema 不新增 proxy/program/args/host/port 输入。
-- [ ] AI 不能动态选择或修改 ProxyCommand。
-- [ ] ProxyCommand 不获得 remote root/path。
-- [ ] ProxyCommand 不能绕过 SFTP-only。
-- [ ] strict Host Key Verification 继续以逻辑目标 host/port 为准。
-- [ ] ProxyCommand failure 不触发 silent stale-cache fallback。
+- [x] MCP 请求 schema 不新增 proxy/program/args/host/port 输入。
+- [x] AI 不能动态选择或修改 ProxyCommand。
+- [x] ProxyCommand 不获得 remote root/path 或 SSH credential。
+- [x] ProxyCommand 继续进入现有 SSH Host Key Verification / Authentication / SFTP 层。
+- [ ] failure matrix 证明 ProxyCommand failure 不触发 silent stale-cache fallback。
 
 ## 5. M7-4 Integration / Failure Matrix
 
@@ -262,7 +267,7 @@ M7 实现完成后必须重新运行完整候选门禁：
 - [ ] Release/package/lifecycle gate PASS。
 - [ ] 无 unexplained critical failure。
 
-GitHub Actions Billing blocker 仍需解除，但即使 Billing 恢复，也必须先完成 M7 实现并对新 candidate 重跑 Final Gate。
+GitHub Actions Billing blocker 仍需解除。即使 Billing 恢复，也必须先对包含 M7 的新 candidate 重跑 Final Gate。
 
 ## 10. 完成定义
 
@@ -275,9 +280,12 @@ runtime config                    DONE
 config contract fixtures          DONE
 stream abstraction                IMPLEMENTED / CI BLOCKED
 Direct regression                 BLOCKED (Billing)
-proxy connector                   TODO
-lifecycle/security                TODO
+proxy connector                   IMPLEMENTED / CI BLOCKED
+child cleanup baseline            IMPLEMENTED / CI BLOCKED
+bounded stderr drain              IMPLEMENTED / CI BLOCKED
+failure classification            TODO
 live integration                  TODO
+failure matrix                    TODO
 WSL acceptance                    TODO
 performance regression            TODO
 release docs/gates                TODO
