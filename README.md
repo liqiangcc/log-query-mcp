@@ -6,7 +6,7 @@ Log Query MCP 只向 AI 暴露受控的日志语义能力，不暴露 Shell、�
 
 ## 部署模式
 
-支持两种来源模式，并且可以在同一个查询中混合使用。
+支持 Local 与 Remote SSH 来源，并且可以在同一个查询中混合使用。Remote SSH 又支持 Direct TCP 和管理员配置的 ProxyCommand 两种底层连接方式。
 
 ### Local Source
 
@@ -46,6 +46,59 @@ Remote Source 的关键边界：
 - 远端日志先增量同步到本地 generation cache，再由现有 Scanner 查询；Query Engine 不直接访问 SSH。
 - cursor 和 `match_ref` 固定到本地 cache snapshot/generation，日志轮转后旧引用在 TTL 内仍可稳定读取。
 - Tail / FromNow 缓存范围不足时返回 `CACHE_SCOPE_EXCEEDED`，不会把不完整缓存误报成“没有匹配”。
+
+#### Direct TCP 与 ProxyCommand
+
+默认不配置 `proxy` 时，SSH 使用 Direct TCP：
+
+```text
+log-query-mcp → TCP → SSH/SFTP target
+```
+
+当 MCP 运行环境无法直接访问目标，但管理员控制的本地/宿主机 helper 可以访问目标时，可使用 ProxyCommand：
+
+```text
+log-query-mcp
+  → spawn admin-configured program + argv[]
+  → stdin/stdout raw byte stream
+  → SSH handshake / strict known_hosts / auth / SFTP
+  → remote logs
+```
+
+典型 WSL 场景：WSL 网络无法访问企业 VPN 内的 SSH Server，但 Windows 宿主机可以访问，此时可让 WSL 内的 `log-query-mcp` 启动 Windows `ncat.exe` 等纯 TCP helper。
+
+示例：
+
+```json
+{
+  "connection_id": "inventory-vpn-proxy-ssh",
+  "type": "ssh",
+  "host": "inventory-vpn.internal",
+  "port": 22,
+  "username": "log-reader",
+  "auth": {
+    "type": "password",
+    "secret_ref": "LOG_QUERY_MCP_INVENTORY_PASSWORD"
+  },
+  "host_key": {
+    "known_hosts_file": "/etc/log-query-mcp/known_hosts"
+  },
+  "proxy": {
+    "type": "command",
+    "program": "ncat.exe",
+    "args": ["{host}", "{port}"]
+  }
+}
+```
+
+ProxyCommand 的边界是固定的：
+
+- 只允许管理员静态配置 `program + args[]`。
+- 不生成 Shell command string，不使用 `sh -c` / `powershell -Command` 拼接命令。
+- MVP 只允许整个 argv 元素为 `{host}` 或 `{port}`。
+- ProxyCommand 不接收 password、private-key passphrase、remote path 或 MCP 请求参数。
+- stdout 是 SSH raw byte stream；Host Key Verification 仍针对逻辑目标 `host:port`。
+- ProxyCommand 不增加 `run_command`、`ssh_exec`、upload/write/delete/deploy/restart 等能力。
 
 ## MCP 工具
 
@@ -117,6 +170,8 @@ sudo chown root:log-query-mcp /etc/log-query-mcp/config.json
 sudo chmod 0640 /etc/log-query-mcp/config.json
 ```
 
+v2 示例同时包含 Direct SSH 与 ProxyCommand/WSL 形式。使用 ProxyCommand 前必须把示例中的 `program` 改成目标环境中由管理员安装并批准的 helper。
+
 完整步骤见 [生产安装指南](./docs/INSTALL.md)。
 
 ## 安全升级与回滚
@@ -155,11 +210,20 @@ log-reader
 - `/etc/log-query-mcp/known_hosts`
 - Password 对应的环境变量 Secret，或只读 private key 文件
 - `/var/lib/log-query-mcp/cache` 可写空间
+- 若使用 ProxyCommand：管理员批准的 helper 可执行文件以及服务用户可执行权限
+
+WSL + Windows helper 还需要确认：
+
+- Windows executable interop 对运行 `log-query-mcp` 的服务身份可用；
+- helper 通过 Windows/VPN 网络可以连接目标 `host:port`；
+- Direct path 在需要 ProxyCommand 的验收场景中确实不可用；
+- helper stdout 不输出 banner/debug 文本，只承载 TCP/SSH 字节流；
+- helper 不接收 SSH Secret，credential 仍由 SSH 层处理。
 
 示例配置：
 
 - [v1 Local 示例](./examples/log-query-mcp.v1.json)
-- [v2 Local + Remote 示例](./examples/log-query-mcp.v2.remote.json)
+- [v2 Local + Direct Remote + ProxyCommand 示例](./examples/log-query-mcp.v2.remote.json)
 
 ## 快速验证
 
@@ -208,40 +272,45 @@ MCP Inspector 可用于人工验收工具列表和调用结果。参考 <https:/
 - 服务不内置客户端认证和 TLS。默认只监听 `127.0.0.1:8000`；暴露到非 loopback 时必须由内网 ACL、反向代理或上层网关负责认证、TLS 和访问控制。
 - Local 文件访问：来源白名单 + `openat2()` + `RESOLVE_NO_XDEV` + 普通文件校验。
 - Remote 文件访问：管理员配置的 SSH connection/source + Host Key Verification + SFTP read-only + regular-file-only + 本地 cache。
-- Remote 默认 `on_query` freshness；网络/认证失败时 fail-closed，不静默使用 stale cache。
+- ProxyCommand：管理员配置的本地 raw-stream adapter；不经过 Shell，不接收 credential，不改变逻辑 SSH target 的 host-key 身份。
+- Remote 默认 `on_query` freshness；网络/认证/ProxyCommand 失败时 fail-closed，不静默使用 stale cache。
 - cache 目录/文件分别按 0700/0600 管理，不保存 credential；内部路径使用 opaque IDs。
 - 排序当前只支持 `oldest_first`。
 - `match_ref` 和 cursor：单实例、服务端有状态、短期随机 token，重启后失效。
-- 错误：稳定错误代码 + 去敏消息 + `retryable`，不暴露 Secret、远端绝对路径、cache 路径、backtrace 或底层系统调用文本。
+- 错误：稳定错误代码 + 去敏消息 + `retryable`，不暴露 Secret、远端绝对路径、cache 路径、ProxyCommand 完整 argv/stderr、backtrace 或底层系统调用文本。
 
 ## 性能边界
 
-M6 已建立可重复工程 benchmark，而不是产品 SLA。当前基线证明：
+M6 已建立 Direct SSH 的可重复工程 benchmark，而不是产品 SLA。历史基线证明：
 
 - unchanged refresh 只读取 64 KiB continuity window；
 - append 只传新增 payload + bounded probes；
 - cache local scan 不访问 SSH；
 - 1 GiB full bootstrap 可以完成；
 - 10 GiB logical log 可只缓存 64 MiB tail；
-- 300 次连续 bounded range read 不泄漏 SFTP file handle；
-- single/dual-server concurrency harness 已接入真实 SSH live Gate。
+- 300 次连续 bounded range read 不泄漏 SFTP file handle。
 
-详见 [M6 性能基线](./docs/M6_PERFORMANCE_BASELINE_V2.md)。
+M7 已新增 paired Direct/ProxyCommand performance harness，覆盖 5 次 connection setup、100 MiB/1 GiB/10 GiB-tail、incremental bounded transfer、300 Proxy range reads、2 Direct + 2 Proxy concurrency 和正常路径 helper 回收。当前 M7 workflow 仍因 GitHub Actions Billing 在 runner 启动前被阻断，因此尚无 M7 实测数字，不能把 M6 数字冒充 M7 结果。
+
+详见 [M6 性能基线](./docs/M6_PERFORMANCE_BASELINE_V2.md) 与 [M7 Proxy Performance Gate](./docs/M7_PROXY_PERFORMANCE_GATE_V2.md)。
 
 ## Release Candidate 状态
 
-v2 仓库实现已完成，但最新 candidate 的 GitHub Actions runner 当前被账户 Billing/Spending Limit 在启动前阻断。外部验证事项统一跟踪在 GitHub Issue #23。
+M0-M6 历史实现/证据已完成；M7 ProxyCommand 的核心实现、功能/故障/同步/性能 harness 和 Release Integration 已进入候选分支。当前仍有两个不可省略的最终条件：
 
-这意味着：
+1. GitHub Actions Billing/Spending Limit 恢复后，让当前 candidate 的所有 gates 真正执行并 PASS；
+2. 完成真实 `WSL → Windows Host helper → Remote SSH` 目标环境验收。
+
+当前状态：
 
 ```text
-repository implementation  COMPLETE
+M7 implementation/harness  IMPLEMENTED
+release integration        IMPLEMENTED
 latest candidate CI        BLOCKED externally
-RC Ready                   NO, until Final Gates rerun green
+WSL target acceptance      PENDING
+RC Ready                   NO
 formal Release             NOT CREATED
 ```
-
-Billing 恢复后可直接通过 `workflow_dispatch` 重跑 Rust、Contracts、SSH Transport 和 Release Gate，不需要额外空提交。
 
 在本地 Linux 环境可先执行全部非 live-SSH 仓库 Gate：
 
@@ -249,7 +318,7 @@ Billing 恢复后可直接通过 `workflow_dispatch` 重跑 Rust、Contracts、S
 bash scripts/rc_check.sh
 ```
 
-该命令不能替代真实双 SSH live Gate，也不能替代目标生产服务器验收。
+`rc_check.sh` 现在还验证 v2 release example 同时保留 Direct SSH 与 ProxyCommand，并要求 release package 包含 v2 machine schema 和 M7 ProxyCommand 交付文档。该命令不能替代真实 Direct/Proxy SSH live Gate，也不能替代目标 WSL/生产服务器验收。
 
 ## 文档索引
 
@@ -257,16 +326,23 @@ bash scripts/rc_check.sh
 - [生产运维指南](./docs/OPERATIONS.md)
 - [生产验收清单](./docs/PRODUCTION_CHECKLIST.md)
 - [v2 Release Readiness](./docs/RELEASE_READINESS_V2.md)
+- [ProxyCommand Transport 设计](./docs/PROXY_COMMAND_TRANSPORT_V2.md)
+- [M7 ProxyCommand 实现基线](./docs/M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md)
+- [M7 ProxyCommand Failure Matrix](./docs/M7_PROXY_COMMAND_FAILURE_MATRIX_V2.md)
+- [M7 Proxy Auth Gate](./docs/M7_PROXY_AUTH_GATE_V2.md)
+- [M7 Proxy Sync Gate](./docs/M7_PROXY_SYNC_GATE_V2.md)
+- [M7 Proxy Restart Gate](./docs/M7_PROXY_RESTART_GATE_V2.md)
+- [M7 Proxy Generation Gate](./docs/M7_PROXY_GENERATION_GATE_V2.md)
+- [M7 Proxy Performance Gate](./docs/M7_PROXY_PERFORMANCE_GATE_V2.md)
 - [M6 Final Baseline](./docs/M6_FINAL_BASELINE_V2.md)
 - [M6 性能基线](./docs/M6_PERFORMANCE_BASELINE_V2.md)
 - [M6 安全/故障矩阵](./docs/M6_SECURITY_FAULT_MATRIX_V2.md)
 - [v2 Remote SSH + Cache 设计](./docs/REMOTE_SSH_CACHE_DESIGN_V2.md)
 - [v2 Remote 实施 TODO](./docs/REMOTE_SSH_CACHE_TODO_V2.md)
-- [M5 Remote Query 实现基线](./docs/M5_IMPLEMENTATION_BASELINE_V2.md)
 - [v1 实现基线](./docs/IMPLEMENTATION_BASELINE_V1.md)
 - [v1 MCP API](./docs/MCP_API_V1.md)
 - [v1 错误模型](./docs/ERROR_MODEL_V1.md)
-- [v1 配置 Schema 说明](./docs/CONFIG_SCHEMA_V1.md)
+- [v2 配置 Schema 说明](./docs/CONFIG_SCHEMA_V2.md)
 - [架构决策记录](./docs/adr/README.md)
 - [MCP 工具机器 Schema](./schemas/mcp-tools-v1.schema.json)
 - [v2 工具错误机器 Schema](./schemas/tool-error-v2.schema.json)
@@ -276,7 +352,7 @@ bash scripts/rc_check.sh
 
 ## 开发验证
 
-完整本地 Final Candidate（不含真实 SSH live/生产环境）：
+完整本地 Final Candidate（不含真实 SSH/Proxy live/生产环境）：
 
 ```bash
 bash scripts/rc_check.sh
@@ -310,6 +386,7 @@ bash scripts/validate_release_package.sh dist/log-query-mcp-v0.1.0-x86_64-unknow
 - Kubernetes、Loki、Elasticsearch。
 - 多实例共享 cursor / `match_ref`。
 - Remote Exec、部署、文件上传或远端写入。
+- ProxyCommand 动态 MCP 参数、Shell command string 或 credential/env 注入。
 - 自动根因分析和代码修复。
 
 ## License
