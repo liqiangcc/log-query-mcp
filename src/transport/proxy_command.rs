@@ -66,7 +66,7 @@ impl Drop for ProxyCommandStream {
         // Reap asynchronously whenever a Tokio runtime is still available. kill_on_drop remains
         // enabled as a final fail-closed guard for runtime-shutdown paths.
         if let Ok(handle) = Handle::try_current() {
-            handle.spawn(async move {
+            let _reaper = handle.spawn(async move {
                 let _ = child.wait().await;
             });
         }
