@@ -41,7 +41,9 @@ for script in \
   bash -n "${script}"
 done
 
-python3 -m py_compile scripts/m7_wsl_acceptance.py
+python3 -m py_compile \
+  scripts/m7_wsl_acceptance.py \
+  scripts/m7_wsl_http_acceptance.py
 
 echo "rc_check: contracts"
 python3 scripts/validate_contracts.py
@@ -75,8 +77,12 @@ for connection in proxy_connections:
 assert "ProxyCommandConfig" in schema.get("$defs", {}), "v2 schema missing ProxyCommandConfig"
 PY
 
-echo "rc_check: WSL acceptance client static precheck"
+echo "rc_check: WSL acceptance clients static precheck"
 python3 scripts/m7_wsl_acceptance.py \
+  --validate-config-only \
+  --config examples/log-query-mcp.v2.remote.json \
+  --source-id inventory-remote-via-host >/dev/null
+python3 scripts/m7_wsl_http_acceptance.py \
   --validate-config-only \
   --config examples/log-query-mcp.v2.remote.json \
   --source-id inventory-remote-via-host >/dev/null
