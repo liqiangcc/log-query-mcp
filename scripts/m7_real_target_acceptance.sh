@@ -149,19 +149,22 @@ record_gate_failure() {
 run_gate() {
   local gate="$1"
   shift
+
   if "$@"; then
     if python3 "${script_dir}/m7_real_target_manifest.py" gate-pass \
         --manifest "${manifest}" \
         --gate "${gate}"; then
       return 0
+    else
+      local manifest_rc=$?
+      record_gate_failure "${gate}" "${manifest_rc}"
+      return "${manifest_rc}"
     fi
-    local manifest_rc=$?
-    record_gate_failure "${gate}" "${manifest_rc}"
-    return "${manifest_rc}"
+  else
+    local gate_rc=$?
+    record_gate_failure "${gate}" "${gate_rc}"
+    return "${gate_rc}"
   fi
-  local gate_rc=$?
-  record_gate_failure "${gate}" "${gate_rc}"
-  return "${gate_rc}"
 }
 
 gate_a() {
