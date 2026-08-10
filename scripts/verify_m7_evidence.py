@@ -196,7 +196,7 @@ def synthetic_pair() -> tuple[dict[str, Any], dict[str, Any]]:
         "target_port": 22,
         "auth_type": "password",
         "proxy_program_basename": "ncat.exe",
-        "proxy_args_shape": ["--proxy-type", "<literal>", "{host}", "{port}"],
+        "proxy_args_shape": ["<literal>", "<literal>", "{host}", "{port}"],
         "config_sha256": h,
         "stdio_binary_sha256": candidate,
         "keyword_sha256": h,
