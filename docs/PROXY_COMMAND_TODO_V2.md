@@ -28,7 +28,7 @@ M7 必须继续遵守现有 v2 安全模型：
 - [x] 定义 Placeholder 首期只允许完整 argv 项 `{host}` / `{port}`。
 - [x] 定义禁止 Shell command string、credential argv 注入和 AI 动态代理配置。
 - [x] 定义 child-process 生命周期、stderr bound/redaction 和 fail-closed 原则。
-- [ ] 同步修正 `PROXY_COMMAND_TRANSPORT_V2.md` 中历史 ADR 建议编号，从 ADR-0011 对齐为 ADR-0012。
+- [x] 修正 `PROXY_COMMAND_TRANSPORT_V2.md` 中历史 ADR 建议编号，从 ADR-0011 对齐为 ADR-0012。
 - [x] 更新机器可读 `schemas/log-query-mcp-config-v2.schema.json`。
 - [x] 更新 Rust v2 config structs/runtime validator。
 - [x] 增加 valid ProxyCommand contract fixture。
