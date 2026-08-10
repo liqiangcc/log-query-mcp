@@ -57,8 +57,8 @@ pub use config_limits_v2::LimitsConfigV2;
 pub use config_v2::{
     AppConfigV2, BackendType, BootstrapPolicy, BootstrapType, CONFIG_VERSION_V2, CacheConfig,
     ConfigV2LoadError, ConfigV2ValidationError, ConfigV2ValidationIssue, ConnectionType,
-    FreshnessPolicy, HostKeyConfig, LogSourceConfigV2, RemoteSyncPolicy, SourceBackendConfig,
-    SshAuthConfig, SshAuthType, SshConnectionConfig,
+    FreshnessPolicy, HostKeyConfig, LogSourceConfigV2, ProxyCommandConfig, ProxyCommandType,
+    RemoteSyncPolicy, SourceBackendConfig, SshAuthConfig, SshAuthType, SshConnectionConfig,
 };
 pub use response_limit::serialize_with_limit;
 pub use scan_executor::{MAX_CONCURRENT_SCAN_TASKS, ScanExecutor, ScanTaskError};
