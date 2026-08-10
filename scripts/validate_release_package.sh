@@ -47,6 +47,7 @@ for path in \
   scripts/m7_wsl_acceptance.py \
   scripts/m7_wsl_acceptance.sh \
   scripts/m7_wsl_http_acceptance.py \
+  scripts/verify_m7_evidence.py \
   docs/INSTALL.md \
   docs/OPERATIONS.md \
   docs/PRODUCTION_CHECKLIST.md \
@@ -62,6 +63,7 @@ for path in \
   docs/M7_PROXY_PERFORMANCE_GATE_V2.md \
   docs/M7_WSL_ACCEPTANCE_V2.md \
   docs/M7_WSL_SYSTEMD_HTTP_ACCEPTANCE_V2.md \
+  docs/M7_REAL_TARGET_EXECUTION_RUNBOOK_V2.md \
   docs/M6_PERFORMANCE_BASELINE_V2.md \
   docs/M6_FINAL_BASELINE_V2.md \
   docs/RELEASE_READINESS_V2.md \
@@ -80,7 +82,8 @@ for path in \
   scripts/healthcheck.sh \
   scripts/m7_wsl_acceptance.py \
   scripts/m7_wsl_acceptance.sh \
-  scripts/m7_wsl_http_acceptance.py; do
+  scripts/m7_wsl_http_acceptance.py \
+  scripts/verify_m7_evidence.py; do
   [[ -x "${root}/${path}" ]] || die "expected executable package entry: ${path}"
 done
 
@@ -123,8 +126,9 @@ PY
 bash -n "${root}/scripts/m7_wsl_acceptance.sh" || die "packaged M7 WSL acceptance wrapper has invalid shell syntax"
 python3 -m py_compile \
   "${root}/scripts/m7_wsl_acceptance.py" \
-  "${root}/scripts/m7_wsl_http_acceptance.py" || \
-  die "packaged M7 WSL acceptance client has invalid Python syntax"
+  "${root}/scripts/m7_wsl_http_acceptance.py" \
+  "${root}/scripts/verify_m7_evidence.py" || \
+  die "packaged M7 acceptance Python tooling has invalid syntax"
 python3 "${root}/scripts/m7_wsl_acceptance.py" \
   --validate-config-only \
   --config "${root}/examples/log-query-mcp.v2.remote.json" \
@@ -135,6 +139,8 @@ python3 "${root}/scripts/m7_wsl_http_acceptance.py" \
   --config "${root}/examples/log-query-mcp.v2.remote.json" \
   --source-id inventory-remote-via-host >/dev/null || \
   die "packaged M7 WSL HTTP acceptance client failed static config validation"
+python3 "${root}/scripts/verify_m7_evidence.py" --self-test >/dev/null || \
+  die "packaged M7 evidence verifier self-test failed"
 
 version="$(awk -F= '$1 == "version" {print $2}' "${root}/BUILDINFO")"
 [[ -n "${version}" ]] || die "BUILDINFO does not contain version"
