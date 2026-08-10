@@ -45,6 +45,7 @@ for path in \
   scripts/rollback.sh \
   scripts/healthcheck.sh \
   scripts/m7_wsl_acceptance.py \
+  scripts/m7_wsl_acceptance.sh \
   docs/INSTALL.md \
   docs/OPERATIONS.md \
   docs/PRODUCTION_CHECKLIST.md \
@@ -75,7 +76,8 @@ for path in \
   scripts/upgrade.sh \
   scripts/rollback.sh \
   scripts/healthcheck.sh \
-  scripts/m7_wsl_acceptance.py; do
+  scripts/m7_wsl_acceptance.py \
+  scripts/m7_wsl_acceptance.sh; do
   [[ -x "${root}/${path}" ]] || die "expected executable package entry: ${path}"
 done
 
@@ -115,6 +117,8 @@ if "ProxyCommandConfig" not in schema.get("$defs", {}):
     raise SystemExit("packaged v2 schema is missing ProxyCommandConfig")
 PY
 
+bash -n "${root}/scripts/m7_wsl_acceptance.sh" || die "packaged M7 WSL acceptance wrapper has invalid shell syntax"
+python3 -m py_compile "${root}/scripts/m7_wsl_acceptance.py" || die "packaged M7 WSL acceptance client has invalid Python syntax"
 python3 "${root}/scripts/m7_wsl_acceptance.py" \
   --validate-config-only \
   --config "${root}/examples/log-query-mcp.v2.remote.json" \
