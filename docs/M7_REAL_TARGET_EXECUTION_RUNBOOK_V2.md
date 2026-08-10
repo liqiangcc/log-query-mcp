@@ -1,6 +1,6 @@
 # Log Query MCP v2 M7 Real Target Execution Runbook
 
-> 状态：Execution procedure implemented / real target execution pending  
+> 状态：Execution procedure/tooling implemented / real target execution pending  
 > 日期：2026-08-10  
 > Draft PR：#25
 
@@ -115,6 +115,54 @@ export M7_EVIDENCE_DIR='/var/lib/log-query-mcp/m7-wsl-evidence'
 
 marker 不是 Secret，但最终 evidence 只保存其 SHA256。
 
+### 7.1 推荐：单命令执行四个 Gate
+
+仓库已经提供 orchestration wrapper：
+
+```text
+scripts/m7_real_target_acceptance.sh
+```
+
+它不实现新的验收逻辑，只按固定顺序调用已有 Gate：
+
+```text
+Gate A service-identity stdio
+  -> Gate B production healthcheck
+  -> Gate C production systemd HTTP Proxy source
+  -> Gate D offline evidence pair verifier
+```
+
+应以实际 service identity 执行，例如：
+
+```bash
+sudo --preserve-env \
+  -u log-query-mcp \
+  ./scripts/m7_real_target_acceptance.sh \
+  --config /etc/log-query-mcp/config.json \
+  --source-id "${M7_SOURCE_ID}" \
+  --keyword "${M7_ACCEPTANCE_MARKER}" \
+  --stdio-bin /opt/log-query-mcp/bin/log-query-mcp-stdio \
+  --http-bin /opt/log-query-mcp/bin/log-query-mcp \
+  --buildinfo /opt/log-query-mcp/BUILDINFO \
+  --evidence-root "${M7_EVIDENCE_DIR}"
+```
+
+每次执行会创建独立目录：
+
+```text
+${M7_EVIDENCE_DIR}/run-<UTC>-<pid>/
+```
+
+并要求 Gate A 和 Gate C 各自产生且只产生一份 evidence。Gate D 对这两份文件交叉验证成功后，wrapper 才输出：
+
+```text
+m7_real_target_acceptance: PASS
+```
+
+任一 Gate 失败时立即停止，并保留已经生成的 evidence，不做自动重试、不删除现场、不修改生产配置。
+
+下面的逐 Gate 命令仍然保留，用于故障定位和审计。
+
 ## 8. Gate A：service-identity stdio
 
 以真实 service identity 执行：
@@ -186,6 +234,10 @@ Windows helper cleanup                     PASS
 ```
 
 ## 11. 找到两份 evidence
+
+如果使用单命令 wrapper，两份 evidence 已被隔离在同一个 `run-*` 目录中，不需要人工从历史文件中挑选。
+
+手工逐 Gate 模式下可执行：
 
 ```bash
 ls -lt "${M7_EVIDENCE_DIR}"/m7-wsl-acceptance-*.json
@@ -293,8 +345,8 @@ Gate D evidence pair verifier        PASS
 在这些条件全部满足前：
 
 ```text
-PR #25 Ready     NO
-merge            NO
-tag/release      NO
+PR #25 Ready      NO
+merge             NO
+tag/release       NO
 production deploy NO
 ```
