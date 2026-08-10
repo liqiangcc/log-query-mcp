@@ -96,6 +96,7 @@ done
 [[ -f scripts/m7_wsl_acceptance.sh ]] || die "missing M7 WSL acceptance service-identity wrapper"
 [[ -f scripts/m7_wsl_http_acceptance.py ]] || die "missing M7 WSL systemd HTTP acceptance client"
 [[ -f scripts/verify_m7_evidence.py ]] || die "missing M7 evidence verifier"
+[[ -f scripts/m7_real_target_manifest.py ]] || die "missing M7 real-target run manifest helper"
 [[ -f scripts/m7_real_target_acceptance.sh ]] || die "missing M7 real-target acceptance orchestrator"
 
 rm -rf "${out_dir:?}/${package_name}"
@@ -114,6 +115,7 @@ install -D -m 0755 scripts/m7_wsl_acceptance.py "${out_dir}/${package_name}/scri
 install -D -m 0755 scripts/m7_wsl_acceptance.sh "${out_dir}/${package_name}/scripts/m7_wsl_acceptance.sh"
 install -D -m 0755 scripts/m7_wsl_http_acceptance.py "${out_dir}/${package_name}/scripts/m7_wsl_http_acceptance.py"
 install -D -m 0755 scripts/verify_m7_evidence.py "${out_dir}/${package_name}/scripts/verify_m7_evidence.py"
+install -D -m 0755 scripts/m7_real_target_manifest.py "${out_dir}/${package_name}/scripts/m7_real_target_manifest.py"
 install -D -m 0755 scripts/m7_real_target_acceptance.sh "${out_dir}/${package_name}/scripts/m7_real_target_acceptance.sh"
 install -D -m 0644 README.md "${out_dir}/${package_name}/README.md"
 
