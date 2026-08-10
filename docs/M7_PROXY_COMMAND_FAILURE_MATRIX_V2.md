@@ -1,13 +1,13 @@
 # Log Query MCP v2 M7 ProxyCommand Failure Matrix
 
-> 状态：Harness implemented / execution blocked before runner start  
+> 状态：Expanded harness implemented / execution blocked before runner start  
 > 日期：2026-08-10  
 > Draft PR：#25  
 > Implementation baseline：[`M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md`](./M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md)
 
 ## 1. 目标
 
-M7 Failure Matrix 用于证明 ProxyCommand 不只是“能连接”，还需要在启动、握手、超时、取消和进程异常情况下保持：
+M7 Failure Matrix 用于证明 ProxyCommand 不只是“能连接”，还需要在启动、认证、握手、超时、取消和 active-session 进程异常情况下保持：
 
 ```text
 fail closed
@@ -15,6 +15,7 @@ no orphan process
 no leaked SSH semaphore permit
 no raw stderr / secret leakage
 no change to host-key/auth trust boundary
+failure isolation between Direct and Proxy transports
 ```
 
 Failure Matrix 独立于正常成功链路 gate：
@@ -24,14 +25,14 @@ Failure Matrix 独立于正常成功链路 gate：
     → success / host-key path
 
 .github/workflows/m7-proxy-command-failures.yml
-    → process / timeout / cancellation fault injection
+    → process / auth / timeout / cancellation / active-session fault injection
 ```
 
-这让正常功能验证和故障注入保持关注分离。
+正常功能验证与故障注入继续保持关注分离。
 
 ## 2. 稳定内部错误分类
 
-当前 `SshTransportError` 增加 ProxyCommand transport-only 分类：
+当前 `SshTransportError` 的 ProxyCommand transport-only 分类：
 
 ```text
 ProxyCommandNotFound
@@ -48,10 +49,11 @@ ProxyCommandTimeout
 | helper 不存在 | `ProxyCommandNotFound` |
 | helper 无执行权限 | `ProxyCommandPermissionDenied` |
 | spawn/stdio 初始化失败 | `ProxyCommandStartFailed` |
-| helper early exit / SSH byte stream 中断 | `ProxyCommandStreamFailed` |
+| helper early exit / handshake byte stream 中断 | `ProxyCommandStreamFailed` |
 | ProxyCommand + SSH handshake 超过统一 deadline | `ProxyCommandTimeout` |
 | wrong host key | `HostKeyVerificationFailed` |
 | wrong SSH credential | `AuthenticationFailed` |
+| active session 中 transport 消失 | SFTP operation error → reader `Broken` |
 
 ProxyCommand 不覆盖 SSH Host Identity 或 Authentication 的原始分类。
 
@@ -65,7 +67,7 @@ ProxyCommand 不覆盖 SSH Host Identity 或 Authentication 的原始分类。
 missing_proxy_program_has_stable_classification
 ```
 
-目标：管理员配置了不存在的 `program` 时：
+目标：
 
 ```text
 spawn
@@ -83,13 +85,7 @@ spawn
 non_executable_proxy_program_has_stable_classification
 ```
 
-Workflow 创建普通文件：
-
-```text
-mode = 0644
-```
-
-然后作为 ProxyCommand program 启动。
+Workflow 创建 mode `0644` 的普通文件并尝试作为 ProxyCommand program 启动。
 
 目标分类：
 
@@ -105,13 +101,7 @@ ProxyCommandPermissionDenied
 early_proxy_exit_is_classified_as_stream_failure
 ```
 
-使用：
-
-```text
-/usr/bin/false
-```
-
-helper 立即退出，stdout EOF，SSH handshake 无法完成。
+使用 `/usr/bin/false` 立即退出，SSH handshake 无法完成。
 
 目标分类：
 
@@ -129,26 +119,19 @@ stderr_flood_still_obeys_proxy_connect_timeout_and_reaps_child
 
 helper：
 
-1. 写入自身 PID。
-2. 向 stderr 写入 128 KiB 数据。
+1. 写入 PID。
+2. 向 stderr 写入 128 KiB。
 3. 不提供有效 SSH stream。
 4. sleep 30 秒。
 
-Transport stderr collector：
+Transport 目标：
 
 ```text
 capture <= 64 KiB
 continue drain after limit
 never expose raw stderr
-```
-
-测试目标：
-
-```text
-stderr pipe 不阻塞 helper/transport
-→ connect_timeout 触发
-→ ProxyCommandTimeout
-→ child 被 kill/reap
+connect_timeout still fires
+child kill/reap
 ```
 
 ### 3.5 Cancellation + Semaphore Release
@@ -172,93 +155,208 @@ start stalling ProxyCommand
 → helper writes PID
 → abort open_reader task
 → ProxyCommandStream Drop
-→ start_kill + wait/reap
-→ helper process disappears
+→ child disappears
 → open second healthy ProxyCommand connection
 ```
 
-如果第二条连接能够进入 SSH/SFTP，则证明取消路径没有永久占用 global SSH semaphore permit。
+第二条连接成功意味着取消路径没有永久泄漏 global SSH semaphore permit。
 
-## 4. Orphan Process 验证
+### 3.6 Wrong Password Through ProxyCommand
 
-测试内部通过：
+测试：
 
 ```text
-/proc/<pid>
+wrong_password_through_proxy_preserves_authentication_error_and_reaps_child
 ```
 
-观察 helper 是否退出。
+使用真实 TCP 字节转发 helper 建立 ProxyCommand stream，但通过独立 `secret_ref` 注入错误密码。
+
+目标：
+
+```text
+ProxyCommand stream established
+→ strict host key succeeds
+→ SSH authentication fails
+→ AuthenticationFailed
+→ tracked proxy helper is reaped
+```
+
+这证明 ProxyCommand 不会把认证失败错误降级成普通 stream/connect failure，也不会在认证失败后遗留 helper process。
+
+### 3.7 Active Proxy Crash / SFTP Failure
+
+测试：
+
+```text
+active_proxy_crash_breaks_sftp_reader_fail_closed
+```
+
+Workflow 提供单进程 controlled TCP proxy helper：
+
+```text
+stdin/stdout ↔ TCP target
+PID file
+trigger file
+```
+
+测试先完成：
+
+```text
+ProxyCommand
+→ SSH handshake
+→ Authentication
+→ SFTP
+→ stat PASS
+```
+
+然后创建 trigger file，使 proxy helper 在 active session 中退出。
+
+目标：
+
+```text
+proxy process exits
+→ target TCP connection closes
+→ next SFTP operation fails
+→ reader marks itself broken
+→ subsequent operation returns Broken
+```
+
+这同时覆盖：
+
+```text
+active ProxyCommand crash
+active network disconnect
+SFTP operation failure through ProxyCommand
+fail-closed reader state
+```
+
+### 3.8 Direct + Proxy Mixed Isolation
+
+测试：
+
+```text
+stalled_proxy_does_not_break_active_direct_transport
+```
+
+配置：
+
+```text
+max_concurrent_ssh_connections = 2
+ProxyCommand connection = intentionally stalled
+Direct connection       = healthy OpenSSH
+```
+
+步骤：
+
+```text
+Proxy path acquires one global permit and stalls
+→ Direct path acquires second permit
+→ Direct SFTP stat succeeds
+→ cancel stalled Proxy path
+→ proxy child reaped
+→ Direct SFTP stat succeeds again
+```
+
+该测试证明：
+
+```text
+Direct and Proxy share the global concurrency budget
+but transport failure state is isolated per connection
+```
+
+Proxy cancellation不能破坏已经建立的 Direct SSH/SFTP session。
+
+## 4. Controlled Proxy Helper 边界
+
+Failure workflow 中的 controlled helper 只是测试 fixture：
+
+```text
+stdin/stdout ↔ TCP socket
+```
+
+它不执行：
+
+```text
+SSH command
+remote shell
+remote grep
+filesystem access
+credential resolution
+MCP request handling
+```
+
+trigger file 只用于测试环境故障注入，不进入生产配置模型。
+
+## 5. Orphan Process 验证
+
+测试内部通过 `/proc/<pid>` 观察 helper 是否退出。
 
 Workflow 结束时再次检查：
 
 ```text
 timeout.pid
 cancel.pid
+auth.pid
+crash.pid
+mixed.pid
 ```
 
-只检查 ProxyCommand helper 的 PID 文件，不检查 `sshd.pid`。
+只检查 ProxyCommand helper PID，不检查 OpenSSH fixture 的 `sshd.pid`。
 
-曾发现初版 workflow 使用 `*.pid`，会把 OpenSSH fixture 的 `sshd.pid` 错认为 orphan helper。该误报已在提交 `3844653d991d34dc68f8985206d31a8b0a637443` 中修复。
+历史上 `*.pid` 误匹配 `sshd.pid` 的问题已在提交 `3844653d991d34dc68f8985206d31a8b0a637443` 修复。
 
-## 5. 当前执行状态
+## 6. 当前执行状态
 
-GitHub 已正确识别 `M7 ProxyCommand Failures` workflow。
+新 Failure Matrix harness 已提交，但 GitHub Actions Billing / Spending Limit blocker 尚未解除。
 
-候选：
+因此当前只能记录：
 
 ```text
-efd07da701bc3e18a89c3204a797d32e01229982
+error classification code             IMPLEMENTED
+program/spawn failure harness          IMPLEMENTED
+timeout/cancellation harness           IMPLEMENTED
+auth failure + child cleanup harness   IMPLEMENTED
+active crash/SFTP failure harness      IMPLEMENTED
+Direct+Proxy isolation harness         IMPLEMENTED
+workflow orphan assertions             IMPLEMENTED
+actual cargo check/test                BLOCKED
+failure evidence                       NO PASS EVIDENCE
 ```
 
-观察到 PR run：
+任何 `steps=null` 的 run 都不能作为 PASS，也不能解释为已知代码测试失败。
+
+## 7. 尚未覆盖的 Fault / Integration
+
+Failure Matrix transport 层剩余重点已明显减少，后续主要是：
 
 ```text
-workflow: M7 ProxyCommand Failures
-run:      31372138200
-job:      proxy-command-failures
-result:   failure
-steps:    null
+server restart through ProxyCommand
+silent stale-cache fallback rejection at Sync/Backend layer
+multi-remote query isolation above transport layer
 ```
 
-runner 没有执行任何 step，与 Issue #23 的 GitHub Actions Billing / Spending Limit blocker 一致。
-
-因此当前状态只能是：
+成功链路仍需补：
 
 ```text
-error classification code       IMPLEMENTED
-failure tests                    IMPLEMENTED
-failure workflow                 IMPLEMENTED
-workflow recognition             CONFIRMED
-actual cargo check/test          BLOCKED
-failure evidence                 NO PASS EVIDENCE
-```
-
-## 6. 尚未覆盖的 Faults
-
-下一轮优先补：
-
-```text
-wrong password through ProxyCommand
-proxy crash during active SFTP session
-active network disconnect
-SFTP operation failure through ProxyCommand
-Direct + Proxy mixed transport isolation
-```
-
-后续再覆盖：
-
-```text
-server restart
-full/tail/from_now sync through proxy
+private key auth
+encrypted private key + passphrase
+full/tail/from_now sync
 incremental append / rotation / truncate
+Remote Query through cache
+```
+
+目标环境仍需：
+
+```text
+WSL → Windows Host ProxyCommand → Remote SSH acceptance
 performance / concurrency regression
 ```
 
-## 7. 安全结论
+## 8. 安全结论
 
-Failure Classification 只存在于内部 SSH Transport 错误层。
+Failure Classification 和 fault injection 都只存在于 SSH Transport / CI 测试层。
 
-它不会新增：
+它们不会新增：
 
 ```text
 MCP Tool
@@ -269,26 +367,27 @@ credential placeholder
 remote shell
 ```
 
-因此 M7 仍保持：
+因此架构仍保持：
 
 ```text
 ProxyCommand = connection mechanism
 not command-execution capability
 ```
 
-## 8. 完成条件
+## 9. 完成条件
 
 Failure Matrix 完整完成前至少需要：
 
-- [ ] 当前 program-not-found 测试真实 PASS。
-- [ ] 当前 permission-denied 测试真实 PASS。
-- [ ] 当前 early-exit/stdout-EOF 测试真实 PASS。
-- [ ] 当前 stderr-flood/timeout 测试真实 PASS。
-- [ ] 当前 cancellation/reap/semaphore 测试真实 PASS。
-- [ ] wrong-password through proxy PASS。
-- [ ] active proxy crash PASS。
-- [ ] mixed Direct/Proxy isolation PASS。
+- [ ] program-not-found 真实 PASS。
+- [ ] permission-denied 真实 PASS。
+- [ ] early-exit/stdout-EOF 真实 PASS。
+- [ ] stderr-flood/timeout 真实 PASS。
+- [ ] cancellation/reap/semaphore 真实 PASS。
+- [ ] wrong-password/auth cleanup 真实 PASS。
+- [ ] active proxy crash/SFTP broken-state 真实 PASS。
+- [ ] mixed Direct/Proxy isolation 真实 PASS。
 - [ ] 所有 PID cleanup assertion PASS。
 - [ ] 无 raw stderr / secret leakage。
+- [ ] 上层 stale-cache fail-closed 证据仍成立。
 
 在上述证据完成前，M7 Failure Matrix 不能标记 DONE，PR #25 继续保持 Draft。
