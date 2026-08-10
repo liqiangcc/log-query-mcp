@@ -43,11 +43,12 @@ actual systemd Streamable HTTP Proxy source acceptance
    - `ActiveState=active`；
    - `User` 等于预期服务身份；
    - `MainPID > 0`；
-3. 记录 Windows helper 进程基线；
-4. 直接调用生产 `/mcp` endpoint；
-5. 验证三个 AI-facing tools；
-6. 记录 helper 是否回到基线；
-7. 输出去敏 JSON evidence。
+3. 对 `/proc/<MainPID>/exe` 与指定 installed candidate binary 做 SHA256 一致性校验；
+4. 记录 Windows helper 进程基线；
+5. 直接调用生产 `/mcp` endpoint；
+6. 验证三个 AI-facing tools；
+7. 记录 helper 是否回到基线；
+8. 输出去敏 JSON evidence。
 
 它不提供：
 
@@ -104,6 +105,7 @@ python3 scripts/m7_wsl_http_acceptance.py \
 
 ```text
 systemctl
+/proc/<pid>/exe
 Windows tasklist
 网络
 MCP endpoint
@@ -146,13 +148,45 @@ python3 scripts/m7_wsl_http_acceptance.py \
   --url http://127.0.0.1:8000/mcp \
   --service-name log-query-mcp.service \
   --expected-service-user log-query-mcp \
+  --expected-http-bin /opt/log-query-mcp/bin/log-query-mcp \
   --buildinfo /opt/log-query-mcp/BUILDINFO \
   --evidence-dir /var/lib/log-query-mcp/m7-wsl-evidence
 ```
 
 Secret 值不应放入命令行；它们应已经由生产 service 的既有 SecretResolver/systemd 环境提供。
 
-## 7. MCP 证据链
+## 7. Candidate Binary Identity
+
+只看到 `MainPID` 不足以证明 systemd 正在运行当前候选版本。
+
+因此脚本会读取：
+
+```text
+/proc/<MainPID>/exe
+```
+
+并分别计算：
+
+```text
+running process executable SHA256
+expected installed HTTP binary SHA256
+```
+
+二者必须完全一致，否则返回：
+
+```text
+SERVICE_BINARY_MISMATCH
+```
+
+若无法读取或 hash，返回：
+
+```text
+SERVICE_BINARY_UNREADABLE
+```
+
+这避免升级后旧进程仍驻留、验收却错误归属于新 candidate 的情况。
+
+## 8. MCP 证据链
 
 客户端直接请求实际 production endpoint：
 
@@ -195,7 +229,7 @@ spawn Windows helper
 → MCP response
 ```
 
-## 8. HTTP Transport 兼容性
+## 9. HTTP Transport 兼容性
 
 当前生产 binary 使用 Streamable HTTP：
 
@@ -206,14 +240,17 @@ with_json_response(true)
 
 验收客户端以 JSON POST 为主，同时：
 
+- 要求 `initialize` 协商到当前 `2025-06-18` protocol；
+- 后续请求携带 `MCP-Protocol-Version`；
 - 若返回 `Mcp-Session-Id`，后续请求会自动携带；
 - Accept 同时允许 `application/json` 与 `text/event-stream`；
 - 对 SSE 响应可解析 `data:` JSON；
+- 非 UTF-8 body fail-closed；
 - 单次 HTTP response 设 8 MiB acceptance 上限，避免故障情况下无界读取。
 
 这只是验收客户端兼容性，不改变 MCP server transport contract。
 
-## 9. Service Identity 证明
+## 10. Service Identity 证明
 
 脚本默认要求：
 
@@ -239,7 +276,7 @@ SERVICE_IDENTITY_MISMATCH
 
 不能用当前 shell 用户成功来替代生产服务身份。
 
-## 10. Helper 生命周期
+## 11. Helper 生命周期
 
 开始 MCP 调用前，脚本通过 Windows：
 
@@ -263,7 +300,7 @@ HELPER_PROCESS_LEAK
 
 系统已有其他同名 helper 不要求归零，本 Gate 只证明本次生产查询没有新增残留进程。
 
-## 11. Evidence
+## 12. Evidence
 
 成功或失败都会尽可能写入 `0600` JSON，例如：
 
@@ -284,6 +321,8 @@ m7-wsl-evidence/m7-wsl-http-acceptance-20260810T120000Z.json
 - keyword SHA256；
 - endpoint SHA256；
 - systemd ActiveState/User/MainPID；
+- running process executable SHA256；
+- expected candidate HTTP binary SHA256；
 - initialize/tools-list/三工具 PASS 状态；
 - search result count；
 - context line count；
@@ -304,7 +343,7 @@ raw stderr
 完整底层 OS error
 ```
 
-## 12. 典型失败分类
+## 13. 典型失败分类
 
 ```text
 CONFIG_UNREADABLE
@@ -316,9 +355,14 @@ SYSTEMCTL_UNAVAILABLE
 SERVICE_NOT_ACTIVE
 SERVICE_IDENTITY_MISMATCH
 SERVICE_PID_INVALID
+EXPECTED_BINARY_UNREADABLE
+SERVICE_BINARY_UNREADABLE
+SERVICE_BINARY_MISMATCH
 TASKLIST_UNAVAILABLE
 HTTP_TRANSPORT_ERROR
 HTTP_STATUS_ERROR
+HTTP_BODY_ENCODING_INVALID
+MCP_PROTOCOL_INVALID
 MCP_JSONRPC_ERROR
 TOOLS_SURFACE_CHANGED
 SOURCE_NOT_LISTED
@@ -329,12 +373,13 @@ HELPER_PROCESS_LEAK
 
 这些是 acceptance-local 分类，不是新的 MCP public error contract。
 
-## 13. Final Gate
+## 14. Final Gate
 
 真实目标 evidence 必须满足：
 
 - [ ] `healthcheck.sh` PASS；
 - [ ] systemd ActiveState/User/MainPID PASS；
+- [ ] running process binary SHA256 与 expected candidate binary 一致；
 - [ ] `tools/list` 只有三个工具；
 - [ ] `list_log_sources` 包含 acceptance Proxy source；
 - [ ] `search_logs` 通过 production systemd service 找到 marker；
