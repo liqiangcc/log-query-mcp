@@ -1,12 +1,14 @@
 # Log Query MCP v2 M7 ProxyCommand 实施 TODO
 
-> 状态：Core + fault + mixed-query + restart + generation harness implemented / CI & live validation blocked  
+> 状态：Core + fault + mixed-query + restart + generation + auth + sync harness implemented / CI & live validation blocked  
 > 日期：2026-08-10  
 > 设计：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
 > 实现基线：[`M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md`](./M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md)  
 > Failure Matrix：[`M7_PROXY_COMMAND_FAILURE_MATRIX_V2.md`](./M7_PROXY_COMMAND_FAILURE_MATRIX_V2.md)  
 > Restart Gate：[`M7_PROXY_RESTART_GATE_V2.md`](./M7_PROXY_RESTART_GATE_V2.md)  
 > Generation Gate：[`M7_PROXY_GENERATION_GATE_V2.md`](./M7_PROXY_GENERATION_GATE_V2.md)  
+> Auth Gate：[`M7_PROXY_AUTH_GATE_V2.md`](./M7_PROXY_AUTH_GATE_V2.md)  
+> Sync Gate：[`M7_PROXY_SYNC_GATE_V2.md`](./M7_PROXY_SYNC_GATE_V2.md)  
 > ADR：[`adr/0012-use-proxy-command-as-ssh-stream-transport.md`](./adr/0012-use-proxy-command-as-ssh-stream-transport.md)  
 > Draft PR：#25
 
@@ -62,18 +64,47 @@
 - [x] workflow-level orphan helper assertion。
 - [ ] actual PASS evidence — **BLOCKED by Billing**。
 
-## 5. M7-4 Success / Failure / Restart / Generation Gates
+## 5. M7-4 Success / Failure / Restart / Generation / Auth / Sync Gates
 
 ### Success Live Gate
 
 - [x] real OpenSSH + `/usr/bin/nc {host} {port}`。
 - [x] password auth / strict known_hosts / wrong-host-key / bounded SFTP read harness。
 - [x] Remote Query through Cache — mixed-query harness implemented。
-- [ ] private key auth。
-- [ ] encrypted private key + passphrase。
-- [ ] full/tail/from_now sync。
-- [ ] incremental append / rotation / truncate。
+- [x] unencrypted private key auth — dedicated Auth gate implemented。
+- [x] encrypted private key + passphrase — dedicated Auth gate implemented。
+- [x] full / tail / from_now sync — dedicated Sync gate implemented。
+- [x] incremental append / rotation / truncate — dedicated Sync gate implemented。
 - [ ] actual PASS evidence — **BLOCKED by Billing**。
+
+### Proxy Key Authentication Gate — HARNESS IMPLEMENTED / EXECUTION BLOCKED
+
+独立 gate：`.github/workflows/m7-proxy-auth.yml`
+
+- [x] 无口令 Ed25519 private key。
+- [x] encrypted Ed25519 private key + `passphrase_secret_ref`。
+- [x] `PasswordAuthentication no` / `PubkeyAuthentication yes` fixture。
+- [x] strict known_hosts 保持在 SSH 层。
+- [x] 两种 key auth 都执行 SFTP `stat` + `read_range`。
+- [x] passphrase 不进入 ProxyCommand argv/stdin/stderr。
+- [ ] Auth gate actual PASS — **BLOCKED by Billing**。
+
+`M7 Proxy Auth` candidate `9abb48c20801ffb0fce63ada609716652f37d88d` 的 run `31378855432` 中，job `proxy-auth-live` 为 `steps=null`。
+
+### Proxy Sync Semantics Gate — HARNESS IMPLEMENTED / EXECUTION BLOCKED
+
+独立 gate：`.github/workflows/m7-proxy-sync.yml`
+
+- [x] `full` bootstrap → `InitialBootstrap`。
+- [x] incremental append → same generation。
+- [x] `tail(bytes)` coverage + later append。
+- [x] `from_now` excludes history + later append。
+- [x] truncate → `RemoteTruncated` new generation。
+- [x] same-path/same-size replacement → `ContinuityMismatch` new generation。
+- [x] cache payload/content assertions。
+- [ ] Sync gate actual PASS — **BLOCKED by Billing**。
+
+`M7 Proxy Sync` candidate `9abb48c20801ffb0fce63ada609716652f37d88d` 的 run `31378855371` 中，job `proxy-sync-live` 为 `steps=null`。
 
 ### Failure Matrix
 
@@ -97,8 +128,6 @@
 - [x] Phase 3：追加内容重新同步并推进 cache generation。
 - [ ] restart/stale-cache gate actual PASS — **BLOCKED by Billing**。
 
-`M7 Proxy Restart` candidate `c0f9b819dd94190397dde9cd60e89a19ddd7cd50` 的 PR run `31374965163` 中，job `proxy-restart-live` 为 `steps=null`。
-
 ### Cursor / MatchRef Generation Gate — HARNESS IMPLEMENTED / EXECUTION BLOCKED
 
 独立 gate：`.github/workflows/m7-proxy-generation.yml`
@@ -114,20 +143,9 @@
 - [x] 暂时移走 known_hosts 后 existing match_ref context 仍 cache-only 可读。
 - [ ] generation-consistency gate actual PASS — **BLOCKED by Billing**。
 
-`M7 Proxy Generation` candidate `90c45a56820774208f42c6c198deda253c3016d9` 的 PR run `31378377040` 中，job `proxy-generation-live` 为 `steps=null`。
-
 ## 6. M7-5 Mixed Transport / Query — HARNESS IMPLEMENTED / EXECUTION BLOCKED
 
 独立 gate：`.github/workflows/m7-mixed-query.yml`
-
-当前 harness：
-
-```text
-Local Source
-Direct Remote
-ProxyCommand Remote
-failed ProxyCommand Remote
-```
 
 - [x] transport-level Direct + stalled Proxy isolation。
 - [x] Direct/Proxy shared global SSH semaphore。
@@ -177,6 +195,8 @@ failed ProxyCommand Remote
 - [ ] release build PASS。
 - [ ] Direct SSH live PASS。
 - [ ] M7 ProxyCommand success gate PASS。
+- [ ] M7 Proxy Auth gate PASS。
+- [ ] M7 Proxy Sync gate PASS。
 - [ ] M7 ProxyCommand failure gate PASS。
 - [ ] M7 Proxy restart/stale-cache gate PASS。
 - [ ] M7 Proxy generation-consistency gate PASS。
@@ -199,6 +219,8 @@ ProxyCommand connector            IMPLEMENTED / CI BLOCKED
 child cleanup + stderr            IMPLEMENTED / CI BLOCKED
 failure classification            IMPLEMENTED / CI BLOCKED
 success live harness              IMPLEMENTED / EXECUTION BLOCKED
+private/encrypted key harness     IMPLEMENTED / EXECUTION BLOCKED
+sync-mode semantics harness       IMPLEMENTED / EXECUTION BLOCKED
 failure matrix harness            EXPANDED / EXECUTION BLOCKED
 restart/stale-cache harness       IMPLEMENTED / EXECUTION BLOCKED
 generation-consistency harness    IMPLEMENTED / EXECUTION BLOCKED
@@ -216,6 +238,7 @@ RC ready                          NO
 ProxyCommand = local stream transport
 SSH          = secure protocol/auth/host identity
 SFTP         = remote read-only file transport
+Sync         = remote-to-local synchronization
 Cache        = stable local snapshot
 Query Engine = search
 MCP          = AI-facing log API
