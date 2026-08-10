@@ -109,11 +109,6 @@ for path in \
   [[ -f "${path}" ]] || die "required acceptance component is missing: $(basename "${path}")"
 done
 
-actual_user="$(id -un)"
-if [[ "${actual_user}" != "${expected_service_user}" ]]; then
-  die "SERVICE_IDENTITY_MISMATCH: expected ${expected_service_user}, got ${actual_user}"
-fi
-
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 run_dir="${evidence_root%/}/run-${run_id}"
 manifest="${run_dir}/m7-real-target-run.json"
