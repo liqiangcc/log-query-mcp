@@ -37,6 +37,7 @@ for path in \
   bin/log-query-mcp-stdio \
   examples/log-query-mcp.v1.json \
   examples/log-query-mcp.v2.remote.json \
+  schemas/log-query-mcp-config-v2.schema.json \
   systemd/log-query-mcp.service \
   scripts/install.sh \
   scripts/uninstall.sh \
@@ -46,6 +47,16 @@ for path in \
   docs/INSTALL.md \
   docs/OPERATIONS.md \
   docs/PRODUCTION_CHECKLIST.md \
+  docs/CONFIG_SCHEMA_V2.md \
+  docs/PROXY_COMMAND_TRANSPORT_V2.md \
+  docs/M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md \
+  docs/M7_PROXY_COMMAND_LIVE_GATE_V2.md \
+  docs/M7_PROXY_AUTH_GATE_V2.md \
+  docs/M7_PROXY_SYNC_GATE_V2.md \
+  docs/M7_PROXY_COMMAND_FAILURE_MATRIX_V2.md \
+  docs/M7_PROXY_RESTART_GATE_V2.md \
+  docs/M7_PROXY_GENERATION_GATE_V2.md \
+  docs/M7_PROXY_PERFORMANCE_GATE_V2.md \
   docs/M6_PERFORMANCE_BASELINE_V2.md \
   docs/M6_FINAL_BASELINE_V2.md \
   docs/RELEASE_READINESS_V2.md \
@@ -69,6 +80,34 @@ done
   cd "${root}"
   sha256sum -c SHA256SUMS
 ) >/dev/null || die "internal package checksum failed"
+
+python3 - "${root}/examples/log-query-mcp.v2.remote.json" "${root}/schemas/log-query-mcp-config-v2.schema.json" <<'PY'
+import json
+import sys
+
+example_path, schema_path = sys.argv[1:]
+with open(example_path, encoding="utf-8") as handle:
+    example = json.load(handle)
+with open(schema_path, encoding="utf-8") as handle:
+    schema = json.load(handle)
+
+connections = example.get("connections", [])
+if not any("proxy" not in connection for connection in connections):
+    raise SystemExit("release v2 example must retain at least one Direct SSH connection")
+proxy_connections = [connection for connection in connections if connection.get("proxy", {}).get("type") == "command"]
+if not proxy_connections:
+    raise SystemExit("release v2 example must contain at least one ProxyCommand connection")
+for connection in proxy_connections:
+    proxy = connection["proxy"]
+    if not proxy.get("program"):
+        raise SystemExit("ProxyCommand example program must be non-empty")
+    for argument in proxy.get("args", []):
+        if "{" in argument or "}" in argument:
+            if argument not in {"{host}", "{port}"}:
+                raise SystemExit("ProxyCommand example contains an unsupported placeholder")
+if "ProxyCommandConfig" not in schema.get("$defs", {}):
+    raise SystemExit("packaged v2 schema is missing ProxyCommandConfig")
+PY
 
 version="$(awk -F= '$1 == "version" {print $2}' "${root}/BUILDINFO")"
 [[ -n "${version}" ]] || die "BUILDINFO does not contain version"
