@@ -14,7 +14,8 @@ use russh::{client, keys};
 use russh_sftp::{client::SftpSession, protocol::FileAttributes};
 use thiserror::Error;
 use tokio::{
-    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
+    io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt},
+    net::TcpStream,
     sync::{OwnedSemaphorePermit, Semaphore},
     task,
     time::timeout,
@@ -27,6 +28,42 @@ const S_IFMT: u32 = 0o170000;
 const S_IFREG: u32 = 0o100000;
 const S_IFDIR: u32 = 0o040000;
 const S_IFLNK: u32 = 0o120000;
+
+trait SshIoStream: AsyncRead + AsyncWrite + Unpin + Send {}
+
+impl<T> SshIoStream for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
+
+type BoxedSshStream = Box<dyn SshIoStream>;
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SshStreamConnector;
+
+impl SshStreamConnector {
+    async fn connect(
+        &self,
+        connection: &SshConnectionConfig,
+    ) -> Result<BoxedSshStream, SshTransportError> {
+        if connection.proxy.is_some() {
+            return Err(SshTransportError::InvalidConfiguration);
+        }
+        DirectConnector.connect(connection).await
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct DirectConnector;
+
+impl DirectConnector {
+    async fn connect(
+        &self,
+        connection: &SshConnectionConfig,
+    ) -> Result<BoxedSshStream, SshTransportError> {
+        let stream = TcpStream::connect((connection.host.as_str(), connection.port))
+            .await
+            .map_err(|_| SshTransportError::ConnectFailed)?;
+        Ok(Box::new(stream))
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoteFileType {
@@ -163,17 +200,15 @@ impl SshReadTransport {
             known_hosts: connection.host_key.known_hosts_file.clone(),
         };
 
-        let mut session = timeout(
-            connect_timeout,
-            client::connect(
-                Arc::new(ssh_config),
-                (connection.host.as_str(), connection.port),
-                handler,
-            ),
-        )
+        let connector = SshStreamConnector;
+        let mut session = timeout(connect_timeout, async {
+            let stream = connector.connect(&connection).await?;
+            client::connect_stream(Arc::new(ssh_config), stream, handler)
+                .await
+                .map_err(map_connect_error)
+        })
         .await
-        .map_err(|_| SshTransportError::ConnectTimeout)?
-        .map_err(map_connect_error)?;
+        .map_err(|_| SshTransportError::ConnectTimeout)??;
 
         authenticate(
             &mut session,
