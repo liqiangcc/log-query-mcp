@@ -34,6 +34,7 @@ for script in \
   scripts/rollback.sh \
   scripts/package_release.sh \
   scripts/validate_release_package.sh \
+  scripts/m7_wsl_acceptance.sh \
   scripts/rc_check.sh \
   tests/healthcheck_test.sh \
   tests/upgrade_rollback_test.sh; do
