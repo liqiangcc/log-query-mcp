@@ -19,6 +19,8 @@ const MAX_HOST_CHARS: usize = 255;
 const MAX_USERNAME_CHARS: usize = 128;
 const MAX_SECRET_REF_CHARS: usize = 256;
 const MAX_PATH_CHARS: usize = 4096;
+const MAX_PROXY_ARGS: usize = 64;
+const MAX_PROXY_ARG_CHARS: usize = 4096;
 const MAX_CACHE_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 const MAX_CACHE_BYTES_PER_SOURCE: u64 = 256 * 1024 * 1024 * 1024;
 const MIN_CACHE_BYTES: u64 = 1024 * 1024;
@@ -197,6 +199,8 @@ pub struct SshConnectionConfig {
     pub username: String,
     pub auth: SshAuthConfig,
     pub host_key: HostKeyConfig,
+    #[serde(default)]
+    pub proxy: Option<ProxyCommandConfig>,
     #[serde(default = "default_connect_timeout_millis")]
     pub connect_timeout_millis: u64,
     #[serde(default = "default_operation_timeout_millis")]
@@ -270,6 +274,9 @@ impl SshConnectionConfig {
         self.auth.validate(&format!("{prefix}.auth"), issues);
         self.host_key
             .validate(&format!("{prefix}.host_key"), issues);
+        if let Some(proxy) = &self.proxy {
+            proxy.validate(&format!("{prefix}.proxy"), issues);
+        }
     }
 }
 
@@ -277,6 +284,64 @@ impl SshConnectionConfig {
 pub enum ConnectionType {
     #[serde(rename = "ssh")]
     Ssh,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProxyCommandConfig {
+    #[serde(rename = "type")]
+    pub proxy_type: ProxyCommandType,
+    pub program: String,
+    pub args: Vec<String>,
+}
+
+impl ProxyCommandConfig {
+    fn validate(&self, prefix: &str, issues: &mut Vec<ConfigV2ValidationIssue>) {
+        if self.program.is_empty()
+            || self.program.len() > MAX_PATH_CHARS
+            || self.program.contains('\0')
+        {
+            push_issue(
+                issues,
+                format!("{prefix}.program"),
+                "must be a non-empty program path/name no longer than 4096 characters",
+            );
+        }
+        if self.args.len() > MAX_PROXY_ARGS {
+            push_issue(
+                issues,
+                format!("{prefix}.args"),
+                format!("must not contain more than {MAX_PROXY_ARGS} values"),
+            );
+        }
+        for (index, argument) in self.args.iter().enumerate() {
+            let field = format!("{prefix}.args[{index}]");
+            if argument.len() > MAX_PROXY_ARG_CHARS || argument.contains('\0') {
+                push_issue(
+                    issues,
+                    field,
+                    "must not exceed 4096 characters or contain NUL",
+                );
+                continue;
+            }
+            if (argument.contains('{') || argument.contains('}'))
+                && argument != "{host}"
+                && argument != "{port}"
+            {
+                push_issue(
+                    issues,
+                    field,
+                    "only whole-argument {host} and {port} placeholders are supported",
+                );
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ProxyCommandType {
+    #[serde(rename = "command")]
+    Command,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -702,6 +767,143 @@ mod tests {
     #[test]
     fn rejects_contract_unknown_connection_fixture() {
         assert!(AppConfigV2::from_json_str(INVALID_UNKNOWN_CONNECTION).is_err());
+    }
+
+    #[test]
+    fn parses_proxy_command_config() {
+        let input = r#"{
+            "version": 2,
+            "connections": [{
+                "connection_id": "proxied-server",
+                "type": "ssh",
+                "host": "10.20.30.40",
+                "port": 22,
+                "username": "log-reader",
+                "auth": {"type": "password", "secret_ref": "PROXY_TEST_PASSWORD"},
+                "host_key": {"known_hosts_file": "/etc/log-query-mcp/known_hosts"},
+                "proxy": {
+                    "type": "command",
+                    "program": "ncat.exe",
+                    "args": ["{host}", "{port}"]
+                }
+            }],
+            "sources": [{
+                "source_id": "remote",
+                "name": "remote",
+                "service": "remote",
+                "environment": "test",
+                "backend": {"type": "ssh", "connection_id": "proxied-server"},
+                "root": "/var/log/remote",
+                "files": ["application.log"],
+                "sync": {"freshness": "on_query", "bootstrap": {"type": "full"}}
+            }],
+            "cache": {
+                "root": "/var/cache/log-query-mcp",
+                "max_bytes": 10485760,
+                "max_bytes_per_source": 5242880,
+                "retention_hours": 24,
+                "max_generations_per_file": 4
+            }
+        }"#;
+
+        let config = AppConfigV2::from_json_str(input).expect("proxy config should parse");
+        let proxy = config.connections[0]
+            .proxy
+            .as_ref()
+            .expect("proxy should be present");
+        assert_eq!(proxy.proxy_type, ProxyCommandType::Command);
+        assert_eq!(proxy.program, "ncat.exe");
+        assert_eq!(proxy.args, ["{host}", "{port}"]);
+    }
+
+    #[test]
+    fn rejects_unknown_proxy_placeholder() {
+        let input = r#"{
+            "version": 2,
+            "connections": [{
+                "connection_id": "proxied-server",
+                "type": "ssh",
+                "host": "10.20.30.40",
+                "username": "log-reader",
+                "auth": {"type": "password", "secret_ref": "PROXY_TEST_PASSWORD"},
+                "host_key": {"known_hosts_file": "/etc/log-query-mcp/known_hosts"},
+                "proxy": {
+                    "type": "command",
+                    "program": "proxy-helper",
+                    "args": ["{username}"]
+                }
+            }],
+            "sources": [{
+                "source_id": "remote",
+                "name": "remote",
+                "service": "remote",
+                "environment": "test",
+                "backend": {"type": "ssh", "connection_id": "proxied-server"},
+                "root": "/var/log/remote",
+                "files": ["application.log"],
+                "sync": {"freshness": "on_query", "bootstrap": {"type": "full"}}
+            }],
+            "cache": {
+                "root": "/var/cache/log-query-mcp",
+                "max_bytes": 10485760,
+                "max_bytes_per_source": 5242880,
+                "retention_hours": 24,
+                "max_generations_per_file": 4
+            }
+        }"#;
+
+        let error = AppConfigV2::from_json_str(input).expect_err("placeholder must fail");
+        let ConfigV2LoadError::Validation(error) = error else {
+            panic!("expected validation error");
+        };
+        assert!(error.issues().iter().any(|issue| {
+            issue.field == "connections[0].proxy.args[0]"
+                && issue.message.contains("{host}")
+                && issue.message.contains("{port}")
+        }));
+    }
+
+    #[test]
+    fn rejects_unknown_proxy_field() {
+        let input = r#"{
+            "version": 2,
+            "connections": [{
+                "connection_id": "proxied-server",
+                "type": "ssh",
+                "host": "10.20.30.40",
+                "username": "log-reader",
+                "auth": {"type": "password", "secret_ref": "PROXY_TEST_PASSWORD"},
+                "host_key": {"known_hosts_file": "/etc/log-query-mcp/known_hosts"},
+                "proxy": {
+                    "type": "command",
+                    "program": "proxy-helper",
+                    "args": ["{host}", "{port}"],
+                    "command": "forbidden shell string"
+                }
+            }],
+            "sources": [{
+                "source_id": "remote",
+                "name": "remote",
+                "service": "remote",
+                "environment": "test",
+                "backend": {"type": "ssh", "connection_id": "proxied-server"},
+                "root": "/var/log/remote",
+                "files": ["application.log"],
+                "sync": {"freshness": "on_query", "bootstrap": {"type": "full"}}
+            }],
+            "cache": {
+                "root": "/var/cache/log-query-mcp",
+                "max_bytes": 10485760,
+                "max_bytes_per_source": 5242880,
+                "retention_hours": 24,
+                "max_generations_per_file": 4
+            }
+        }"#;
+
+        assert!(matches!(
+            AppConfigV2::from_json_str(input),
+            Err(ConfigV2LoadError::Parse(_))
+        ));
     }
 
     #[test]
