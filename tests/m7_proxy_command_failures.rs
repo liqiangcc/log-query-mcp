@@ -19,10 +19,11 @@ fn port(name: &str) -> u16 {
         .unwrap_or_else(|_| panic!("invalid test port in {name}"))
 }
 
-fn proxy_connection(
+fn proxy_connection_with_secret(
     connection_id: &str,
     program: &str,
     args: Vec<String>,
+    secret_ref: &str,
     connect_timeout_millis: u64,
 ) -> Value {
     json!({
@@ -33,7 +34,7 @@ fn proxy_connection(
         "username": "logreader",
         "auth": {
             "type": "password",
-            "secret_ref": "M2_SSH_PASSWORD"
+            "secret_ref": secret_ref
         },
         "host_key": {
             "known_hosts_file": required("M2_KNOWN_HOSTS")
@@ -49,7 +50,46 @@ fn proxy_connection(
     })
 }
 
-fn config(connections: Vec<Value>, source_connection_id: &str) -> AppConfigV2 {
+fn proxy_connection(
+    connection_id: &str,
+    program: &str,
+    args: Vec<String>,
+    connect_timeout_millis: u64,
+) -> Value {
+    proxy_connection_with_secret(
+        connection_id,
+        program,
+        args,
+        "M2_SSH_PASSWORD",
+        connect_timeout_millis,
+    )
+}
+
+fn direct_connection(connection_id: &str, connect_timeout_millis: u64) -> Value {
+    json!({
+        "connection_id": connection_id,
+        "type": "ssh",
+        "host": "127.0.0.1",
+        "port": port("M2_SSH_PORT"),
+        "username": "logreader",
+        "auth": {
+            "type": "password",
+            "secret_ref": "M2_SSH_PASSWORD"
+        },
+        "host_key": {
+            "known_hosts_file": required("M2_KNOWN_HOSTS")
+        },
+        "connect_timeout_millis": connect_timeout_millis,
+        "operation_timeout_millis": 3000,
+        "keepalive_seconds": 5
+    })
+}
+
+fn config_with_limit(
+    connections: Vec<Value>,
+    source_connection_id: &str,
+    max_concurrent_ssh_connections: usize,
+) -> AppConfigV2 {
     let remote_dir = required("M2_REMOTE_DIR");
     let remote_file = required("M2_REMOTE_FILE");
     let file_name = remote_file
@@ -84,11 +124,15 @@ fn config(connections: Vec<Value>, source_connection_id: &str) -> AppConfigV2 {
             "max_generations_per_file": 2
         },
         "limits": {
-            "max_concurrent_ssh_connections": 1
+            "max_concurrent_ssh_connections": max_concurrent_ssh_connections
         }
     });
 
     AppConfigV2::from_json_str(&document.to_string()).expect("M7 failure config should be valid")
+}
+
+fn config(connections: Vec<Value>, source_connection_id: &str) -> AppConfigV2 {
+    config_with_limit(connections, source_connection_id, 1)
 }
 
 async fn wait_for_pid(path: &str) -> u32 {
@@ -106,7 +150,7 @@ async fn wait_for_pid(path: &str) -> u32 {
 
 async fn wait_for_process_exit(pid: u32) {
     let proc_path = format!("/proc/{pid}");
-    for _ in 0..100 {
+    for _ in 0..150 {
         if !Path::new(&proc_path).exists() {
             return;
         }
@@ -230,4 +274,137 @@ async fn cancelling_proxy_connect_reaps_child_and_releases_global_permit() {
         .await
         .expect("cancellation must release the shared SSH connection permit");
     reader.close().await.expect("good reader should close");
+}
+
+#[tokio::test]
+#[ignore = "requires the M7 ProxyCommand failure workflow fixture"]
+async fn wrong_password_through_proxy_preserves_authentication_error_and_reaps_child() {
+    let pid_file = required("M7_AUTH_PID_FILE");
+    let trigger_file = required("M7_AUTH_TRIGGER_FILE");
+    let _ = fs::remove_file(&pid_file);
+    let _ = fs::remove_file(&trigger_file);
+    let connection = proxy_connection_with_secret(
+        "bad-auth",
+        &required("M7_CONTROLLED_PROXY_PROGRAM"),
+        vec![
+            "{host}".to_owned(),
+            "{port}".to_owned(),
+            trigger_file,
+            pid_file.clone(),
+        ],
+        "M7_BAD_SSH_PASSWORD",
+        3000,
+    );
+    let manager = SshConnectionManager::from_config(&config(vec![connection], "bad-auth"))
+        .expect("connection manager should build");
+
+    assert_eq!(
+        manager
+            .open_reader("bad-auth")
+            .await
+            .expect_err("wrong password through proxy must remain an SSH auth failure"),
+        SshTransportError::AuthenticationFailed
+    );
+    let pid = wait_for_pid(&pid_file).await;
+    wait_for_process_exit(pid).await;
+}
+
+#[tokio::test]
+#[ignore = "requires the M7 ProxyCommand failure workflow fixture"]
+async fn active_proxy_crash_breaks_sftp_reader_fail_closed() {
+    let pid_file = required("M7_CRASH_PID_FILE");
+    let trigger_file = required("M7_CRASH_TRIGGER_FILE");
+    let remote_file = required("M2_REMOTE_FILE");
+    let _ = fs::remove_file(&pid_file);
+    let _ = fs::remove_file(&trigger_file);
+    let connection = proxy_connection(
+        "active-crash",
+        &required("M7_CONTROLLED_PROXY_PROGRAM"),
+        vec![
+            "{host}".to_owned(),
+            "{port}".to_owned(),
+            trigger_file.clone(),
+            pid_file.clone(),
+        ],
+        3000,
+    );
+    let manager = SshConnectionManager::from_config(&config(vec![connection], "active-crash"))
+        .expect("connection manager should build");
+    let reader = manager
+        .open_reader("active-crash")
+        .await
+        .expect("controlled proxy must establish SSH/SFTP before the injected crash");
+
+    reader
+        .stat(&remote_file)
+        .await
+        .expect("SFTP should work before the proxy crashes");
+    let pid = wait_for_pid(&pid_file).await;
+    fs::write(&trigger_file, b"crash\n").expect("should trigger controlled proxy crash");
+    wait_for_process_exit(pid).await;
+
+    let first_error = reader
+        .stat(&remote_file)
+        .await
+        .expect_err("active proxy crash must fail the next SFTP operation");
+    assert!(matches!(
+        first_error,
+        SshTransportError::SftpProtocol
+            | SshTransportError::OperationTimeout
+            | SshTransportError::Broken
+    ));
+    assert_eq!(
+        reader
+            .stat(&remote_file)
+            .await
+            .expect_err("reader must remain fail-closed after the transport breaks"),
+        SshTransportError::Broken
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the M7 ProxyCommand failure workflow fixture"]
+async fn stalled_proxy_does_not_break_active_direct_transport() {
+    let pid_file = required("M7_MIXED_PID_FILE");
+    let remote_file = required("M2_REMOTE_FILE");
+    let _ = fs::remove_file(&pid_file);
+    let stall = proxy_connection(
+        "proxy-stall",
+        &required("M7_STALL_PROGRAM"),
+        vec![pid_file.clone()],
+        5000,
+    );
+    let direct = direct_connection("direct-good", 3000);
+    let manager = SshConnectionManager::from_config(&config_with_limit(
+        vec![stall, direct],
+        "direct-good",
+        2,
+    ))
+    .expect("connection manager should build");
+
+    let proxy_manager = manager.clone();
+    let proxy_task = tokio::spawn(async move { proxy_manager.open_reader("proxy-stall").await });
+    let pid = wait_for_pid(&pid_file).await;
+
+    let direct_reader = manager
+        .open_reader("direct-good")
+        .await
+        .expect("a stalled ProxyCommand must not prevent an independent Direct connection");
+    direct_reader
+        .stat(&remote_file)
+        .await
+        .expect("Direct SFTP must work while ProxyCommand is stalled");
+
+    proxy_task.abort();
+    let _ = proxy_task.await;
+    wait_for_process_exit(pid).await;
+
+    direct_reader
+        .stat(&remote_file)
+        .await
+        .expect("cancelling the ProxyCommand path must not break the active Direct session");
+    direct_reader
+        .close()
+        .await
+        .expect("Direct reader should close cleanly");
 }
