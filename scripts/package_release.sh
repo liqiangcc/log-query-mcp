@@ -87,6 +87,7 @@ fi
 [[ -x "${bin_dir}/log-query-mcp-stdio" ]] || die "missing executable ${bin_dir}/log-query-mcp-stdio"
 [[ -f examples/log-query-mcp.v1.json ]] || die "missing v1 example config"
 [[ -f examples/log-query-mcp.v2.remote.json ]] || die "missing v2 remote example config"
+[[ -f schemas/log-query-mcp-config-v2.schema.json ]] || die "missing v2 machine config schema"
 [[ -f systemd/log-query-mcp.service ]] || die "missing systemd unit"
 for script in install.sh uninstall.sh upgrade.sh rollback.sh healthcheck.sh; do
   [[ -f "scripts/${script}" ]] || die "missing ${script}"
@@ -99,6 +100,7 @@ install -m 0755 "${bin_dir}/log-query-mcp" "${out_dir}/${package_name}/bin/log-q
 install -m 0755 "${bin_dir}/log-query-mcp-stdio" "${out_dir}/${package_name}/bin/log-query-mcp-stdio"
 install -D -m 0644 examples/log-query-mcp.v1.json "${out_dir}/${package_name}/examples/log-query-mcp.v1.json"
 install -D -m 0644 examples/log-query-mcp.v2.remote.json "${out_dir}/${package_name}/examples/log-query-mcp.v2.remote.json"
+install -D -m 0644 schemas/log-query-mcp-config-v2.schema.json "${out_dir}/${package_name}/schemas/log-query-mcp-config-v2.schema.json"
 install -D -m 0644 systemd/log-query-mcp.service "${out_dir}/${package_name}/systemd/log-query-mcp.service"
 for script in install.sh uninstall.sh upgrade.sh rollback.sh healthcheck.sh; do
   install -D -m 0755 "scripts/${script}" "${out_dir}/${package_name}/scripts/${script}"
@@ -109,6 +111,16 @@ for doc in \
   docs/INSTALL.md \
   docs/OPERATIONS.md \
   docs/PRODUCTION_CHECKLIST.md \
+  docs/CONFIG_SCHEMA_V2.md \
+  docs/PROXY_COMMAND_TRANSPORT_V2.md \
+  docs/M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md \
+  docs/M7_PROXY_COMMAND_LIVE_GATE_V2.md \
+  docs/M7_PROXY_AUTH_GATE_V2.md \
+  docs/M7_PROXY_SYNC_GATE_V2.md \
+  docs/M7_PROXY_COMMAND_FAILURE_MATRIX_V2.md \
+  docs/M7_PROXY_RESTART_GATE_V2.md \
+  docs/M7_PROXY_GENERATION_GATE_V2.md \
+  docs/M7_PROXY_PERFORMANCE_GATE_V2.md \
   docs/M6_PERFORMANCE_BASELINE_V2.md \
   docs/M6_FINAL_BASELINE_V2.md \
   docs/RELEASE_READINESS_V2.md; do
