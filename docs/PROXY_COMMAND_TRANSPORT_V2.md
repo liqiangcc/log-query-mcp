@@ -1320,7 +1320,7 @@ Release
 新增：
 
 ```text
-ADR-0011-use-proxy-command-as-ssh-stream-transport.md
+ADR-0012-use-proxy-command-as-ssh-stream-transport.md
 ```
 
 Decision：
