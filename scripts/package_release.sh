@@ -92,6 +92,7 @@ fi
 for script in install.sh uninstall.sh upgrade.sh rollback.sh healthcheck.sh; do
   [[ -f "scripts/${script}" ]] || die "missing ${script}"
 done
+[[ -f scripts/m7_wsl_acceptance.py ]] || die "missing M7 WSL acceptance client"
 
 rm -rf "${out_dir:?}/${package_name}"
 mkdir -p "${out_dir}/${package_name}/bin"
@@ -105,6 +106,7 @@ install -D -m 0644 systemd/log-query-mcp.service "${out_dir}/${package_name}/sys
 for script in install.sh uninstall.sh upgrade.sh rollback.sh healthcheck.sh; do
   install -D -m 0755 "scripts/${script}" "${out_dir}/${package_name}/scripts/${script}"
 done
+install -D -m 0755 scripts/m7_wsl_acceptance.py "${out_dir}/${package_name}/scripts/m7_wsl_acceptance.py"
 install -D -m 0644 README.md "${out_dir}/${package_name}/README.md"
 
 for doc in \
@@ -121,6 +123,7 @@ for doc in \
   docs/M7_PROXY_RESTART_GATE_V2.md \
   docs/M7_PROXY_GENERATION_GATE_V2.md \
   docs/M7_PROXY_PERFORMANCE_GATE_V2.md \
+  docs/M7_WSL_ACCEPTANCE_V2.md \
   docs/M6_PERFORMANCE_BASELINE_V2.md \
   docs/M6_FINAL_BASELINE_V2.md \
   docs/RELEASE_READINESS_V2.md; do
