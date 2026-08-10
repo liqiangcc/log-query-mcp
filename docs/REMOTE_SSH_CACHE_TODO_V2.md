@@ -1,10 +1,11 @@
 # Log Query MCP v2 Remote SSH/Cache 实施 TODO
 
-> 状态：M0-M6 implementation complete / M7 ProxyCommand planned / Final RC not ready  
+> 状态：M0-M6 historical implementation complete / M7 implementation + harness + release integration complete / Final RC not ready  
 > 日期：2026-08-10  
 > 总方案：[`REMOTE_SSH_CACHE_DESIGN_V2.md`](./REMOTE_SSH_CACHE_DESIGN_V2.md)  
 > ProxyCommand 方案：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
 > M7 TODO：[`PROXY_COMMAND_TODO_V2.md`](./PROXY_COMMAND_TODO_V2.md)  
+> M7 基线：[`M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md`](./M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md)  
 > M6 最终基线：[`M6_FINAL_BASELINE_V2.md`](./M6_FINAL_BASELINE_V2.md)  
 > Draft PR：#25  
 > External CI blocker：Issue #23
@@ -21,7 +22,7 @@ v2 全部实现继续遵守：
 - 默认 fail-closed，不静默使用 stale cache。
 - Tail/FromNow 覆盖不足必须返回 `CACHE_SCOPE_EXCEEDED`，不能制造假阴性。
 - SSH 是内部 Transport，不是业务 API。
-- ProxyCommand 若启用，也只能作为 SSH raw byte stream Transport，不能成为通用命令执行能力。
+- ProxyCommand 只能作为管理员配置的 SSH raw byte-stream Transport，不能成为通用命令执行能力。
 - Cache generation + snapshot length 是 Remote cursor / match_ref 的稳定边界。
 
 ## 1. M0～M5 — DONE
@@ -41,7 +42,7 @@ v2 全部实现继续遵守：
 - [`M4_IMPLEMENTATION_BASELINE_V2.md`](./M4_IMPLEMENTATION_BASELINE_V2.md)
 - [`M5_IMPLEMENTATION_BASELINE_V2.md`](./M5_IMPLEMENTATION_BASELINE_V2.md)
 
-## 2. M6-A～D Security / Fault / Multi-Server — DONE
+## 2. M6 Security / Fault / Multi-Server — HISTORICAL DONE
 
 - [x] AI cannot submit SSH host/user/credential/root/arbitrary path。
 - [x] Remote symlink escape rejected；regular-file-only。
@@ -55,9 +56,9 @@ v2 全部实现继续遵守：
 
 矩阵：[`M6_SECURITY_FAULT_MATRIX_V2.md`](./M6_SECURITY_FAULT_MATRIX_V2.md)
 
-## 3. M6-E Performance — IMPLEMENTATION COMPLETE
+M7 修改了 SSH Transport，因此这些历史证据仍是重要回归基线，但不能替代当前 candidate 的 Direct/M7 live Gate。
 
-Large-file evidence：
+## 3. M6 Performance — HISTORICAL BASELINE COMPLETE
 
 - [x] 100 MiB full bootstrap。
 - [x] 1 GiB full bootstrap。
@@ -66,17 +67,15 @@ Large-file evidence：
 - [x] append only transfers payload + bounded probes。
 - [x] local cache scan = 0 remote bytes。
 - [x] 300 continuous range-read handle regression。
-
-Concurrency：
-
 - [x] single-server 4-query benchmark harness。
 - [x] dual-server concurrent-query benchmark harness。
-- [x] harness wired into real two-OpenSSH SSH Transport workflow。
-- [ ] newest live elapsed metrics — **BLOCKED before runner start by GitHub Actions Billing**。
+- [x] historical large-file evidence recorded。
 
 基线：[`M6_PERFORMANCE_BASELINE_V2.md`](./M6_PERFORMANCE_BASELINE_V2.md)
 
-## 4. M6-F Production Readiness — DONE FOR PRE-M7 BASELINE
+M7 已新增 Direct/Proxy paired performance gate；M6 elapsed 数字不作为 M7 PASS threshold。
+
+## 4. M6 Production Readiness — PRE-M7 BASELINE COMPLETE
 
 ### Release / package
 
@@ -93,113 +92,136 @@ Concurrency：
 - [x] protocol-health failure matrix covers inactive service / JSON-RPC error / wrong server / transport failure。
 - [x] upgrade verifies checksum before mutation, preserves config, backs up runtime state and atomically replaces runtime files。
 - [x] restart/protocol-health failure triggers automatic rollback。
-- [x] rollback restores exact previous state and must pass protocol health。
-- [x] rollback preserves backed-up ownership/modes for service-readable config/unit。
+- [x] rollback restores previous state and must pass protocol health。
 - [x] isolated lifecycle tests cover successful upgrade / explicit rollback / restart failure / corrupt package / tar input。
 
-### Final Candidate helper / docs
+M7 Release Integration 已在此基础上补充 ProxyCommand schema/example/docs/package contract。
 
-- [x] `scripts/rc_check.sh` runs all repository-local non-live gates in one command。
-- [x] Rust、Contracts、SSH Transport、Release expose manual rerun paths；M6 Performance already exposes profile-based `workflow_dispatch`。
-- [x] README / INSTALL / OPERATIONS / PRODUCTION_CHECKLIST / RELEASE_READINESS / M6_FINAL aligned with pre-M7 v2 baseline。
-- [x] Draft PR #25 updated with pre-M7 production-readiness scope。
+## 5. M7 ProxyCommand — IMPLEMENTED / VALIDATION BLOCKED
 
-Release contract：[`RELEASE_READINESS_V2.md`](./RELEASE_READINESS_V2.md)
+### Design / config
 
-> M7 修改 SSH Transport 后，上述 release/readiness 文档和验证证据必须重新对齐，不能直接把 pre-M7 结果作为最终 RC。
+- [x] `PROXY_COMMAND_TRANSPORT_V2.md`。
+- [x] ADR-0012。
+- [x] machine JSON Schema `ProxyCommandConfig`。
+- [x] Rust config/runtime validator。
+- [x] Direct + Proxy shared stream connector。
+- [x] whole-argv `{host}` / `{port}` placeholders。
 
-## 5. M7 ProxyCommand — DESIGN ACCEPTED / IMPLEMENTATION PENDING
+### Process / security
 
-目标：支持 WSL / Container 等环境通过宿主机或管理员指定 helper 建立 SSH 底层字节流，同时不扩大 Log Query MCP 的命令权限。
+- [x] direct `program + argv[]` spawn，无 Shell command string。
+- [x] stdin/stdout raw SSH stream。
+- [x] bounded stderr。
+- [x] timeout/cancellation/kill/reap lifecycle baseline。
+- [x] stable ProxyCommand startup/stream/timeout internal errors。
+- [x] strict known_hosts/auth/SFTP 保持在 Proxy 层之上。
+- [x] no new MCP Tool / Exec / write / upload / arbitrary path。
 
-设计与决策：
+### Functional harnesses
 
-- [x] `PROXY_COMMAND_TRANSPORT_V2.md` 已提交。
-- [x] ADR-0012 已接受：ProxyCommand 只作为 SSH Stream Transport。
-- [x] `CONFIG_SCHEMA_V2.md` 已定义目标 ProxyCommand 配置契约。
-- [x] 独立 `PROXY_COMMAND_TODO_V2.md` 已建立。
+- [x] real ProxyCommand → OpenSSH → SFTP success path。
+- [x] wrong host key fail-closed。
+- [x] password/private/encrypted-key auth。
+- [x] full/tail/from_now/incremental/rotation/truncate Sync。
+- [x] startup/permission/EOF/stderr flood/timeout/cancellation/auth/crash failure matrix。
+- [x] child cleanup + semaphore release。
+- [x] Direct + Proxy transport isolation。
+- [x] Local + Direct + Proxy mixed query。
+- [x] failed Proxy source isolation。
+- [x] server restart / stale-cache fail-closed / recovery。
+- [x] cursor/match_ref/generation pin consistency。
 
-实现入口：
+### Performance harness
 
-- [ ] 修正 ProxyCommand 设计文档中的历史 ADR 编号引用为 ADR-0012。
-- [ ] 更新机器 JSON Schema。
-- [ ] 更新 Rust config/runtime validator。
-- [ ] 抽取 Direct/Proxy 共用 SSH stream connector。
-- [ ] 实现 ProxyCommand process stdin/stdout stream。
-- [ ] 实现 timeout/cancellation/child cleanup/bounded stderr/redaction。
-- [ ] Direct SSH 全量 regression。
-- [ ] ProxyCommand SSH/SFTP live gate。
-- [ ] Multi-server + failure isolation。
-- [ ] WSL → Windows Host → Remote SSH acceptance。
-- [ ] large-file / concurrency / process-leak regression。
-- [ ] README / INSTALL / OPERATIONS / release docs 对齐。
-- [ ] 完整 Final RC Gate 重跑。
+- [x] Direct/Proxy 5-session setup paired measurement。
+- [x] 100 MiB / 1 GiB / 10 GiB-tail paired profiles。
+- [x] bounded unchanged/incremental transfer assertions。
+- [x] Proxy 300 range reads。
+- [x] 2 Direct + 2 Proxy concurrency。
+- [x] normal-path helper orphan checks。
+- [x] environment/metrics/time/disk artifact wiring。
+- [ ] actual M7 performance metrics — **BLOCKED by Billing**。
+
+### Release Integration
+
+- [x] README Direct/Proxy/WSL/security guidance。
+- [x] INSTALL service-identity/helper/systemd-hardening guidance。
+- [x] OPERATIONS diagnostics/error categories/lifecycle guidance。
+- [x] PRODUCTION_CHECKLIST Proxy/WSL/performance acceptance。
+- [x] v2 example contains Direct + Proxy connections/sources。
+- [x] release package includes v2 machine schema and M7 delivery docs。
+- [x] release validator checks Direct+Proxy example, placeholders and machine schema。
+- [x] `rc_check.sh` includes ProxyCommand release-contract non-live check。
 
 详细阶段与验收项见 [`PROXY_COMMAND_TODO_V2.md`](./PROXY_COMMAND_TODO_V2.md)。
 
-## 6. Final Gate — NOT READY
+## 6. WSL Acceptance — PENDING REAL TARGET
 
-### 6.1 既有外部阻塞
-
-pre-M7 candidate 的 GitHub Actions 仍存在 Billing/Spending Limit 外部阻塞。历史候选运行在 runner 启动前被拒绝，这不是已知代码失败，但也不能标记为 PASS。
-
-Canonical external blocker：Issue #23。
-
-### 6.2 M7 引入后的新边界
-
-在接受 M7 ProxyCommand 后，即使 Billing 恢复，也不能直接把旧 candidate 标成 RC READY。
-
-原因：
+必须形成可追溯的真实证据：
 
 ```text
-M7 changes SSH transport/config/security/process lifecycle
-↓
-old candidate evidence is not the final candidate
-↓
-M7 implementation must complete
-↓
-new candidate must rerun all critical gates
+WSL Direct target path unavailable
+    +
+Windows Host/VPN path available
+    +
+log-query-mcp service identity launches approved Windows helper
+    +
+ProxyCommand -> SSH -> strict known_hosts -> auth -> SFTP
+    +
+list_log_sources/search_logs/get_log_context PASS
+    +
+normal/failure/cancel helper cleanup PASS
 ```
 
-最终必须完成：
+- [ ] direct path 确认不可用。
+- [ ] Windows Host/VPN path 可用。
+- [ ] service identity Windows executable interop PASS。
+- [ ] strict host-key/auth/SFTP PASS。
+- [ ] 三个 MCP 工具 PASS。
+- [ ] helper lifecycle / error redaction PASS。
 
-- [ ] M7 implementation complete。
+## 7. Final Gate — NOT READY
+
+当前必须完成：
+
 - [ ] `bash scripts/rc_check.sh` on final candidate PASS。
 - [ ] candidate Rust Gate PASS。
 - [ ] candidate Contracts Gate PASS。
-- [ ] candidate Direct + Proxy SSH live Gate PASS。
-- [ ] candidate M6/M7 security/fault Gate PASS。
-- [ ] candidate WSL acceptance evidence recorded。
-- [ ] candidate single/dual/mixed concurrency metrics recorded。
-- [ ] candidate Release Gate PASS（shell syntax / smoke / protocol health / lifecycle / package validation）。
-- [ ] M7 transport change 后重跑相关 large-file Performance。
-- [ ] 确认没有 unexplained critical failure，然后才可把 RC 标成 Ready。
+- [ ] candidate Direct SSH Gate PASS。
+- [ ] candidate M7 ProxyCommand success/auth/sync/failure/mixed/restart/generation Gates PASS。
+- [ ] candidate M7 Proxy Performance PASS + metrics/artifact recorded。
+- [ ] candidate Release/package/lifecycle PASS。
+- [ ] WSL acceptance evidence recorded。
+- [ ] no unexplained critical failure。
 
-## 7. 发布 / 环境动作
+GitHub Actions Billing/Spending Limit 仍是外部 blocker，Issue #23 为 canonical tracking issue。`steps=null` 既不是 code PASS，也不是已知 code failure。
+
+## 8. 发布 / 环境动作
 
 - [x] Draft PR #25 已创建，继续保持 Draft。
-- [ ] Mark PR Ready / merge main — **M7 + Final Gate 全绿后且需显式授权**。
+- [ ] Mark PR Ready — **全部 Final Gate + WSL acceptance 后，且需显式授权**。
+- [ ] merge main — Ready/review 后且需显式授权。
 - [ ] 创建 `v{Cargo.toml version}` tag — Final Gate 全绿后且需显式授权。
 - [ ] GitHub Release — tag workflow，Final Gate 未绿时禁止发布。
-- [ ] 目标生产服务器 INSTALL / Remote / ProxyCommand / AI-client / upgrade / rollback 人工验收 — 必须在真实目标环境执行。
+- [ ] 目标生产服务器 INSTALL / Remote / ProxyCommand / AI-client / upgrade / rollback 人工验收。
 
-## 8. 当前判断
+## 9. 当前判断
 
 ```text
-M0-M6 design/implementation             COMPLETE
-pre-M7 security/fault implementation    COMPLETE
-pre-M7 performance harness              COMPLETE
-pre-M7 production/release tooling       COMPLETE
-M7 ProxyCommand design                  COMPLETE
-M7 ADR/config target contract           COMPLETE
-M7 implementation                       PENDING
-M7 WSL acceptance                       PENDING
-final candidate regression              PENDING
-GitHub Actions Billing                  BLOCKED externally
-Draft PR                                OPEN (#25)
-RC Ready                                NO
-formal Release                          NOT CREATED
-production target acceptance            PENDING target environment
+M0-M6 historical implementation       COMPLETE
+M6 historical evidence                COMPLETE / reference only
+M7 ProxyCommand design/config/core    IMPLEMENTED
+M7 functional/fault/query harnesses   IMPLEMENTED
+M7 performance harness                IMPLEMENTED
+M7 release integration                IMPLEMENTED
+M7 current-candidate execution        BLOCKED externally
+M7 WSL acceptance                     PENDING target environment
+GitHub Actions Billing                BLOCKED externally
+Draft PR                              OPEN (#25)
+RC Ready                              NO
+formal Release                        NOT CREATED
+production target acceptance          PENDING
 ```
 
-当前正确下一步不再是直接等待 Billing：应先完成 M7 ProxyCommand 的实现与验证准备；Billing 恢复后在最终 M7 candidate 上执行完整 Final Gate，然后再进入受控的 Ready / merge / tag / release / 生产验收流程。
+当前下一步应从“继续扩实现”切换到**真实 WSL acceptance 准备与 Final Gate 执行**。在 Billing 恢复、所有 candidate gates 真正 PASS、WSL evidence 完成之前，不应把 PR 标 Ready、merge、tag 或 release。
