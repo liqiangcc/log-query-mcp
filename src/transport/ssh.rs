@@ -47,7 +47,6 @@ impl SshStreamConnector {
     ) -> Result<BoxedSshStream, SshTransportError> {
         if connection.proxy.is_some() {
             let stream = connect_proxy_command(connection)
-                .await
                 .map_err(|_| SshTransportError::ConnectFailed)?;
             return Ok(Box::new(stream));
         }
