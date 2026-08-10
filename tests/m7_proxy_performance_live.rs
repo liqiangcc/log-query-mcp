@@ -9,7 +9,8 @@ use std::{
 
 use log_query_mcp::{
     AppConfigV2, CONTINUITY_FINGERPRINT_WINDOW_BYTES, CacheStore, RemoteSyncTarget, ScanLimits,
-    ScanRequest, SshConnectionManager, SyncAction, SyncEngine, scan_reader,
+    ScanRequest, SyncAction, SyncEngine, scan_reader,
+    transport::SshConnectionManager,
 };
 use serde_json::{Value, json};
 
