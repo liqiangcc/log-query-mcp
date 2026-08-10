@@ -64,11 +64,25 @@ def read_buildinfo(path: Path) -> dict[str, str]:
 
 def write_manifest(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary = path.with_name(f".{path.name}.tmp")
+    payload = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     try:
-        path.chmod(0o600)
-    except OSError:
-        pass
+        temporary.write_text(payload, encoding="utf-8")
+        try:
+            temporary.chmod(0o600)
+        except OSError:
+            pass
+        temporary.replace(path)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+    except OSError as exc:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise ManifestError("run manifest could not be written atomically") from exc
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
@@ -81,10 +95,30 @@ def load_manifest(path: Path) -> dict[str, Any]:
     return value
 
 
+def completed_gates(value: dict[str, Any]) -> list[str]:
+    completed = value.get("completed_gates")
+    if not isinstance(completed, list) or not all(isinstance(item, str) for item in completed):
+        raise ManifestError("completed_gates is invalid")
+    if completed != list(VALID_GATES[: len(completed)]):
+        raise ManifestError("completed_gates is out of order")
+    return completed
+
+
+def expected_next_gate(value: dict[str, Any]) -> str:
+    completed = completed_gates(value)
+    if len(completed) >= len(VALID_GATES):
+        raise ManifestError("no gate remains to be recorded")
+    return VALID_GATES[len(completed)]
+
+
 def start(args: argparse.Namespace) -> None:
     path = Path(args.manifest)
     if path.exists():
         raise ManifestError("run manifest already exists")
+    if not args.source_id:
+        raise ManifestError("source_id must be non-empty")
+    if not args.keyword:
+        raise ManifestError("keyword must be non-empty")
     config = Path(args.config)
     stdio_bin = Path(args.stdio_bin)
     http_bin = Path(args.http_bin)
@@ -111,41 +145,44 @@ def start(args: argparse.Namespace) -> None:
 
 
 def gate_pass(args: argparse.Namespace) -> None:
-    value = load_manifest(Path(args.manifest))
+    path = Path(args.manifest)
+    value = load_manifest(path)
     if value.get("status") != "RUNNING":
         raise ManifestError("only a RUNNING manifest can record a gate PASS")
-    completed = value.get("completed_gates")
-    if not isinstance(completed, list):
-        raise ManifestError("completed_gates is invalid")
-    gate = args.gate
-    expected_index = len(completed)
-    if expected_index >= len(VALID_GATES) or VALID_GATES[expected_index] != gate:
+    if expected_next_gate(value) != args.gate:
         raise ManifestError("gate PASS is out of order")
-    completed.append(gate)
+    completed = completed_gates(value)
+    completed.append(args.gate)
     value["last_gate_completed_at_utc"] = datetime.now(timezone.utc).isoformat()
-    write_manifest(Path(args.manifest), value)
+    write_manifest(path, value)
 
 
 def fail(args: argparse.Namespace) -> None:
-    value = load_manifest(Path(args.manifest))
+    path = Path(args.manifest)
+    value = load_manifest(path)
     if value.get("status") != "RUNNING":
         raise ManifestError("only a RUNNING manifest can fail")
+    if expected_next_gate(value) != args.gate:
+        raise ManifestError("failed gate is out of order")
+    if not 1 <= args.exit_code <= 255:
+        raise ManifestError("failed gate exit_code must be between 1 and 255")
     value["status"] = "FAIL"
     value["failed_gate"] = args.gate
     value["gate_exit_code"] = args.exit_code
     value["finished_at_utc"] = datetime.now(timezone.utc).isoformat()
-    write_manifest(Path(args.manifest), value)
+    write_manifest(path, value)
 
 
 def finish_pass(args: argparse.Namespace) -> None:
-    value = load_manifest(Path(args.manifest))
+    path = Path(args.manifest)
+    value = load_manifest(path)
     if value.get("status") != "RUNNING":
         raise ManifestError("only a RUNNING manifest can complete")
-    if value.get("completed_gates") != list(VALID_GATES):
+    if completed_gates(value) != list(VALID_GATES):
         raise ManifestError("all four gates must pass before the run can PASS")
     value["status"] = "PASS"
     value["finished_at_utc"] = datetime.now(timezone.utc).isoformat()
-    write_manifest(Path(args.manifest), value)
+    write_manifest(path, value)
 
 
 def parse_args() -> argparse.Namespace:
