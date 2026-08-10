@@ -43,7 +43,8 @@ done
 
 python3 -m py_compile \
   scripts/m7_wsl_acceptance.py \
-  scripts/m7_wsl_http_acceptance.py
+  scripts/m7_wsl_http_acceptance.py \
+  scripts/verify_m7_evidence.py
 
 echo "rc_check: contracts"
 python3 scripts/validate_contracts.py
@@ -87,6 +88,9 @@ python3 scripts/m7_wsl_http_acceptance.py \
   --config examples/log-query-mcp.v2.remote.json \
   --source-id inventory-remote-via-host >/dev/null
 
+echo "rc_check: M7 evidence verifier synthetic self-test"
+python3 scripts/verify_m7_evidence.py --self-test
+
 echo "rc_check: rustfmt"
 cargo fmt --all -- --check
 
@@ -113,4 +117,4 @@ archive="$(find "${out_dir}" -maxdepth 1 -type f -name 'log-query-mcp-v*.tar.gz'
 bash scripts/validate_release_package.sh "${archive}" "${out_dir}/SHA256SUMS"
 
 echo "rc_check: PASS"
-echo "rc_check: note: Direct SSH, M7 ProxyCommand live/auth/sync/failure/restart/generation/performance gates and real WSL/production acceptance remain separate live gates"
+echo "rc_check: note: verifier self-test is synthetic only; Direct SSH, M7 live/performance gates and real WSL/systemd evidence remain separate gates"
