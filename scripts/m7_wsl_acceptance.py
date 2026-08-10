@@ -208,6 +208,11 @@ def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def redact_proxy_args_shape(args: list[str]) -> list[str]:
+    """Retain only structural ProxyCommand argv information in evidence."""
+    return [item if item in {"{host}", "{port}"} else "<literal>" for item in args]
+
+
 def direct_probe(host: str, port: int, timeout_seconds: float) -> tuple[bool, str]:
     try:
         with socket.create_connection((host, port), timeout=timeout_seconds):
@@ -450,7 +455,7 @@ def run_acceptance(args: argparse.Namespace) -> int:
         "target_port": target.port,
         "auth_type": target.auth_type,
         "proxy_program_basename": target.helper_image,
-        "proxy_args_shape": target.args,
+        "proxy_args_shape": redact_proxy_args_shape(target.args),
         "config_sha256": sha256_file(config_path),
         "stdio_binary_sha256": sha256_file(stdio_bin),
         "keyword_sha256": sha256_text(args.keyword),
