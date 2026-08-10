@@ -11,6 +11,7 @@
 > Sync Gate：[`M7_PROXY_SYNC_GATE_V2.md`](./M7_PROXY_SYNC_GATE_V2.md)  
 > Performance Gate：[`M7_PROXY_PERFORMANCE_GATE_V2.md`](./M7_PROXY_PERFORMANCE_GATE_V2.md)  
 > WSL Acceptance：[`M7_WSL_ACCEPTANCE_V2.md`](./M7_WSL_ACCEPTANCE_V2.md)  
+> systemd HTTP Acceptance：[`M7_WSL_SYSTEMD_HTTP_ACCEPTANCE_V2.md`](./M7_WSL_SYSTEMD_HTTP_ACCEPTANCE_V2.md)  
 > ADR：[`adr/0012-use-proxy-command-as-ssh-stream-transport.md`](./adr/0012-use-proxy-command-as-ssh-stream-transport.md)  
 > Draft PR：#25
 
@@ -135,7 +136,11 @@ M7 Proxy Sync
 - [x] real mode 执行 MCP initialize / tools/list / 三个 MCP tools。
 - [x] evidence JSON 默认去除 Secret、日志正文、match_ref、明文 logical host。
 - [x] Windows helper before/after process-count cleanup evidence。
-- [x] acceptance tooling 已接入 release package / validator / `rc_check.sh` static precheck。
+- [x] `scripts/m7_wsl_http_acceptance.py` 自动验证生产 systemd Streamable HTTP Proxy source。
+- [x] systemd HTTP gate 验证 `ActiveState/User/MainPID`。
+- [x] systemd HTTP gate 验证 `/proc/<MainPID>/exe` 与 expected candidate binary SHA256 一致。
+- [x] systemd HTTP gate 自动执行 initialize / tools-list / 三个 MCP tools，并输出独立去敏 evidence。
+- [x] stdio + HTTP acceptance tooling 均接入 release package / validator / `rc_check.sh` static precheck。
 
 真实目标仍必须执行：
 
@@ -148,9 +153,10 @@ M7 Proxy Sync
 - [ ] stdio `get_log_context` PASS。
 - [ ] stdio helper cleanup PASS。
 - [ ] production systemd HTTP healthcheck PASS。
-- [ ] production systemd service 对同一 Proxy source 三工具 smoke PASS。
-- [ ] systemd smoke 后 helper 没有持续增长。
-- [ ] traceable redacted evidence 保存。
+- [ ] production systemd HTTP acceptance client PASS。
+- [ ] production systemd service 对同一 Proxy source 三工具 PASS。
+- [ ] systemd helper cleanup PASS。
+- [ ] traceable redacted stdio + HTTP evidence 保存。
 
 > WSL 交互会话能启动 `.exe` 不代表 systemd service 一定拥有相同 Windows interop 条件。因此 Final Acceptance 必须包含实际 systemd Proxy source search，不允许只用 stdio acceptance 替代。
 
@@ -183,9 +189,9 @@ M7 Proxy Sync
 - [x] PRODUCTION_CHECKLIST ProxyCommand + WSL security/acceptance matrix。
 - [x] v2 example config 同时包含 Direct + ProxyCommand。
 - [x] Release package 强制包含 v2 machine Schema、示例和 M7 交付文档。
-- [x] Release package 包含 WSL acceptance client / service-identity wrapper / acceptance doc。
-- [x] `validate_release_package.sh` 验证 Direct+Proxy example、placeholder、`ProxyCommandConfig` machine schema 与 WSL acceptance tooling。
-- [x] `rc_check.sh` 增加 non-live ProxyCommand contract + WSL acceptance static precheck。
+- [x] Release package 包含 stdio/service-identity/systemd HTTP WSL acceptance tooling 与文档。
+- [x] `validate_release_package.sh` 验证 Direct+Proxy example、placeholder、`ProxyCommandConfig` machine schema 与两套 WSL acceptance clients。
+- [x] `rc_check.sh` 增加 non-live ProxyCommand contract + 两套 WSL acceptance static precheck。
 - [ ] 当前 candidate package/rc_check 实际 PASS — **BLOCKED until runner/local gate executes**。
 
 ## 10. Final Gate
@@ -204,8 +210,8 @@ M7 Proxy Sync
 - [ ] M7 Proxy generation-consistency gate PASS。
 - [ ] M7 mixed-query gate PASS。
 - [ ] M7 Proxy performance gate PASS。
-- [ ] WSL acceptance PASS / traceable target evidence。
-- [ ] production systemd Proxy source smoke PASS。
+- [ ] WSL stdio service-identity acceptance PASS / traceable target evidence。
+- [ ] WSL production systemd HTTP acceptance PASS / traceable target evidence。
 - [ ] Release/package/lifecycle PASS。
 - [ ] no unexplained critical failure。
 
@@ -230,7 +236,8 @@ generation-consistency harness    IMPLEMENTED / EXECUTION BLOCKED
 Direct+Proxy isolation / mixed    IMPLEMENTED / EXECUTION BLOCKED
 performance regression harness    IMPLEMENTED / EXECUTION BLOCKED
 release integration               IMPLEMENTED / VALIDATION BLOCKED
-WSL acceptance tooling            IMPLEMENTED
+WSL stdio acceptance tooling      IMPLEMENTED
+systemd HTTP acceptance tooling   IMPLEMENTED
 real WSL/systemd evidence         PENDING REAL TARGET
 final gates                       BLOCKED / NOT PASS
 RC ready                          NO
