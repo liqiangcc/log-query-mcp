@@ -6,16 +6,22 @@ use std::{
 };
 
 use tokio::{
-    io::{AsyncRead, AsyncWrite, ReadBuf},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf},
     process::{Child, ChildStdin, ChildStdout, Command},
+    runtime::Handle,
+    task::JoinHandle,
 };
 
 use crate::SshConnectionConfig;
 
+const MAX_PROXY_STDERR_BYTES: usize = 64 * 1024;
+const PROXY_STDERR_READ_BUFFER_BYTES: usize = 4096;
+
 pub(crate) struct ProxyCommandStream {
     stdin: ChildStdin,
     stdout: ChildStdout,
-    _child: Child,
+    child: Option<Child>,
+    stderr_task: Option<JoinHandle<()>>,
 }
 
 impl AsyncRead for ProxyCommandStream {
@@ -46,6 +52,27 @@ impl AsyncWrite for ProxyCommandStream {
     }
 }
 
+impl Drop for ProxyCommandStream {
+    fn drop(&mut self) {
+        if let Some(task) = self.stderr_task.take() {
+            task.abort();
+        }
+
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        let _ = child.start_kill();
+
+        // Reap asynchronously whenever a Tokio runtime is still available. kill_on_drop remains
+        // enabled as a final fail-closed guard for runtime-shutdown paths.
+        if let Ok(handle) = Handle::try_current() {
+            handle.spawn(async move {
+                let _ = child.wait().await;
+            });
+        }
+    }
+}
+
 pub(crate) fn connect_proxy_command(
     connection: &SshConnectionConfig,
 ) -> io::Result<ProxyCommandStream> {
@@ -60,9 +87,7 @@ pub(crate) fn connect_proxy_command(
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        // M7-3 will replace this with a bounded/redacted stderr collector.
-        // Discarding stderr here prevents a verbose helper from blocking the raw SSH stream.
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .kill_on_drop(true);
 
     let mut child = command.spawn()?;
@@ -72,12 +97,37 @@ pub(crate) fn connect_proxy_command(
     let stdout = child.stdout.take().ok_or_else(|| {
         io::Error::new(io::ErrorKind::BrokenPipe, "proxy command stdout is unavailable")
     })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::BrokenPipe, "proxy command stderr is unavailable")
+    })?;
+    let stderr_task = tokio::spawn(async move {
+        drain_bounded_stderr(stderr).await;
+    });
 
     Ok(ProxyCommandStream {
         stdin,
         stdout,
-        _child: child,
+        child: Some(child),
+        stderr_task: Some(stderr_task),
     })
+}
+
+async fn drain_bounded_stderr(mut stderr: tokio::process::ChildStderr) {
+    let mut captured = Vec::with_capacity(MAX_PROXY_STDERR_BYTES);
+    let mut buffer = [0_u8; PROXY_STDERR_READ_BUFFER_BYTES];
+
+    loop {
+        let read = match stderr.read(&mut buffer).await {
+            Ok(0) | Err(_) => break,
+            Ok(read) => read,
+        };
+        if captured.len() < MAX_PROXY_STDERR_BYTES {
+            let remaining = MAX_PROXY_STDERR_BYTES - captured.len();
+            captured.extend_from_slice(&buffer[..read.min(remaining)]);
+        }
+        // Continue draining after the capture limit so a verbose helper cannot block on a full
+        // stderr pipe. Captured bytes are deliberately not logged or returned in M7-3.
+    }
 }
 
 fn expand_argument(argument: &str, host: &str, port: u16) -> io::Result<String> {
