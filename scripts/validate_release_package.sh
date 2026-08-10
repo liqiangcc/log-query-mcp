@@ -46,6 +46,7 @@ for path in \
   scripts/healthcheck.sh \
   scripts/m7_wsl_acceptance.py \
   scripts/m7_wsl_acceptance.sh \
+  scripts/m7_wsl_http_acceptance.py \
   docs/INSTALL.md \
   docs/OPERATIONS.md \
   docs/PRODUCTION_CHECKLIST.md \
@@ -77,7 +78,8 @@ for path in \
   scripts/rollback.sh \
   scripts/healthcheck.sh \
   scripts/m7_wsl_acceptance.py \
-  scripts/m7_wsl_acceptance.sh; do
+  scripts/m7_wsl_acceptance.sh \
+  scripts/m7_wsl_http_acceptance.py; do
   [[ -x "${root}/${path}" ]] || die "expected executable package entry: ${path}"
 done
 
@@ -118,12 +120,20 @@ if "ProxyCommandConfig" not in schema.get("$defs", {}):
 PY
 
 bash -n "${root}/scripts/m7_wsl_acceptance.sh" || die "packaged M7 WSL acceptance wrapper has invalid shell syntax"
-python3 -m py_compile "${root}/scripts/m7_wsl_acceptance.py" || die "packaged M7 WSL acceptance client has invalid Python syntax"
+python3 -m py_compile \
+  "${root}/scripts/m7_wsl_acceptance.py" \
+  "${root}/scripts/m7_wsl_http_acceptance.py" || \
+  die "packaged M7 WSL acceptance client has invalid Python syntax"
 python3 "${root}/scripts/m7_wsl_acceptance.py" \
   --validate-config-only \
   --config "${root}/examples/log-query-mcp.v2.remote.json" \
   --source-id inventory-remote-via-host >/dev/null || \
   die "packaged M7 WSL acceptance client failed static config validation"
+python3 "${root}/scripts/m7_wsl_http_acceptance.py" \
+  --validate-config-only \
+  --config "${root}/examples/log-query-mcp.v2.remote.json" \
+  --source-id inventory-remote-via-host >/dev/null || \
+  die "packaged M7 WSL HTTP acceptance client failed static config validation"
 
 version="$(awk -F= '$1 == "version" {print $2}' "${root}/BUILDINFO")"
 [[ -n "${version}" ]] || die "BUILDINFO does not contain version"
