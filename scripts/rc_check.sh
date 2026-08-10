@@ -43,6 +43,33 @@ done
 echo "rc_check: contracts"
 python3 scripts/validate_contracts.py
 
+echo "rc_check: ProxyCommand release contract"
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+example_path = Path("examples/log-query-mcp.v2.remote.json")
+schema_path = Path("schemas/log-query-mcp-config-v2.schema.json")
+example = json.loads(example_path.read_text(encoding="utf-8"))
+schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+connections = example.get("connections", [])
+assert any("proxy" not in connection for connection in connections), "v2 example must retain Direct SSH"
+proxy_connections = [
+    connection
+    for connection in connections
+    if connection.get("proxy", {}).get("type") == "command"
+]
+assert proxy_connections, "v2 example must contain ProxyCommand"
+for connection in proxy_connections:
+    proxy = connection["proxy"]
+    assert proxy.get("program"), "ProxyCommand program must be non-empty"
+    for argument in proxy.get("args", []):
+        if "{" in argument or "}" in argument:
+            assert argument in {"{host}", "{port}"}, "unsupported ProxyCommand placeholder"
+assert "ProxyCommandConfig" in schema.get("$defs", {}), "v2 schema missing ProxyCommandConfig"
+PY
+
 echo "rc_check: rustfmt"
 cargo fmt --all -- --check
 
@@ -69,4 +96,4 @@ archive="$(find "${out_dir}" -maxdepth 1 -type f -name 'log-query-mcp-v*.tar.gz'
 bash scripts/validate_release_package.sh "${archive}" "${out_dir}/SHA256SUMS"
 
 echo "rc_check: PASS"
-echo "rc_check: note: real SSH/SFTP, multi-server concurrency and target-production acceptance remain separate live gates"
+echo "rc_check: note: Direct SSH, M7 ProxyCommand live/auth/sync/failure/restart/generation/performance gates and target WSL/production acceptance remain separate live gates"
