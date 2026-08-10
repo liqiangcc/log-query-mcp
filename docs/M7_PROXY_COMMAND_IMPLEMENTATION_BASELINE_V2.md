@@ -1,6 +1,6 @@
 # Log Query MCP v2 M7 ProxyCommand Implementation Baseline
 
-> 状态：Core + expanded fault harness present / CI and live validation blocked  
+> 状态：Core + expanded fault + mixed-query harness present / CI and live validation blocked  
 > 日期：2026-08-10  
 > Draft PR：#25  
 > 设计：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
@@ -24,6 +24,7 @@ M7 当前已具备：
 - stable ProxyCommand startup/stream/timeout internal classifications。
 - success live harness。
 - expanded process/auth/timeout/cancellation/active-session/mixed-transport failure harness。
+- SourceRegistry / StatefulQueryService 层的 Local + Direct + Proxy mixed-query harness。
 
 ## 2. 关注分离
 
@@ -37,6 +38,8 @@ MCP          = AI-facing log API
 ```
 
 `src/transport/proxy_command.rs` 只负责本地 child process 与 stdin/stdout stream，不负责 remote shell、remote command、remote paths、credentials、cache、sync 或 query。
+
+M7 mixed-query 测试也保持层次分离：Transport fault tests 与 SourceRegistry/Query integration tests 分属不同文件和 workflow。
 
 ## 3. Failure Classification
 
@@ -101,29 +104,46 @@ stalled ProxyCommand + active Direct SSH isolation
 workflow orphan-helper assertions
 ```
 
-active-session crash 使用 controlled single-process TCP proxy fixture：
+active-session crash 使用 controlled single-process TCP proxy fixture。trigger 只用于 CI fault injection，不属于生产配置或 MCP API。
+
+## 6. Mixed Query Integration Harness
+
+新增：
 
 ```text
-stdin/stdout ↔ TCP target
-PID file
-CI-only trigger file
+tests/m7_mixed_query_live.rs
+.github/workflows/m7-mixed-query.yml
 ```
 
-trigger 只用于测试故障注入，不属于生产配置或 MCP API。
-
-## 6. Mixed Direct / Proxy Transport Evidence Harness
+完整业务链路：
 
 ```text
-max_concurrent_ssh_connections = 2
-Proxy path occupies one permit and stalls
-Direct path occupies second permit and reads SFTP successfully
-Proxy task is cancelled/reaped
-Direct path reads SFTP successfully again
+Local source ────────────────┐
+                             │
+Direct SSH → SFTP → Cache ───┼→ SourceRegistry → StatefulQueryService → search
+                             │
+Proxy → SSH → SFTP → Cache ──┘
 ```
 
-目标语义：shared global concurrency budget + per-connection failure isolation。
+测试一：
 
-仍需补 SourceRegistry / Query Engine 层的 Local + Direct + multiple Proxy mixed query evidence。
+```text
+Local + Direct Remote + Proxy Remote
+→ one StatefulQueryService
+→ one mixed search request
+→ three source results
+```
+
+测试二：
+
+```text
+bad Proxy Remote (/usr/bin/false)
+→ explicit REMOTE_UNAVAILABLE
+→ same query service remains alive
+→ Local + Direct + healthy Proxy query succeeds
+```
+
+这证明目标不是“坏 source 参与同一请求时返回 partial result”，而是现有 fail-closed 请求语义下，单个 Proxy source 的故障不会污染其他 source、cache 或 query service。
 
 ## 7. 主要新增提交
 
@@ -135,19 +155,22 @@ efd07da  dedicated M7 failure workflow
 3844653  fix orphan PID scope
 de8349f  expand auth/crash/mixed transport tests
 bb0ae0b  expand active failure CI fixture
-b4d547c  expand Failure Matrix documentation
-0d77ebb  update M7 TODO state
+ec7dcba  add M7 mixed-query live tests
+bea09b5  add dedicated M7 Mixed Query workflow
 ```
 
 ## 8. 当前验证状态
 
 GitHub Actions Billing / Spending Limit 仍是外部 blocker。
 
-expanded harness candidate `dd3310b7250824bbfc259c80bc16f30e2d2d52fd` 触发 `M7 ProxyCommand Failures` run `31373870218`，其 `proxy-command-failures` job 为：
+`M7 Mixed Query` candidate `bea09b5eb91bdd6ab26312bc57c6c150b8f45994` 已被 GitHub 正确识别并触发：
 
 ```text
-result = failure
-steps  = null
+workflow = M7 Mixed Query
+run      = 31374390180
+job      = mixed-query-live
+result   = failure
+steps    = null
 ```
 
 runner 未执行任何 step。因此当前状态：
@@ -158,8 +181,9 @@ failure classification                 IMPLEMENTED
 success live harness                   IMPLEMENTED
 expanded failure harness               IMPLEMENTED
 Direct+Proxy isolation harness         IMPLEMENTED
+full mixed-query harness               IMPLEMENTED
 compile/rustfmt/clippy evidence         NO CURRENT PASS
-failure harness execution              BLOCKED
+M7 workflow execution                  BLOCKED
 Direct SSH regression                  NO NEW PASS EVIDENCE
 ProxyCommand live SSH                  NOT VALIDATED
 full mixed query                       NOT VALIDATED
@@ -172,14 +196,14 @@ RC ready                               NO
 
 ## 9. 下一阶段
 
-实现工作下一步从 Transport fault harness 转向上层集成：
+Transport 与基础 Query integration 的 harness 已基本闭合。下一步转向剩余系统语义：
 
-1. 补 Local + Direct Remote + Proxy Remote 的 SourceRegistry / Query Engine mixed query。
-2. 验证一个 Proxy remote failure 不影响其他 Local/Direct/Proxy source。
-3. 补 server restart through ProxyCommand 与 stale-cache fail-closed 回归。
-4. 补 success gate 的 private/encrypted key 与 Sync/Cache/Query 链路。
-5. Billing 恢复后运行全部真实 gates。
-6. 最后执行 WSL → Windows Host → Remote SSH acceptance 与性能回归。
+1. 补 server restart through ProxyCommand。
+2. 验证 Sync/Backend 层 `allow_stale_on_error=false` 在 Proxy failure 下继续 fail-closed。
+3. 补 cursor/match_ref generation consistency through Proxy source。
+4. 扩成功 gate：private key / encrypted key、full/tail/from_now、incremental/rotation/truncate。
+5. Billing 恢复后运行 Rust / Contracts / Direct / M7 success / failure / mixed-query gates。
+6. 最后执行真实 WSL → Windows Host → Remote SSH acceptance 与性能回归。
 
 ## 10. 当前完成定义
 
@@ -195,7 +219,7 @@ failure classification            IMPLEMENTED / CI BLOCKED
 ProxyCommand live harness         IMPLEMENTED / EXECUTION BLOCKED
 failure matrix harness            EXPANDED / EXECUTION BLOCKED
 Direct+Proxy transport isolation  IMPLEMENTED / EXECUTION BLOCKED
-full mixed query                  TODO
+full mixed query                  IMPLEMENTED / EXECUTION BLOCKED
 WSL acceptance                    TODO
 performance regression            TODO
 release docs/final gates          TODO
