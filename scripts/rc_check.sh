@@ -93,6 +93,9 @@ python3 scripts/m7_wsl_http_acceptance.py \
 echo "rc_check: M7 evidence verifier synthetic self-test"
 python3 scripts/verify_m7_evidence.py --self-test
 
+echo "rc_check: M7 run manifest synthetic self-test"
+python3 scripts/m7_real_target_manifest.py self-test
+
 echo "rc_check: rustfmt"
 cargo fmt --all -- --check
 
@@ -119,4 +122,4 @@ archive="$(find "${out_dir}" -maxdepth 1 -type f -name 'log-query-mcp-v*.tar.gz'
 bash scripts/validate_release_package.sh "${archive}" "${out_dir}/SHA256SUMS"
 
 echo "rc_check: PASS"
-echo "rc_check: note: verifier self-test, run-manifest lifecycle and orchestrator syntax checks are synthetic/non-live only; Direct SSH, M7 live/performance gates and real WSL/systemd evidence remain separate gates"
+echo "rc_check: note: verifier self-test, run-manifest self-test/lifecycle and orchestrator syntax checks are synthetic/non-live only; Direct SSH, M7 live/performance gates and real WSL/systemd evidence remain separate gates"
