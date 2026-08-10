@@ -1,6 +1,6 @@
 # Log Query MCP v2 M7 ProxyCommand 实施 TODO
 
-> 状态：Core + functional + performance harness + release integration implemented / CI & live validation blocked  
+> 状态：Core + functional + performance harness + release integration + WSL acceptance tooling implemented / CI & real target validation blocked  
 > 日期：2026-08-10  
 > 设计：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
 > 实现基线：[`M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md`](./M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md)  
@@ -10,6 +10,7 @@
 > Auth Gate：[`M7_PROXY_AUTH_GATE_V2.md`](./M7_PROXY_AUTH_GATE_V2.md)  
 > Sync Gate：[`M7_PROXY_SYNC_GATE_V2.md`](./M7_PROXY_SYNC_GATE_V2.md)  
 > Performance Gate：[`M7_PROXY_PERFORMANCE_GATE_V2.md`](./M7_PROXY_PERFORMANCE_GATE_V2.md)  
+> WSL Acceptance：[`M7_WSL_ACCEPTANCE_V2.md`](./M7_WSL_ACCEPTANCE_V2.md)  
 > ADR：[`adr/0012-use-proxy-command-as-ssh-stream-transport.md`](./adr/0012-use-proxy-command-as-ssh-stream-transport.md)  
 > Draft PR：#25
 
@@ -122,17 +123,36 @@ M7 Proxy Sync
 - [x] cursor/match_ref generation consistency through Proxy source。
 - [ ] actual PASS evidence — **BLOCKED by Billing**。
 
-## 7. WSL Acceptance — PENDING REAL TARGET
+## 7. WSL Acceptance — TOOLING IMPLEMENTED / REAL TARGET PENDING
+
+交付：
+
+- [x] `docs/M7_WSL_ACCEPTANCE_V2.md` 真实目标验收契约。
+- [x] `scripts/m7_wsl_acceptance.py` stdio MCP acceptance client。
+- [x] `scripts/m7_wsl_acceptance.sh` 默认强制实际 service identity。
+- [x] static mode 验证 Proxy source / Windows helper / `{host}` / `{port}` contract。
+- [x] real mode 验证 WSL Direct TCP gap。
+- [x] real mode 执行 MCP initialize / tools/list / 三个 MCP tools。
+- [x] evidence JSON 默认去除 Secret、日志正文、match_ref、明文 logical host。
+- [x] Windows helper before/after process-count cleanup evidence。
+- [x] acceptance tooling 已接入 release package / validator / `rc_check.sh` static precheck。
+
+真实目标仍必须执行：
 
 - [ ] WSL `log-query-mcp` → Windows executable ProxyCommand → Remote SSH。
 - [ ] Windows/VPN host path 可达，WSL Direct path 确认不可用。
-- [ ] systemd 服务身份可启动 Windows helper。
+- [ ] 实际 `log-query-mcp` service identity 可启动 Windows helper。
 - [ ] strict known_hosts 仍绑定逻辑目标。
-- [ ] `list_log_sources` PASS。
-- [ ] `search_logs` PASS。
-- [ ] `get_log_context` PASS。
-- [ ] child cleanup PASS。
-- [ ] 不泄露 helper path/argv/Secret。
+- [ ] stdio `list_log_sources` PASS。
+- [ ] stdio `search_logs` PASS。
+- [ ] stdio `get_log_context` PASS。
+- [ ] stdio helper cleanup PASS。
+- [ ] production systemd HTTP healthcheck PASS。
+- [ ] production systemd service 对同一 Proxy source 三工具 smoke PASS。
+- [ ] systemd smoke 后 helper 没有持续增长。
+- [ ] traceable redacted evidence 保存。
+
+> WSL 交互会话能启动 `.exe` 不代表 systemd service 一定拥有相同 Windows interop 条件。因此 Final Acceptance 必须包含实际 systemd Proxy source search，不允许只用 stdio acceptance 替代。
 
 ## 8. M7-6 Performance / Regression — HARNESS IMPLEMENTED / EXECUTION BLOCKED
 
@@ -163,8 +183,9 @@ M7 Proxy Sync
 - [x] PRODUCTION_CHECKLIST ProxyCommand + WSL security/acceptance matrix。
 - [x] v2 example config 同时包含 Direct + ProxyCommand。
 - [x] Release package 强制包含 v2 machine Schema、示例和 M7 交付文档。
-- [x] `validate_release_package.sh` 验证 Direct+Proxy example、placeholder 和 `ProxyCommandConfig` machine schema。
-- [x] `rc_check.sh` 增加 non-live ProxyCommand release contract 检查。
+- [x] Release package 包含 WSL acceptance client / service-identity wrapper / acceptance doc。
+- [x] `validate_release_package.sh` 验证 Direct+Proxy example、placeholder、`ProxyCommandConfig` machine schema 与 WSL acceptance tooling。
+- [x] `rc_check.sh` 增加 non-live ProxyCommand contract + WSL acceptance static precheck。
 - [ ] 当前 candidate package/rc_check 实际 PASS — **BLOCKED until runner/local gate executes**。
 
 ## 10. Final Gate
@@ -184,6 +205,7 @@ M7 Proxy Sync
 - [ ] M7 mixed-query gate PASS。
 - [ ] M7 Proxy performance gate PASS。
 - [ ] WSL acceptance PASS / traceable target evidence。
+- [ ] production systemd Proxy source smoke PASS。
 - [ ] Release/package/lifecycle PASS。
 - [ ] no unexplained critical failure。
 
@@ -208,7 +230,8 @@ generation-consistency harness    IMPLEMENTED / EXECUTION BLOCKED
 Direct+Proxy isolation / mixed    IMPLEMENTED / EXECUTION BLOCKED
 performance regression harness    IMPLEMENTED / EXECUTION BLOCKED
 release integration               IMPLEMENTED / VALIDATION BLOCKED
-WSL acceptance                    PENDING REAL TARGET
+WSL acceptance tooling            IMPLEMENTED
+real WSL/systemd evidence         PENDING REAL TARGET
 final gates                       BLOCKED / NOT PASS
 RC ready                          NO
 ```
