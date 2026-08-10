@@ -1,12 +1,12 @@
 # Log Query MCP 配置 Schema v2
 
-> 状态：Draft / M7 ProxyCommand contract pending implementation  
+> 状态：Implemented contract / current candidate validation blocked by CI Billing  
 > 日期：2026-08-10  
 > 机器可读定义：[`schemas/log-query-mcp-config-v2.schema.json`](../schemas/log-query-mcp-config-v2.schema.json)  
 > 架构方案：[`REMOTE_SSH_CACHE_DESIGN_V2.md`](./REMOTE_SSH_CACHE_DESIGN_V2.md)  
 > ProxyCommand 方案：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)
 
-> 注意：本文已定义 M7 的目标配置契约；机器可读 JSON Schema 与 Rust runtime config 需要在 M7 实现阶段同步落地。在二者完成前，`proxy` 字段属于目标契约，不代表当前二进制已经接受该字段。
+> M7 ProxyCommand 配置契约已经同步落入机器可读 JSON Schema、Rust v2 config/runtime validation、valid/invalid contract fixtures 和 release example。当前二进制源码已经接受合法 `proxy` 字段；但当前 candidate 的 Rust/Contracts/Live gates 仍需在 GitHub Actions Billing 恢复后真实执行并通过，因此“契约已实现”不等同于“RC 已验证”。
 
 ## 1. 目标
 
@@ -281,7 +281,7 @@ v2 / M7 首期只允许：
 }
 ```
 
-实现必须使用等价于：
+实现使用等价于：
 
 ```text
 Command::new(program).args(args)
@@ -537,9 +537,11 @@ JSON Schema 无法表达所有跨对象关系。实现必须额外验证：
 18. ProxyCommand connection 仍然必须提供正常 `host`、`port`、`username`、`auth` 和 `host_key`。
 19. ProxyCommand 配置不得从 MCP Client 请求动态注入或覆盖。
 
-## 13. JSON Schema M7 目标
+这些规则已经在 Rust v2 config/runtime validator 中实现；machine schema 负责对象形状、类型、长度和数量，runtime validator 负责 placeholder 等更强语义。
 
-机器可读 Schema 在 M7 落地时应新增：
+## 13. JSON Schema M7 实现
+
+机器可读 Schema 已新增：
 
 ```json
 {
@@ -569,7 +571,7 @@ JSON Schema 无法表达所有跨对象关系。实现必须额外验证：
 }
 ```
 
-并给 `SshConnectionConfig.properties` 增加可选：
+并在 `SshConnectionConfig.properties` 中增加可选：
 
 ```json
 {
@@ -579,9 +581,9 @@ JSON Schema 无法表达所有跨对象关系。实现必须额外验证：
 }
 ```
 
-Schema 仍然保持 `additionalProperties=false`。
+Schema 保持 `additionalProperties=false`。
 
-Placeholder 的“必须占据完整 argv”“只允许 `{host}` / `{port}`”更适合由 runtime validator 严格执行；如 JSON Schema 能清晰表达，也可增加 pattern 作为第一层防御，但不能只依赖 Schema。
+Placeholder 的“必须占据完整 argv”“只允许 `{host}` / `{port}`”由 runtime validator 严格执行；release contract 还会检查 v2 示例同时保留 Direct SSH 与 ProxyCommand，并确认 packaged machine schema 包含 `ProxyCommandConfig`。
 
 ## 14. v1 / v2 兼容性
 
