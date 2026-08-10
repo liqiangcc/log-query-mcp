@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://log-query-mcp.local/schemas/log-query-mcp-config-v2.schema.json",
   "title": "Log Query MCP service configuration v2",
-  "description": "Draft v2 configuration for local and SSH/SFTP remote log sources with bounded local cache.",
+  "description": "Draft v2 configuration for local and SSH/SFTP remote log sources with bounded local cache and optional ProxyCommand transport.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "sources"],
@@ -161,6 +161,30 @@
         "known_hosts_file": { "type": "string", "minLength": 1, "maxLength": 4096 }
       }
     },
+    "ProxyCommandArg": {
+      "oneOf": [
+        { "enum": ["{host}", "{port}"] },
+        {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^[^{}]*$"
+        }
+      ]
+    },
+    "ProxyCommandConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "program", "args"],
+      "properties": {
+        "type": { "const": "command" },
+        "program": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "args": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/ProxyCommandArg" }
+        }
+      }
+    },
     "SshConnectionConfig": {
       "type": "object",
       "additionalProperties": false,
@@ -183,6 +207,7 @@
         },
         "auth": { "$ref": "#/$defs/SshAuth" },
         "host_key": { "$ref": "#/$defs/HostKeyConfig" },
+        "proxy": { "$ref": "#/$defs/ProxyCommandConfig" },
         "connect_timeout_millis": {
           "type": "integer",
           "minimum": 100,
