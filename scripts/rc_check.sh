@@ -45,7 +45,8 @@ done
 python3 -m py_compile \
   scripts/m7_wsl_acceptance.py \
   scripts/m7_wsl_http_acceptance.py \
-  scripts/verify_m7_evidence.py
+  scripts/verify_m7_evidence.py \
+  scripts/m7_real_target_manifest.py
 
 echo "rc_check: contracts"
 python3 scripts/validate_contracts.py
@@ -118,4 +119,4 @@ archive="$(find "${out_dir}" -maxdepth 1 -type f -name 'log-query-mcp-v*.tar.gz'
 bash scripts/validate_release_package.sh "${archive}" "${out_dir}/SHA256SUMS"
 
 echo "rc_check: PASS"
-echo "rc_check: note: verifier self-test and orchestrator syntax checks are synthetic/non-live only; Direct SSH, M7 live/performance gates and real WSL/systemd evidence remain separate gates"
+echo "rc_check: note: verifier self-test, run-manifest lifecycle and orchestrator syntax checks are synthetic/non-live only; Direct SSH, M7 live/performance gates and real WSL/systemd evidence remain separate gates"
