@@ -1,6 +1,6 @@
 # Log Query MCP v2 M7 ProxyCommand 实施 TODO
 
-> 状态：Config contract implemented / stream abstraction pending  
+> 状态：Stream abstraction implemented / Direct regression CI blocked  
 > 日期：2026-08-10  
 > 设计：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
 > ADR：[`adr/0012-use-proxy-command-as-ssh-stream-transport.md`](./adr/0012-use-proxy-command-as-ssh-stream-transport.md)  
@@ -38,18 +38,22 @@ M7 必须继续遵守现有 v2 安全模型：
 
 最新 candidate 的 Rust/Contracts workflow 仍在 runner 启动前失败，job `steps=[]`，属于现有 GitHub Actions Billing 外部阻塞；上述配置改动尚未获得 CI PASS 证据。
 
-## 2. M7-1 Stream Abstraction
+## 2. M7-1 Stream Abstraction — IMPLEMENTED / REGRESSION BLOCKED
 
 目标：先抽离“如何建立 SSH 底层 stream”，不改变 Direct 行为。
 
-- [ ] 新增窄 `SshStreamConnector` / 等价抽象。
-- [ ] 将现有 Direct TCP 连接迁移到 `DirectConnector`。
-- [ ] 统一返回可供 `russh` stream-based connect 使用的 `AsyncRead + AsyncWrite` stream。
-- [ ] 保持 `SshConnectionManager` semaphore、timeout、KnownHostsClient 和认证语义。
-- [ ] 不把 russh Handle / generic channel 暴露给业务层。
-- [ ] Direct SSH 全量 regression PASS 后才进入 ProxyCommand connector。
+- [x] 新增窄 `SshStreamConnector` / 等价抽象。
+- [x] 将现有 Direct TCP 连接迁移到 `DirectConnector`。
+- [x] 统一返回可供 `russh::client::connect_stream` 使用的 boxed `AsyncRead + AsyncWrite + Unpin + Send` stream。
+- [x] 保持 `SshConnectionManager` semaphore、单一 connect timeout、KnownHostsClient 和认证语义。
+- [x] 不把 russh Handle / generic channel 暴露给业务层。
+- [ ] Direct SSH 全量 regression PASS — **BLOCKED before runner start by GitHub Actions Billing**。
 
-验收：
+实现提交：`8abd4bdae5b2322a73745005ec2fe0a245f1321b`。
+
+重构使用一个总 `connect_timeout` 覆盖 Direct TCP connect + SSH handshake，避免拆分后把 deadline 意外扩成两倍；Host Key Verification 仍使用逻辑目标 `connection.host/port`。
+
+验收仍需实际执行：
 
 ```text
 password auth
@@ -63,6 +67,8 @@ server restart
 multi-server
 300 range-read regression
 ```
+
+根据冻结顺序，在上述 Direct regression 得到真实 PASS 证据前，不把 M7-2 ProxyCommand connector 标记为已验证。
 
 ## 3. M7-2 Config / ProxyCommand Connector
 
@@ -267,7 +273,8 @@ config target contract            DONE
 machine schema                    DONE
 runtime config                    DONE
 config contract fixtures          DONE
-stream abstraction                TODO
+stream abstraction                IMPLEMENTED / CI BLOCKED
+Direct regression                 BLOCKED (Billing)
 proxy connector                   TODO
 lifecycle/security                TODO
 live integration                  TODO
