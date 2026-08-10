@@ -1,9 +1,10 @@
 # Log Query MCP v2 M7 WSL Acceptance
 
-> 状态：Acceptance procedure implemented / real target evidence pending  
+> 状态：Acceptance procedure/tooling implemented / real target evidence pending  
 > 日期：2026-08-10  
 > Draft PR：#25  
-> 脚本：[`scripts/m7_wsl_acceptance.py`](../scripts/m7_wsl_acceptance.py)
+> Service-identity wrapper：[`scripts/m7_wsl_acceptance.sh`](../scripts/m7_wsl_acceptance.sh)  
+> MCP acceptance client：[`scripts/m7_wsl_acceptance.py`](../scripts/m7_wsl_acceptance.py)
 
 ## 1. 目标
 
@@ -40,7 +41,7 @@ list_log_sources / search_logs / get_log_context
 - helper stderr 不进入 AI-facing 返回；
 - `allow_stale_on_error=false` 继续 fail-closed。
 
-`scripts/m7_wsl_acceptance.py` 也不会把 Secret、完整日志内容、`match_ref` 或逻辑 host 明文写进 evidence JSON。
+`scripts/m7_wsl_acceptance.py` 不会把 Secret、完整日志内容、`match_ref` 或逻辑 host 明文写进 evidence JSON。
 
 ## 3. 前置条件
 
@@ -57,7 +58,8 @@ list_log_sources / search_logs / get_log_context
    - strict `known_hosts_file`；
    - 正常 SSH password 或 private-key auth；
 6. Windows `tasklist.exe` 可从 WSL 调用，用于 helper 生命周期证据；
-7. 目标日志中存在一个可安全用于验收的唯一 marker。
+7. 目标日志中存在一个可安全用于验收的唯一 marker；
+8. 最终 acceptance 必须由实际服务身份执行，默认是 `log-query-mcp`。
 
 marker 应通过正常业务/测试路径产生，或使用已存在的可识别测试日志。不要为了制造 marker 给 Log Query MCP 增加远程写/执行能力。
 
@@ -123,46 +125,83 @@ python3 scripts/m7_wsl_acceptance.py \
 
 该模式不检测 WSL、不访问网络、不启动 helper，也不代表真实 acceptance PASS。
 
-## 7. 真实 WSL 验收
+`rc_check.sh` 和 release-package validator 只运行这一 static mode。
+
+## 7. Service Identity Gate
+
+真实验收不要直接调用 Python client，而应通过：
+
+```text
+scripts/m7_wsl_acceptance.sh
+```
+
+wrapper 默认要求：
+
+```text
+id -un == log-query-mcp
+```
+
+否则返回：
+
+```text
+SERVICE_IDENTITY_MISMATCH
+```
+
+如果生产 service 使用不同的受控用户，可以显式设置：
+
+```bash
+M7_WSL_EXPECTED_USER=custom-service-user
+```
+
+`M7_WSL_ALLOW_USER_MISMATCH=1` 只用于本地诊断；使用该绕过产生的结果不能作为 Final WSL Acceptance。
+
+这个 gate 很重要：Windows interop / helper execution 不能只在管理员自己的交互用户下成功，必须由真正运行 Log Query MCP 的身份成功。
+
+## 8. 真实 WSL stdio 验收
 
 先确保 candidate Secret 已通过环境/systemd 等既有方式提供。不要把明文 Secret 写进命令行。
 
-示例：
+推荐从 release 解包目录，以实际服务身份执行。示意：
 
 ```bash
-python3 scripts/m7_wsl_acceptance.py \
+sudo --preserve-env=LOG_QUERY_MCP_INVENTORY_PASSWORD \
+  -u log-query-mcp \
+  ./scripts/m7_wsl_acceptance.sh \
   --config /etc/log-query-mcp/config.json \
   --source-id inventory-remote-via-host \
   --keyword 'M7_WSL_ACCEPTANCE_MARKER_20260810' \
   --stdio-bin /opt/log-query-mcp/bin/log-query-mcp-stdio \
   --buildinfo /opt/log-query-mcp/BUILDINFO \
-  --evidence-dir ./m7-wsl-evidence
+  --evidence-dir /var/lib/log-query-mcp/m7-wsl-evidence
 ```
 
-默认脚本要求：
+实际 Secret environment 名称按生产配置使用。不要在 shell history、ticket 或 evidence 中写 Secret 值。
+
+默认 acceptance 要求：
 
 ```text
-WSL detected                                 PASS
-selected source is ProxyCommand-backed       PASS
-proxy helper is Windows .exe                 PASS
-known_hosts file exists                      PASS
-WSL direct TCP to logical SSH target          FAIL as expected
-Windows helper process baseline captured     PASS
-MCP initialize                               PASS
-tools/list exactly three tools               PASS
-list_log_sources contains selected source    PASS
-search_logs finds acceptance marker          PASS
-get_log_context returns marker context       PASS
-helper process count returns to baseline     PASS
+actual user = configured service identity       PASS
+WSL detected                                    PASS
+selected source is ProxyCommand-backed          PASS
+proxy helper is Windows .exe                    PASS
+known_hosts file exists                         PASS
+WSL direct TCP to logical SSH target             FAIL as expected
+Windows helper process baseline captured        PASS
+MCP initialize                                  PASS
+tools/list exactly three tools                  PASS
+list_log_sources contains selected source       PASS
+search_logs finds acceptance marker             PASS
+get_log_context returns marker context          PASS
+helper process count returns to baseline        PASS
 ```
 
-如果 WSL 本身已经可以直接连接目标 SSH，脚本默认失败为 `DIRECT_PATH_REACHABLE`。这不代表 ProxyCommand 功能坏了，而是该次运行没有证明“WSL 不可达但 Windows Host 可达”的目标网络场景。
+如果 WSL 本身已经可以直接连接目标 SSH，Python client 默认失败为 `DIRECT_PATH_REACHABLE`。这不代表 ProxyCommand 功能坏了，而是该次运行没有证明“WSL 不可达但 Windows Host 可达”的目标网络场景。
 
 `--allow-direct-reachable` 只用于辅助诊断，不应作为最终 M7 WSL-path acceptance 证据。
 
-## 8. 三个 MCP 工具如何被证明
+## 9. 三个 MCP 工具如何被证明
 
-脚本使用待验收的 `log-query-mcp-stdio` 和同一个 v2 config，执行标准 MCP sequence：
+client 使用待验收的 `log-query-mcp-stdio` 和同一个 v2 config，执行标准 MCP sequence：
 
 ```text
 initialize
@@ -199,37 +238,47 @@ Windows helper byte stream
 
 形成完整链路。
 
-## 9. HTTP/生产服务补充验收
+## 10. systemd / Streamable HTTP 必须单独证明
 
-stdio acceptance 用于稳定地覆盖工具协议与 Proxy source。若生产入口使用 Streamable HTTP，还必须另外对实际 systemd service 执行：
+stdio acceptance 证明“service identity + candidate binary + v2 config + Windows helper + MCP tools”的确定性链路，但 **不能替代真实 systemd service**。
+
+WSL Windows interop 尤其需要注意：交互 shell 中存在的 interop 环境不代表 systemd service 一定拥有同样的 Windows executable 启动条件。
+
+因此最终验收还必须对实际运行的 systemd service 执行：
 
 ```bash
 sudo scripts/healthcheck.sh
 ```
 
-并用真实 AI client / MCP Inspector 至少完成一次同一 source 的 `search_logs` smoke。
-
-因此最终证据组合是：
+随后通过真实 AI client / MCP Inspector 对**同一个 ProxyCommand source**至少完成：
 
 ```text
-stdio WSL acceptance JSON
-+
-production HTTP healthcheck PASS
-+
-real client smoke
+list_log_sources
+search_logs(acceptance marker)
+get_log_context(match_ref)
 ```
 
-而不是用 stdio 替代生产 HTTP 生命周期。
+其中 `search_logs` 成功是关键：单纯 `initialize` healthcheck 不会触发 SSH/ProxyCommand，不能证明 systemd service 可以启动 Windows helper。
 
-## 10. Helper 生命周期
+因此最终证据组合必须是：
 
-真实验收前脚本通过 Windows `tasklist.exe` 记录 helper image 的进程数量，例如：
+```text
+service-identity stdio WSL acceptance JSON
++
+production systemd HTTP healthcheck PASS
++
+production systemd Proxy source three-tool smoke PASS
+```
+
+## 11. Helper 生命周期
+
+真实验收前 client 通过 Windows `tasklist.exe` 记录 helper image 的进程数量，例如：
 
 ```text
 ncat.exe count = N
 ```
 
-MCP 工具调用结束并终止 acceptance stdio server 后，脚本等待 helper 回收，并要求：
+MCP 工具调用结束并终止 acceptance stdio server 后，client 等待 helper 回收，并要求：
 
 ```text
 after_count <= before_count
@@ -239,12 +288,14 @@ after_count <= before_count
 
 若最终数量高于基线，状态必须为 `HELPER_PROCESS_LEAK`，不能人工改成 PASS。
 
-## 11. Evidence JSON
+生产 systemd smoke 后也应再次检查 helper 数量没有持续增长。
+
+## 12. Evidence JSON
 
 成功或失败都会生成 `0600` JSON，例如：
 
 ```text
-m7-wsl-evidence/m7-wsl-acceptance-20260810T120000Z.json
+/var/lib/log-query-mcp/m7-wsl-evidence/m7-wsl-acceptance-20260810T120000Z.json
 ```
 
 Evidence 记录：
@@ -277,11 +328,14 @@ match_ref
 logical target host plaintext
 ```
 
-## 12. Failure categories
+systemd HTTP smoke 的人工记录也应遵守相同去敏原则。
 
-Acceptance client 只输出稳定、安全的本地分类，例如：
+## 13. Failure categories
+
+Acceptance tooling 只输出稳定、安全的本地分类，例如：
 
 ```text
+SERVICE_IDENTITY_MISMATCH
 NOT_WSL
 DIRECT_PATH_REACHABLE
 TASKLIST_UNAVAILABLE
@@ -298,7 +352,7 @@ HELPER_PROCESS_LEAK
 
 产品自身的 SSH/ProxyCommand 错误分类仍以代码中的 transport/tool error contract 为准；acceptance failure category 不是新的 MCP API。
 
-## 13. Final Acceptance Checklist
+## 14. Final Acceptance Checklist
 
 真实目标环境必须逐项记录：
 
@@ -307,27 +361,30 @@ HELPER_PROCESS_LEAK
 - [ ] Windows/WSL 版本与 distro 已记录；
 - [ ] VPN/企业网络处于目标生产等价状态；
 - [ ] WSL Direct TCP 到 logical SSH target 确实不可达；
+- [ ] acceptance wrapper 以实际 service identity 执行；
 - [ ] Windows `.exe` helper 可由实际服务身份启动；
 - [ ] strict known_hosts 已独立核验；
 - [ ] configured SSH auth 成功；
 - [ ] SFTP/Sync/Cache/Search 完整链路成功；
-- [ ] `list_log_sources` PASS；
-- [ ] `search_logs` PASS；
-- [ ] `get_log_context` PASS；
+- [ ] stdio `list_log_sources` PASS；
+- [ ] stdio `search_logs` PASS；
+- [ ] stdio `get_log_context` PASS；
 - [ ] helper count 回到基线；
 - [ ] evidence JSON 已保存；
-- [ ] `scripts/healthcheck.sh` 对生产 HTTP service PASS；
-- [ ] 实际 AI client/MCP Inspector smoke PASS；
+- [ ] `scripts/healthcheck.sh` 对生产 systemd HTTP service PASS；
+- [ ] production systemd service 对同一 Proxy source 的三工具 smoke PASS；
+- [ ] systemd smoke 后 helper 没有持续增长；
 - [ ] 未出现 Secret/path/raw stderr 泄漏；
 - [ ] 操作人、时间、目标环境和审批/测试记录可追溯。
 
-## 14. RC 边界
+## 15. RC 边界
 
-仓库中存在本验收脚本和文档，只能标记：
+仓库中存在本验收 tooling 和文档，只能标记：
 
 ```text
-WSL acceptance procedure  IMPLEMENTED
-real WSL evidence          PENDING
+WSL acceptance procedure/tooling  IMPLEMENTED
+real WSL evidence                 PENDING
+systemd Proxy source evidence     PENDING
 ```
 
 只有真实目标环境证据满足本清单，且当前 candidate 的 Rust / Contracts / Direct SSH / all M7 / Performance / Release gates 同时 PASS，PR #25 才能进入 Ready/merge 评估。
