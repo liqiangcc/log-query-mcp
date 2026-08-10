@@ -13,5 +13,6 @@
 | [0009](./0009-use-cache-generations-and-query-snapshots.md) | Remote Cache 使用 Generation 与查询快照保证一致性 | Accepted for v2 |
 | [0010](./0010-use-on-query-sync-and-explicit-cache-coverage.md) | v2 默认按查询同步并显式表达缓存覆盖范围 | Accepted for v2 |
 | [0011](./0011-use-russh-and-russh-sftp.md) | Remote Transport 使用 russh 与 russh-sftp | Accepted for v2 |
+| [0012](./0012-use-proxy-command-as-ssh-stream-transport.md) | ProxyCommand 作为 SSH 底层字节流 Transport | Accepted for v2 / M7 |
 
 推翻已有决策时应新增 ADR，并标记旧 ADR 为 Superseded，不应静默重写历史原因。
