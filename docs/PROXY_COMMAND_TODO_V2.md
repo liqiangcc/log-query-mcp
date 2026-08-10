@@ -1,6 +1,6 @@
 # Log Query MCP v2 M7 ProxyCommand 实施 TODO
 
-> 状态：Core + functional + performance harness implemented / CI & live validation blocked  
+> 状态：Core + functional + performance harness + release integration implemented / CI & live validation blocked  
 > 日期：2026-08-10  
 > 设计：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
 > 实现基线：[`M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md`](./M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md)  
@@ -27,7 +27,7 @@
 
 - [x] `PROXY_COMMAND_TRANSPORT_V2.md`。
 - [x] ADR-0012。
-- [x] `CONFIG_SCHEMA_V2.md`。
+- [x] `CONFIG_SCHEMA_V2.md` 目标契约。
 - [x] Machine JSON Schema。
 - [x] Rust config/runtime validation。
 - [x] `{host}` / `{port}` whole-argv placeholder。
@@ -122,14 +122,17 @@ M7 Proxy Sync
 - [x] cursor/match_ref generation consistency through Proxy source。
 - [ ] actual PASS evidence — **BLOCKED by Billing**。
 
-## 7. WSL Acceptance
+## 7. WSL Acceptance — PENDING REAL TARGET
 
 - [ ] WSL `log-query-mcp` → Windows executable ProxyCommand → Remote SSH。
+- [ ] Windows/VPN host path 可达，WSL Direct path 确认不可用。
+- [ ] systemd 服务身份可启动 Windows helper。
+- [ ] strict known_hosts 仍绑定逻辑目标。
 - [ ] `list_log_sources` PASS。
 - [ ] `search_logs` PASS。
 - [ ] `get_log_context` PASS。
-- [ ] direct path 确认不可用。
 - [ ] child cleanup PASS。
+- [ ] 不泄露 helper path/argv/Secret。
 
 ## 8. M7-6 Performance / Regression — HARNESS IMPLEMENTED / EXECUTION BLOCKED
 
@@ -152,15 +155,17 @@ M7 Proxy Sync
 
 `M7 Proxy Performance` candidate `8d116de693f2ee05381b429944e4f5033533c150` 的 run `31380836168` 中，job `proxy-performance` 为 `steps=null`。
 
-## 9. M7-7 Documentation / Release
+## 9. M7-7 Documentation / Release — IMPLEMENTED / VALIDATION BLOCKED
 
-- [ ] README ProxyCommand usage。
-- [ ] INSTALL WSL/helper dependency。
-- [ ] OPERATIONS Proxy diagnostics/error categories。
-- [ ] PRODUCTION_CHECKLIST ProxyCommand security acceptance。
-- [ ] v2 example config Direct + Proxy examples。
-- [ ] Release package includes latest Schema/examples/docs。
-- [ ] `rc_check.sh` includes new non-live M7 checks。
+- [x] README ProxyCommand usage / WSL 模型 / 安全边界。
+- [x] INSTALL WSL/helper dependency、服务身份、systemd hardening 注意事项。
+- [x] OPERATIONS Proxy diagnostics/error categories/helper lifecycle。
+- [x] PRODUCTION_CHECKLIST ProxyCommand + WSL security/acceptance matrix。
+- [x] v2 example config 同时包含 Direct + ProxyCommand。
+- [x] Release package 强制包含 v2 machine Schema、示例和 M7 交付文档。
+- [x] `validate_release_package.sh` 验证 Direct+Proxy example、placeholder 和 `ProxyCommandConfig` machine schema。
+- [x] `rc_check.sh` 增加 non-live ProxyCommand release contract 检查。
+- [ ] 当前 candidate package/rc_check 实际 PASS — **BLOCKED until runner/local gate executes**。
 
 ## 10. Final Gate
 
@@ -202,8 +207,9 @@ restart/stale-cache harness       IMPLEMENTED / EXECUTION BLOCKED
 generation-consistency harness    IMPLEMENTED / EXECUTION BLOCKED
 Direct+Proxy isolation / mixed    IMPLEMENTED / EXECUTION BLOCKED
 performance regression harness    IMPLEMENTED / EXECUTION BLOCKED
-WSL acceptance                    TODO
-release docs/final gates          TODO
+release integration               IMPLEMENTED / VALIDATION BLOCKED
+WSL acceptance                    PENDING REAL TARGET
+final gates                       BLOCKED / NOT PASS
 RC ready                          NO
 ```
 
