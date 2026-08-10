@@ -1,6 +1,6 @@
 # Log Query MCP v2 M7 ProxyCommand 实施 TODO
 
-> 状态：Core + expanded fault harness implemented / CI & live validation blocked  
+> 状态：Core + expanded fault + mixed-query harness implemented / CI & live validation blocked  
 > 日期：2026-08-10  
 > 设计：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
 > 实现基线：[`M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md`](./M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md)  
@@ -77,7 +77,7 @@
 - [ ] encrypted private key + passphrase。
 - [ ] full/tail/from_now sync。
 - [ ] incremental append / rotation / truncate。
-- [ ] Remote Query through cache。
+- [x] Remote Query through cache — mixed-query harness implemented, execution blocked。
 - [ ] actual PASS evidence — **BLOCKED by Billing**。
 
 ## 6. M7-4 Failure Matrix — EXPANDED HARNESS IMPLEMENTED / EXECUTION BLOCKED
@@ -101,29 +101,35 @@
 
 - [ ] server restart through ProxyCommand。
 - [ ] stale-cache fallback rejection at Sync/Backend layer。
-- [ ] multi-remote query isolation above transport layer。
+- [x] Proxy remote failure 后 Local/Direct/healthy Proxy 仍可继续 query — harness implemented。
 
-expanded harness candidate `dd3310b7250824bbfc259c80bc16f30e2d2d52fd` 的 `M7 ProxyCommand Failures` run `31373870218` job `proxy-command-failures` 为 `steps=null`，runner 未启动。
+expanded failure harness 的实际执行仍被 Billing blocker 阻塞。
 
 ## 7. M7-5 Mixed Transport / WSL Acceptance
 
-### Mixed Transport
+### Mixed Transport — HARNESS IMPLEMENTED / EXECUTION BLOCKED
 
-最终目标：
+独立 gate：`.github/workflows/m7-mixed-query.yml`
+
+当前 harness：
 
 ```text
 Local Source
-Direct Remote A
-ProxyCommand Remote B
-ProxyCommand Remote C
+Direct Remote
+ProxyCommand Remote
+failed ProxyCommand Remote
 ```
 
 - [x] transport-level Direct + stalled Proxy isolation harness。
 - [x] Direct/Proxy shared global SSH semaphore harness。
-- [ ] full mixed query through SourceRegistry/Query Engine。
-- [ ] 一个 Proxy remote failure 不影响其他 Remote/Local query。
+- [x] SourceRegistry / StatefulQueryService 完整 `Local + Direct + Proxy` mixed query harness。
+- [x] healthy Direct 与 Proxy 都通过 Sync/Cache 后进入 Query Engine。
+- [x] 一个 failed Proxy remote 显式返回 `REMOTE_UNAVAILABLE`。
+- [x] failed Proxy remote 后，Local + Direct + healthy Proxy 仍可继续 query。
 - [ ] cursor/match_ref generation consistency。
 - [ ] actual PASS evidence — **BLOCKED by Billing**。
+
+`M7 Mixed Query` candidate `bea09b5eb91bdd6ab26312bc57c6c150b8f45994` 已触发 PR run `31374390180`；job `mixed-query-live` 为 `steps=null`，runner 未启动。
 
 ### WSL Acceptance
 
@@ -166,7 +172,7 @@ ProxyCommand Remote C
 - [ ] Direct SSH live PASS。
 - [ ] M7 ProxyCommand success gate PASS。
 - [ ] M7 ProxyCommand failure gate PASS。
-- [ ] mixed Direct/Proxy PASS。
+- [ ] M7 mixed query gate PASS。
 - [ ] WSL acceptance PASS / traceable target evidence。
 - [ ] Performance PASS。
 - [ ] Release/package/lifecycle PASS。
@@ -188,7 +194,7 @@ failure classification            IMPLEMENTED / CI BLOCKED
 success live harness              IMPLEMENTED / EXECUTION BLOCKED
 failure matrix harness            EXPANDED / EXECUTION BLOCKED
 Direct+Proxy transport isolation  IMPLEMENTED / EXECUTION BLOCKED
-full mixed query                  TODO
+full mixed query                  IMPLEMENTED / EXECUTION BLOCKED
 WSL acceptance                    TODO
 performance regression            TODO
 release docs/final gates          TODO
