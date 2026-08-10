@@ -40,6 +40,8 @@ for script in \
   bash -n "${script}"
 done
 
+python3 -m py_compile scripts/m7_wsl_acceptance.py
+
 echo "rc_check: contracts"
 python3 scripts/validate_contracts.py
 
@@ -64,11 +66,19 @@ assert proxy_connections, "v2 example must contain ProxyCommand"
 for connection in proxy_connections:
     proxy = connection["proxy"]
     assert proxy.get("program"), "ProxyCommand program must be non-empty"
-    for argument in proxy.get("args", []):
+    args = proxy.get("args", [])
+    assert "{host}" in args and "{port}" in args, "WSL ProxyCommand example needs {host}/{port}"
+    for argument in args:
         if "{" in argument or "}" in argument:
             assert argument in {"{host}", "{port}"}, "unsupported ProxyCommand placeholder"
 assert "ProxyCommandConfig" in schema.get("$defs", {}), "v2 schema missing ProxyCommandConfig"
 PY
+
+echo "rc_check: WSL acceptance client static precheck"
+python3 scripts/m7_wsl_acceptance.py \
+  --validate-config-only \
+  --config examples/log-query-mcp.v2.remote.json \
+  --source-id inventory-remote-via-host >/dev/null
 
 echo "rc_check: rustfmt"
 cargo fmt --all -- --check
@@ -96,4 +106,4 @@ archive="$(find "${out_dir}" -maxdepth 1 -type f -name 'log-query-mcp-v*.tar.gz'
 bash scripts/validate_release_package.sh "${archive}" "${out_dir}/SHA256SUMS"
 
 echo "rc_check: PASS"
-echo "rc_check: note: Direct SSH, M7 ProxyCommand live/auth/sync/failure/restart/generation/performance gates and target WSL/production acceptance remain separate live gates"
+echo "rc_check: note: Direct SSH, M7 ProxyCommand live/auth/sync/failure/restart/generation/performance gates and real WSL/production acceptance remain separate live gates"
