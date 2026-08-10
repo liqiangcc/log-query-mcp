@@ -1,6 +1,6 @@
 # Log Query MCP 生产运维指南
 
-本文面向负责运行 Log Query MCP 的运维和开发人员，覆盖 Local/Remote 日志来源、监控、配置变更、SSH/SFTP、Cache、升级回滚和故障排查。
+本文面向负责运行 Log Query MCP 的运维和开发人员，覆盖 Local/Remote 日志来源、Direct/ProxyCommand SSH Transport、监控、配置变更、SSH/SFTP、Cache、升级回滚和故障排查。
 
 ## 1. 服务模型
 
@@ -25,6 +25,15 @@ LOG_QUERY_MCP_BIND=127.0.0.1:8000
 ```
 
 HTTP endpoint 固定为 `/mcp`。当前没有独立 `/health` endpoint；发布包使用 `scripts/healthcheck.sh` 同时验证 systemd 状态和 MCP `initialize` 协议响应。
+
+Remote SSH connection 有两种底层连接方式：
+
+```text
+Direct       : TcpStream → russh → auth → SFTP
+ProxyCommand : admin program/argv → stdin/stdout raw stream → russh → auth → SFTP
+```
+
+ProxyCommand 只改变 SSH 底层字节流，不改变 host identity、credential、SFTP、Sync、Cache 或 Query Engine。
 
 ## 2. 常用命令
 
@@ -66,7 +75,9 @@ sudo systemctl restart log-query-mcp.service
 sudo scripts/healthcheck.sh
 ```
 
-每次配置变更至少记录：变更人、时间、source/connection 变化、Secret/known_hosts 变化、权限变化、cache limit 变化、验证结果和回滚方案。
+每次配置变更至少记录：变更人、时间、source/connection 变化、Direct/ProxyCommand 变化、Secret/known_hosts 变化、权限变化、cache limit 变化、验证结果和回滚方案。
+
+ProxyCommand 变更还必须记录：helper 程序来源/版本、程序路径、argv 模板、为何 Direct 不适用、目标网络路径和服务身份下的执行验证。
 
 ## 4. 安全边界
 
@@ -80,8 +91,12 @@ Log Query MCP 是只读日志查询服务，但日志内容本身可能敏感。
 - Password/private-key passphrase 使用 `secret_ref`，不得把明文 Secret 放进普通配置或日志。
 - Host Key Verification 必须 fail-closed。
 - Remote 账号推荐专用 `log-reader`：无 sudo、只读日志权限，条件允许时使用 SFTP-only/chroot。
+- ProxyCommand 只允许管理员配置的 `program + argv[]`，不经过 Shell。
+- ProxyCommand 只允许 whole-argv `{host}` / `{port}` placeholder，不允许 credential/path/client parameter placeholder。
+- Proxy helper stdout 是 SSH raw byte stream；不得混入 banner/debug/JSON 文本。
+- Proxy helper 不获得 SSH Secret；认证仍由 russh 层执行。
 
-systemd unit 的基础加固包括 `NoNewPrivileges=true`、`PrivateTmp=true`、`ProtectSystem=strict`、`ProtectHome=true` 和受限 address families。不要为了省事整体放宽这些边界。
+systemd unit 的基础加固包括 `NoNewPrivileges=true`、`PrivateTmp=true`、`ProtectSystem=strict`、`ProtectHome=true` 和受限 address families。不要为了运行 Proxy helper 直接关闭全部 hardening；如目标 WSL/helper 与某一项冲突，应记录证据并做最小调整。
 
 ## 5. Remote Source 运维
 
@@ -102,6 +117,8 @@ ssh-keygen -lf /etc/log-query-mcp/known_hosts.new
 sudo install -m 0644 /etc/log-query-mcp/known_hosts.new /etc/log-query-mcp/known_hosts
 ```
 
+无论 Direct 还是 ProxyCommand，host-key identity 都是配置中的逻辑 `host:port`，不是 Proxy helper、Windows 主机或 localhost。
+
 ### 5.2 Host key rotation
 
 Host key 变化时服务应拒绝连接，而不是自动接受。处理步骤：
@@ -121,7 +138,50 @@ config: secret_ref=ORDER_LOG_PASSWORD
 environment: ORDER_LOG_PASSWORD=<secret>
 ```
 
-Private key 模式应把 key 文件权限限制给服务账户读取；加密私钥的 passphrase 仍通过 Secret reference 提供。
+Private key 模式应把 key 文件权限限制给服务账户读取；加密私钥的 passphrase 仍通过 Secret reference 提供。ProxyCommand 不参与 Secret resolution。
+
+### 5.4 ProxyCommand / WSL 运维
+
+典型路径：
+
+```text
+WSL log-query-mcp
+  → Windows helper executable
+  → Windows/VPN network stack
+  → logical SSH target
+```
+
+操作约束：
+
+- 优先使用明确的管理员批准程序路径；不要依赖交互式 shell 的 PATH。
+- 以 `log-query-mcp` 服务身份验证 helper，而不是只用管理员 shell 验证。
+- 不把 `sh -c`、`bash -c`、`powershell -Command` 作为通用逃生口。
+- helper stdout 必须保持纯字节流；诊断走 stderr。
+- helper 退出/EOF/timeout/cancellation 后应被回收，不能长期残留孤儿进程。
+- 全局 `max_concurrent_ssh_connections` 同时约束 Direct 与 Proxy session，Proxy child 不拥有独立绕过额度。
+
+内部 Transport 分类用于运维定位：
+
+```text
+ProxyCommandNotFound
+ProxyCommandPermissionDenied
+ProxyCommandStartFailed
+ProxyCommandStreamFailed
+ProxyCommandTimeout
+```
+
+这些分类不得把完整 argv、raw stderr、Secret、private-key path 或 OS error 原样返回给 AI。上层 MCP 错误仍按稳定、去敏、fail-closed 模型处理。
+
+WSL 排查顺序：
+
+1. 确认 Direct path 的确不可达；如果 Direct 可达，优先保持 Direct 简单路径。
+2. 以服务身份确认 helper 文件存在、可执行。
+3. 确认 Windows executable interop/systemd 环境可启动 helper。
+4. 确认 helper 使用宿主机/VPN 网络可到逻辑目标 `host:port`。
+5. 确认 known_hosts 对逻辑目标正确，不能因为 Proxy 连接成功就跳过 host-key 验证。
+6. 确认 SSH credential 只由服务 Secret/key 配置提供。
+7. 检查 helper 是否异常退出、超时或残留进程。
+8. 恢复后执行已知 `search_logs` 与 `get_log_context` smoke。
 
 ## 6. Cache 运维和容量
 
@@ -157,9 +217,11 @@ per-source bootstrap range
 
 Remote SyncEngine 使用 size + bounded continuity fingerprint 判断 append/replacement/truncate。正常 append 延续 generation；truncate/replacement/continuity mismatch 创建新 generation，旧 generation 在引用 TTL 内可继续读取。
 
-同步失败必须保持最后有效 cache，不允许部分同步覆盖有效 generation。Remote 默认 `allow_stale_on_error=false`，因此 SSH/认证/host-key 失败时会显式返回错误，而不是静默查询旧 cache。
+同步失败必须保持最后有效 cache，不允许部分同步覆盖有效 generation。Remote 默认 `allow_stale_on_error=false`，因此 SSH/认证/host-key/ProxyCommand 失败时会显式返回错误，而不是静默查询旧 cache。
 
 Tail/FromNow 覆盖不足时返回 `CACHE_SCOPE_EXCEEDED`；这不是“没有结果”，而是“当前 cache 不能证明完整查询范围”。
+
+ProxyCommand restart/failure harness 还要求：最后有效 generation 可保留用于恢复，但远端不可用时不能伪装为成功 stale query；恢复连接后再继续同步。
 
 ## 8. 运行健康检查
 
@@ -195,10 +257,10 @@ sudo LOG_QUERY_MCP_URL=http://127.0.0.1:9000/mcp scripts/healthcheck.sh
 
 功能验证：
 
-1. `list_log_sources`：确认只返回批准来源且不泄露 host/username/secret/cache path。
-2. `search_logs`：Local 与 Remote 各使用已知 trace/request ID 验证。
-3. `get_log_context`：用 `match_ref` 验证有限上下文。
-4. Remote 场景确认服务端没有执行 Shell/命令。
+1. `list_log_sources`：确认只返回批准来源且不泄露 host/username/secret/cache path/ProxyCommand argv。
+2. `search_logs`：Local、Direct Remote、Proxy Remote 使用已知 trace/request ID 验证。
+3. `get_log_context`：用 `match_ref` 验证有限上下文与 pinned cache generation。
+4. Proxy source 场景确认服务端没有执行 Shell/命令。
 
 ## 9. 监控建议
 
@@ -208,10 +270,13 @@ sudo LOG_QUERY_MCP_URL=http://127.0.0.1:9000/mcp scripts/healthcheck.sh
 - 周期性 MCP protocol initialize 外部探测。
 - 启动和配置失败。
 - `REMOTE_UNAVAILABLE` / auth / host-key / timeout 频率。
+- ProxyCommand start/stream/timeout 类故障频率。
+- Proxy helper 异常残留进程。
 - `CACHE_SCOPE_EXCEEDED` / cache quota 频率。
 - cache 磁盘空间。
 - 查询 timeout/resource-limit 频率。
 - 目标服务器 host key / 日志权限 / rotation 策略变化。
+- WSL 场景的 Windows/VPN/interop 变化。
 
 当前未暴露 Prometheus metrics。需要指标时优先使用 journal + systemd + 外部探测，不要临时增加远程管理接口。
 
@@ -239,7 +304,7 @@ sudo scripts/upgrade.sh /path/to/log-query-mcp-vX.Y.Z-x86_64-unknown-linux-gnu.t
 6. 执行标准 service + MCP protocol health check；
 7. post-mutation/restart/protocol health 失败时自动调用 rollback。
 
-升级前仍应保留上一版本 release artifact，并记录 backup path。
+升级前仍应保留上一版本 release artifact，并记录 backup path。如果生产配置包含 ProxyCommand，升级后额外执行 Proxy source smoke 和 helper cleanup 检查。
 
 ## 11. 回滚
 
@@ -263,36 +328,47 @@ bash scripts/validate_release_package.sh \
   SHA256SUMS
 ```
 
+Package validator 现在还要求：
+
+- v2 example 同时存在 Direct SSH 与 ProxyCommand connection；
+- ProxyCommand example 仅使用 `{host}` / `{port}` placeholder；
+- 包含 `schemas/log-query-mcp-config-v2.schema.json`；
+- 包含 ProxyCommand 设计、实现/验证和性能交付文档。
+
 本地仓库 Final Candidate 检查：
 
 ```bash
 bash scripts/rc_check.sh
 ```
 
-它覆盖所有非 live-SSH 的仓库 Gate。真实 SSH/SFTP、双服务器 concurrency 和目标生产验收仍需单独执行。
+它覆盖所有非 live-SSH 的仓库 Gate，并显式检查 ProxyCommand release contract。真实 Direct/Proxy SSH、M7 functional/performance gates、真实 WSL 目标验收仍需单独执行。
 
 Release workflow 在 tag 上验证 tag/version，构建 release binaries，运行 transport smoke、protocol health 负向矩阵、upgrade/rollback 演练，组装并验证 tarball。普通 branch/PR package job 只有 `contents: read`；只有 tag publish job 获得 `contents: write`。
 
-Rust、Contracts、SSH Transport、Release 均支持手动 rerun。当前最新 candidate 的 Actions runner 启动被 GitHub Billing/Spending Limit 外部阻塞，跟踪于 Issue #23。
+Rust、Contracts、SSH Transport、M7 gates、Release 均需要当前 candidate 的真实执行证据。当前 Actions runner 启动被 GitHub Billing/Spending Limit 外部阻塞，跟踪于 Issue #23。
 
-## 13. Remote 故障排查
+## 13. Remote / ProxyCommand 故障排查
 
 | 现象 | 常见原因 | 处理 |
 |---|---|---|
-| `REMOTE_UNAVAILABLE` | 网络、sshd、路由或目标服务不可达 | 从 MCP 主机检查 TCP/SSH 连通性，不要改成 remote shell 工具 |
+| `REMOTE_UNAVAILABLE` | 网络、sshd、路由、Proxy helper 或目标服务不可达 | 按 Direct/Proxy 路径分层检查；不要改成 remote shell 工具 |
+| Proxy program not found | program 路径/PATH 与服务身份不同 | 使用管理员批准的明确路径，并以服务身份验证 |
+| Proxy permission denied/start failed | executable 权限、WSL interop、systemd hardening/环境 | 最小化修复执行条件，不关闭整体安全边界 |
+| Proxy stream failed/early EOF | helper 崩溃、宿主机网络/VPN中断、stdout 被污染 | 检查 helper 生命周期和宿主机路径；不得把 stderr 直接回传 AI |
+| Proxy timeout | helper 未连上目标或字节流未完成 SSH handshake | 验证逻辑 host:port 与宿主机/VPN 可达性 |
 | auth failure | Secret/key/远端账号权限错误 | 核对 secret_ref、key 权限、账号状态；不要在日志打印 Secret |
-| host key verification failure | known_hosts 缺失、目标 host key 变化 | 先独立核验 fingerprint，再更新 known_hosts |
+| host key verification failure | known_hosts 缺失、目标 host key 变化 | 先独立核验逻辑目标 fingerprint，再更新 known_hosts |
 | `CACHE_SCOPE_EXCEEDED` | Tail/FromNow cache 不覆盖请求历史范围 | 缩小查询范围或由管理员调整 bootstrap；不要当作无匹配 |
 | cache limit | global/per-source quota 或 pinned generation 占用 | 检查 retention/active refs/磁盘，再调整容量 |
 | rotation 后结果变化 | 新 generation 已创建 | 新查询读新 generation；旧 match_ref 在 TTL 内仍读旧 snapshot |
-| Remote 一台失败 | 单 connection 故障 | 其他独立 server/source 应保持可用；按 source 缩小排查 |
+| Remote 一台失败 | 单 connection/Proxy 故障 | 其他独立 server/source 应保持可用；按 source 缩小排查 |
 | systemd active 但 healthcheck 失败 | MCP endpoint/协议初始化异常 | 查 journal、配置、bind；不得把仅进程存活当成健康 |
 
-通用错误仍遵守稳定 code + 去敏 message + retryable，不应返回绝对 remote/cache path、Secret、backtrace 或底层系统调用详情。
+通用错误仍遵守稳定 code + 去敏 message + retryable，不应返回绝对 remote/cache path、Secret、ProxyCommand 完整 argv/raw stderr、backtrace 或底层系统调用详情。
 
 ## 14. 性能基线
 
-当前 M6 大文件基线：
+M6 历史 Direct 大文件基线：
 
 - 100 MiB full cold bootstrap：约 4.9s（特定 GitHub Runner）。
 - 1 GiB full cold bootstrap：约 48.6s。
@@ -300,10 +376,11 @@ Rust、Contracts、SSH Transport、Release 均支持手动 rerun。当前最新 
 - unchanged probe：64 KiB。
 - local cache scan：0 remote bytes。
 - 300 次连续 range read：已验证 SFTP handle 确定关闭。
-- single/dual-server concurrency harness 已实现并接入真实 SSH Gate；最新 elapsed metrics 等待 Issue #23 解锁 runner 后记录。
 
-这些数字只用于回归对比，不是 SLA。详见 `M6_PERFORMANCE_BASELINE_V2.md`。
+M7 已实现 paired Direct/Proxy performance gate：5-session setup、100MiB/1GiB/10GiB-tail、incremental bounded transfer、Proxy 300 range reads、2 Direct + 2 Proxy concurrency、normal-path helper cleanup。当前 Billing 阻塞导致 `steps=null`，所以尚无当前 M7 性能实测数字。
+
+这些数字只用于回归对比，不是 SLA。详见 `M6_PERFORMANCE_BASELINE_V2.md` 与 `M7_PROXY_PERFORMANCE_GATE_V2.md`。
 
 ## 15. 变更记录
 
-每次生产操作记录：操作类型、操作人/审批单、版本和 SHA256、配置/source/connection 摘要、known_hosts/Secret 变更、backup path、验收结果、遗留风险和回滚结果。
+每次生产操作记录：操作类型、操作人/审批单、版本和 SHA256、配置/source/connection 摘要、Direct/ProxyCommand 选择及原因、helper 版本/路径（如适用）、known_hosts/Secret 变更、backup path、验收结果、遗留风险和回滚结果。
