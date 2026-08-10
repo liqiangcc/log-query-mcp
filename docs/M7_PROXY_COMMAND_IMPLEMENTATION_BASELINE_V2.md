@@ -178,6 +178,8 @@ README.md
 docs/INSTALL.md
 docs/OPERATIONS.md
 docs/PRODUCTION_CHECKLIST.md
+docs/CONFIG_SCHEMA_V2.md
+docs/RELEASE_READINESS_V2.md
 examples/log-query-mcp.v2.remote.json
 scripts/package_release.sh
 scripts/validate_release_package.sh
@@ -190,6 +192,8 @@ scripts/rc_check.sh
 - INSTALL 要求以 systemd 服务身份验证 helper，不为了 helper 整体关闭 hardening；
 - OPERATIONS 记录 Proxy internal categories、bounded stderr、helper lifecycle、WSL 排障顺序；
 - PRODUCTION_CHECKLIST 增加 ProxyCommand、WSL、performance、release artifact 验收项；
+- CONFIG_SCHEMA_V2 已从“target pending”修正为 machine schema + Rust runtime 已实现状态；
+- RELEASE_READINESS_V2 已纳入所有 M7 gates、WSL acceptance 和新 package contract；
 - v2 example 同时包含 Direct connection 与 `proxy.type=command` connection；
 - package 强制包含 `schemas/log-query-mcp-config-v2.schema.json` 和 M7 设计/验证文档；
 - package validator 检查 Direct + Proxy example、允许的 placeholder 和 `ProxyCommandConfig` machine schema；
@@ -201,20 +205,21 @@ Release Integration 不表示 RC 已通过。package/rc_check 仍需要当前 ca
 
 GitHub Actions Billing / Spending Limit 仍是外部 blocker。
 
-最新 Performance harness 已被 GitHub 识别：
+Release Integration 后当前 branch head `ede9c591b91c22e76a8db696db3fb8cc4336a5b4` 触发了新的 candidate runs。其中：
 
 ```text
-workflow = M7 Proxy Performance
-run      = 31380836168
-head     = 8d116de693f2ee05381b429944e4f5033533c150
-job      = proxy-performance
-result   = failure
-steps    = null
+Release run = 31382108976
+package job = failure
+steps       = null
+
+Rust run    = 31382108916
+test job    = failure
+steps       = null
 ```
 
-runner 没有执行任何 step，因此没有 M7 性能数字。
+两者都没有执行任何 step，因此新 package/rc_check/Rust 代码没有真实 runner 结果。其他 M7 workflows 在同一 head 也继续以 runner-start 前失败结束。
 
-其他 M7 gates 与刚完成的 Release Integration 也仍缺当前候选的真实 PASS evidence。当前必须记录：
+当前必须记录：
 
 ```text
 implementation present                 YES
