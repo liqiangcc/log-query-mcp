@@ -147,6 +147,8 @@ python3 "${root}/scripts/m7_wsl_http_acceptance.py" \
   die "packaged M7 WSL HTTP acceptance client failed static config validation"
 python3 "${root}/scripts/verify_m7_evidence.py" --self-test >/dev/null || \
   die "packaged M7 evidence verifier self-test failed"
+python3 "${root}/scripts/m7_real_target_manifest.py" self-test >/dev/null || \
+  die "packaged M7 run manifest self-test failed"
 
 version="$(awk -F= '$1 == "version" {print $2}' "${root}/BUILDINFO")"
 [[ -n "${version}" ]] || die "BUILDINFO does not contain version"
