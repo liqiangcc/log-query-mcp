@@ -69,6 +69,8 @@ for required in \
 done
 [[ -x "${package_root}/bin/log-query-mcp" ]] || die "release binary is not executable"
 [[ -x "${package_root}/bin/log-query-mcp-stdio" ]] || die "release stdio binary is not executable"
+build_git_commit="$(sed -n 's/^git_commit=//p' "${package_root}/BUILDINFO")"
+[[ "${build_git_commit}" =~ ^[0-9a-f]{40,64}$ ]] || die "release BUILDINFO git_commit is missing or not traceable"
 [[ -f "${rollback_script}" ]] || die "rollback helper not found: ${rollback_script}"
 if [[ -z "${healthcheck_cmd}" ]]; then
   [[ -f "${healthcheck_script}" ]] || die "health check helper not found: ${healthcheck_script}"
