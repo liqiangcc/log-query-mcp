@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/verify <target>
+
+Targets:
+  conventions      Test the convention checker, then check repository conventions
+  conventions-test Run convention checker self-tests only
+  fmt              Check Rust formatting
+  clippy           Run Clippy with warnings denied
+  test             Run Rust tests
+  build            Build release binaries
+  rust             Run fmt, clippy, test, and build
+  contracts        Validate v1 JSON contracts
+  http-smoke       Execute production-safe MCP HTTP smoke tests (requires BASE_URL and httpyac)
+  all              Run conventions, rust, and contracts verification
+EOF
+}
+
+run_conventions_test() {
+  echo "[verify] conventions-test"
+  python -m unittest discover -s tests/scripts -p 'test_*.py' -v
+}
+
+run_convention_checker() {
+  echo "[verify] convention-checker"
+  python scripts/check_conventions.py
+}
+
+run_conventions() {
+  run_conventions_test
+  run_convention_checker
+}
+
+run_fmt() {
+  echo "[verify] fmt"
+  cargo fmt --all -- --check
+}
+
+run_clippy() {
+  echo "[verify] clippy"
+  cargo clippy --locked --all-targets --all-features -- -D warnings
+}
+
+run_test() {
+  echo "[verify] test"
+  cargo test --locked --all-targets --all-features
+}
+
+run_build() {
+  echo "[verify] build"
+  cargo build --release --locked --bins
+}
+
+run_rust() {
+  run_fmt
+  run_clippy
+  run_test
+  run_build
+}
+
+run_contracts() {
+  echo "[verify] contracts"
+  python scripts/validate_contracts.py
+}
+
+run_http_smoke() {
+  echo "[verify] http-smoke"
+
+  if [[ -z "${BASE_URL:-}" ]]; then
+    echo "BASE_URL is required for http-smoke" >&2
+    exit 2
+  fi
+
+  if ! command -v httpyac >/dev/null 2>&1; then
+    echo "httpyac is required for http-smoke" >&2
+    echo "Install it with: npm install -g httpyac" >&2
+    exit 2
+  fi
+
+  httpyac send 'tests/http/**/*.http' --all --bail --filter only-failed
+}
+
+target="${1:-}"
+
+case "$target" in
+  conventions) run_conventions ;;
+  conventions-test) run_conventions_test ;;
+  fmt) run_fmt ;;
+  clippy) run_clippy ;;
+  test) run_test ;;
+  build) run_build ;;
+  rust) run_rust ;;
+  contracts) run_contracts ;;
+  http-smoke) run_http_smoke ;;
+  all)
+    run_conventions
+    run_rust
+    run_contracts
+    ;;
+  -h|--help|help|"")
+    usage
+    ;;
+  *)
+    echo "Unknown verification target: $target" >&2
+    usage >&2
+    exit 3
+    ;;
+esac

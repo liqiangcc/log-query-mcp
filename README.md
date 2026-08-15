@@ -121,6 +121,8 @@ get_log_context
 - [v1 MCP API](./docs/MCP_API_V1.md)
 - [v1 错误模型](./docs/ERROR_MODEL_V1.md)
 - [v1 配置 Schema 说明](./docs/CONFIG_SCHEMA_V1.md)
+- [Convention Checker](./docs/CONVENTION_CHECKER.md)
+- [HTTP 验证](./docs/HTTP_VERIFICATION.md)
 - [架构决策记录](./docs/adr/README.md)
 - [Codex 交接说明](./docs/CODEX_HANDOFF.md)
 - [MCP 工具机器 Schema](./schemas/mcp-tools-v1.schema.json)
@@ -130,13 +132,43 @@ get_log_context
 
 ## 开发验证
 
+本地开发、AI 和 CI 共用 `scripts/verify` 作为稳定验证入口，避免三套调用方式逐渐漂移。
+
+完整预部署验证：
+
 ```bash
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets --all-features -- -D warnings
-cargo test --locked --all-targets --all-features
-cargo build --release --locked --bins
-python3 scripts/validate_contracts.py
+./scripts/verify all
 ```
+
+按关注点运行：
+
+```bash
+./scripts/verify conventions
+./scripts/verify conventions-test
+./scripts/verify rust
+./scripts/verify contracts
+```
+
+更小的 Rust 目标：
+
+```bash
+./scripts/verify fmt
+./scripts/verify clippy
+./scripts/verify test
+./scripts/verify build
+```
+
+`conventions` 会先运行 Convention Checker 自测，再检查真实仓库 HTTP 测试资产；详细规则见 [Convention Checker](./docs/CONVENTION_CHECKER.md)。
+
+`contracts`/`all` 需要当前 Python 环境已安装 `jsonschema`；CI 的 Contracts workflow 负责安装该依赖。底层仍使用 Cargo 和 `scripts/validate_contracts.py`，`scripts/verify` 只负责编排，不复制验证逻辑。
+
+真实 HTTP / 部署后验证单独执行：
+
+```bash
+BASE_URL=http://127.0.0.1:8000 ./scripts/verify http-smoke
+```
+
+它要求可访问的运行实例和 httpYac，不包含在 `all` 中。
 
 发布包 dry-run：
 

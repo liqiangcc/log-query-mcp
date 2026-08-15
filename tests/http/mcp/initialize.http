@@ -1,0 +1,25 @@
+# @name initializeMcp
+# @tags smoke deployment production-safe
+
+POST {{$processEnv BASE_URL}}/mcp
+Content-Type: application/json
+Accept: application/json, text/event-stream
+
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2025-06-18",
+    "capabilities": {},
+    "clientInfo": {
+      "name": "http-regression",
+      "version": "0.1.0"
+    }
+  }
+}
+
+?? status == 200
+?? header content-type exists
+?? body includes jsonrpc
+?? body includes protocolVersion
