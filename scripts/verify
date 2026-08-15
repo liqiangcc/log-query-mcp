@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/verify <target>
+
+Targets:
+  fmt        Check Rust formatting
+  clippy     Run Clippy with warnings denied
+  test       Run Rust tests
+  build      Build release binaries
+  rust       Run fmt, clippy, test, and build
+  contracts  Validate v1 JSON contracts
+  all        Run rust and contracts verification
+EOF
+}
+
+run_fmt() {
+  echo "[verify] fmt"
+  cargo fmt --all -- --check
+}
+
+run_clippy() {
+  echo "[verify] clippy"
+  cargo clippy --locked --all-targets --all-features -- -D warnings
+}
+
+run_test() {
+  echo "[verify] test"
+  cargo test --locked --all-targets --all-features
+}
+
+run_build() {
+  echo "[verify] build"
+  cargo build --release --locked --bins
+}
+
+run_rust() {
+  run_fmt
+  run_clippy
+  run_test
+  run_build
+}
+
+run_contracts() {
+  echo "[verify] contracts"
+  python scripts/validate_contracts.py
+}
+
+target="${1:-}"
+
+case "$target" in
+  fmt) run_fmt ;;
+  clippy) run_clippy ;;
+  test) run_test ;;
+  build) run_build ;;
+  rust) run_rust ;;
+  contracts) run_contracts ;;
+  all)
+    run_rust
+    run_contracts
+    ;;
+  -h|--help|help|"")
+    usage
+    ;;
+  *)
+    echo "Unknown verification target: $target" >&2
+    usage >&2
+    exit 3
+    ;;
+esac
