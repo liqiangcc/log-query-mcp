@@ -1,0 +1,22 @@
+name: Self-hosted Billing Probe
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/self-hosted-billing-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: self-hosted
+    timeout-minutes: 5
+    steps:
+      - name: Execute isolated scheduling probe
+        run: |
+          echo 'SELF_HOSTED_BILLING_PROBE'
+          echo "repo=${GITHUB_REPOSITORY}"
+          echo "sha=${GITHUB_SHA}"
