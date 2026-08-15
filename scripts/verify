@@ -6,21 +6,32 @@ usage() {
 Usage: ./scripts/verify <target>
 
 Targets:
-  conventions Check project-local structural conventions
-  fmt         Check Rust formatting
-  clippy      Run Clippy with warnings denied
-  test        Run Rust tests
-  build       Build release binaries
-  rust        Run fmt, clippy, test, and build
-  contracts   Validate v1 JSON contracts
-  http-smoke  Execute production-safe MCP HTTP smoke tests (requires BASE_URL and httpyac)
-  all         Run conventions, rust, and contracts verification
+  conventions      Test the convention checker, then check repository conventions
+  conventions-test Run convention checker self-tests only
+  fmt              Check Rust formatting
+  clippy           Run Clippy with warnings denied
+  test             Run Rust tests
+  build            Build release binaries
+  rust             Run fmt, clippy, test, and build
+  contracts        Validate v1 JSON contracts
+  http-smoke       Execute production-safe MCP HTTP smoke tests (requires BASE_URL and httpyac)
+  all              Run conventions, rust, and contracts verification
 EOF
 }
 
-run_conventions() {
-  echo "[verify] conventions"
+run_conventions_test() {
+  echo "[verify] conventions-test"
+  python -m unittest discover -s tests/scripts -p 'test_*.py' -v
+}
+
+run_convention_checker() {
+  echo "[verify] convention-checker"
   python scripts/check_conventions.py
+}
+
+run_conventions() {
+  run_conventions_test
+  run_convention_checker
 }
 
 run_fmt() {
@@ -76,6 +87,7 @@ target="${1:-}"
 
 case "$target" in
   conventions) run_conventions ;;
+  conventions-test) run_conventions_test ;;
   fmt) run_fmt ;;
   clippy) run_clippy ;;
   test) run_test ;;
