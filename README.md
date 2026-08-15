@@ -130,13 +130,24 @@ get_log_context
 
 ## 开发验证
 
+本地开发、AI 和 CI 共用 `scripts/verify` 作为稳定验证入口，避免三套调用方式逐渐漂移：
+
 ```bash
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets --all-features -- -D warnings
-cargo test --locked --all-targets --all-features
-cargo build --release --locked --bins
-python3 scripts/validate_contracts.py
+./scripts/verify rust
+./scripts/verify contracts
+./scripts/verify all
 ```
+
+可按关注点运行更小的目标：
+
+```bash
+./scripts/verify fmt
+./scripts/verify clippy
+./scripts/verify test
+./scripts/verify build
+```
+
+`contracts`/`all` 需要当前 Python 环境已安装 `jsonschema`；CI 的 Contracts workflow 负责安装该依赖。底层仍使用 Cargo 和 `scripts/validate_contracts.py`，`scripts/verify` 只负责编排，不复制验证逻辑。
 
 发布包 dry-run：
 
