@@ -6,6 +6,7 @@ usage() {
 Usage: ./scripts/verify <target>
 
 Targets:
+  conventions Check project-local structural conventions
   fmt         Check Rust formatting
   clippy      Run Clippy with warnings denied
   test        Run Rust tests
@@ -13,8 +14,13 @@ Targets:
   rust        Run fmt, clippy, test, and build
   contracts   Validate v1 JSON contracts
   http-smoke  Execute production-safe MCP HTTP smoke tests (requires BASE_URL and httpyac)
-  all         Run rust and contracts verification
+  all         Run conventions, rust, and contracts verification
 EOF
+}
+
+run_conventions() {
+  echo "[verify] conventions"
+  python scripts/check_conventions.py
 }
 
 run_fmt() {
@@ -69,6 +75,7 @@ run_http_smoke() {
 target="${1:-}"
 
 case "$target" in
+  conventions) run_conventions ;;
   fmt) run_fmt ;;
   clippy) run_clippy ;;
   test) run_test ;;
@@ -77,6 +84,7 @@ case "$target" in
   contracts) run_contracts ;;
   http-smoke) run_http_smoke ;;
   all)
+    run_conventions
     run_rust
     run_contracts
     ;;
