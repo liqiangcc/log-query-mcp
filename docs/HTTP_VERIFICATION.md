@@ -1,71 +1,96 @@
 # HTTP Verification
 
-## Purpose
+## 目的
 
-HTTP verification proves the behavior of a running `log-query-mcp` instance from the external Streamable HTTP boundary. It is intentionally separate from `./scripts/verify all`, which only verifies source/build/contracts and does not require a deployed service.
+HTTP 验证证明真实运行实例的外部 MCP 行为，不替代 Rust、Contract 或 Convention Checker。
 
-## Test assets
-
-Executable HTTP cases live under:
-
-```text
-tests/http/
-```
-
-The first smoke case is:
+## 可执行资产
 
 ```text
 tests/http/mcp/initialize.http
 ```
 
-It sends the same MCP `initialize` operation documented in the README and asserts the externally observable response.
+该 Case：
 
-## Run
-
-Install httpYac:
-
-```bash
-npm install -g httpyac
+```text
+smoke
+deployment
+production-safe
 ```
 
-Point verification at a running instance. `BASE_URL` does not include `/mcp`:
+使用环境变量选择目标实例：
+
+```text
+{{$processEnv BASE_URL}}
+```
+
+并显式断言 HTTP status。
+
+这些结构约定由 `./scripts/verify conventions` 自动检查，但 Checker 不会真的发送 HTTP 请求。
+
+## 运行
 
 ```bash
 BASE_URL=http://127.0.0.1:8000 ./scripts/verify http-smoke
 ```
 
-The same command can target staging after deployment:
+要求本地存在 httpYac。
 
-```bash
-BASE_URL=https://staging.example.internal ./scripts/verify http-smoke
-```
-
-## Separation of concerns
+## 分离点
 
 ```text
-./scripts/verify all
-→ source/build/contract verification
-→ no running service required
+./scripts/verify conventions
+→ 检查 HTTP 测试资产结构和安全 metadata
 
 ./scripts/verify http-smoke
-→ real HTTP boundary verification
-→ running service + BASE_URL + httpYac required
+→ 对真实服务执行 HTTP 请求和断言
 ```
 
-The HTTP case is tagged `smoke`, `deployment`, and `production-safe` because MCP initialization is read-only and does not modify log data.
-
-## Bug regression
-
-When an HTTP-visible bug is fixed, add the smallest `.http` case that asserts the correct behavior. Keep the same case after the fix:
+所以：
 
 ```text
-Before fix: FAIL
-After fix: PASS
-After deployment: PASS
+Convention PASS
+≠ HTTP Runtime PASS
 ```
 
-Do not delete the case after the incident is closed; it becomes a permanent regression asset.
+反过来 HTTP 请求成功也不能证明所有 Convention Rule 都满足。
 
-## Current pilot status
+## 使用阶段
 
-The asset and stable command are implemented on the verification pilot branch. Runtime execution remains `NOT VERIFIED` until a reachable service and an execution environment with httpYac are available. GitHub-hosted Actions are currently blocked at the account/billing layer before any workflow step starts, so that condition is classified as `TEST_ENVIRONMENT_FAILURE`, not an HTTP or code failure.
+### 本地/测试环境
+
+启动或连接真实 `log-query-mcp` 后运行 `http-smoke`。
+
+### Staging
+
+部署后验证运行版本，然后对 staging `BASE_URL` 重放同一个 Case。
+
+### Production
+
+只允许明确标记 `production-safe` 且无破坏性的 Case 自动运行。当前 initialize 只是协议握手，不修改日志或业务数据。
+
+## Bug Regression
+
+未来如果真实 HTTP Bug 可以通过 `.http` 稳定复现：
+
+```text
+Bug
+→ 新增/扩展正确行为断言
+→ Before Fix: FAIL
+→ Fix
+→ After Fix: PASS
+→ 永久保留
+→ staging 部署后重放
+```
+
+不要在修复后删除复现 Case。
+
+## 当前 Pilot 状态
+
+HTTP asset 和 Runner 入口已经实现，但当前没有同时满足“可访问运行实例 + httpYac”的执行环境，因此：
+
+```text
+HTTP Runtime: NOT VERIFIED
+```
+
+不能因为 `.http` 文件存在就写 PASS。
