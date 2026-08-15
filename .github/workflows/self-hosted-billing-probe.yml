@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/self-hosted-billing-probe.yml'
+      - 'scripts/bootstrap-self-hosted-runner.sh'
   workflow_dispatch:
 
 permissions:
@@ -12,7 +13,7 @@ permissions:
 
 jobs:
   probe:
-    runs-on: self-hosted
+    runs-on: [self-hosted, verification-pilot]
     timeout-minutes: 5
     steps:
       - name: Execute isolated scheduling probe
@@ -20,3 +21,4 @@ jobs:
           echo 'SELF_HOSTED_BILLING_PROBE'
           echo "repo=${GITHUB_REPOSITORY}"
           echo "sha=${GITHUB_SHA}"
+          echo "runner=${RUNNER_NAME}"
