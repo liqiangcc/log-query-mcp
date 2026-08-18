@@ -380,6 +380,16 @@ docs/M7_PROXY_PERFORMANCE_GATE_V2.md
 
 历史 M6 指标只能作为对照，不能替代当前 M7 候选执行。
 
+### 阶段 F 实际状态（2026-08-18）
+
+- 状态：`PASS（本地不可由 GitHub Actions 代替的 live/performance gate）`；测试产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`。
+- M7 transport 性能：Direct setup 5 次 `767 ms`，ProxyCommand setup 5 次 `692 ms`，ProxyCommand 300 次 range read `519 ms`，2 Direct + 2 Proxy 并发 `221 ms`；孤儿 helper 检查 PASS。
+- 100 MiB Full：Direct cold `3509 ms`、Proxy cold `3775 ms`；unchanged probe 仅远程读取 `65536` bytes；local scan 远程 `0` bytes；incremental 远程读取 `1179648` bytes、缓存写入 `1048576` bytes。
+- 1 GiB Full：Direct cold `29434 ms`、Proxy cold `28413 ms`；unchanged probe 仅远程读取 `65536` bytes；local scan 远程 `0` bytes；incremental 远程读取 `104988672` bytes、缓存写入 `104857600` bytes。
+- 10 GiB logical/Tail 64 MiB：Direct cold `1747 ms`、Proxy cold `1905 ms`；unchanged probe 仅远程读取 `65536` bytes；local scan 远程 `0` bytes、扫描 `67108864` bytes；incremental 远程读取 `1179648` bytes、缓存写入 `1048576` bytes。
+- 资源证据：六次 profile 的 `/usr/bin/time -v`、metrics、磁盘检查和输出日志保存在 `/tmp/log-query-mcp-m7-perf-local/`；最大 RSS 约 `72 MiB`，测试期间磁盘可用空间保持 `217–221 GiB`，未发现 `nc 127.0.0.1:2235` 孤儿进程。
+- 该阶段验证的是本机真实 SSH/SFTP、ProxyCommand、缓存、增量和资源边界；GitHub Actions 仍需在 Billing 恢复后执行其对应 workflow，不能用本地结果伪造 Actions required check。
+
 ## 12. 阶段 G：真实 WSL/Windows 验收
 
 ### 12.1 必须证明的场景
