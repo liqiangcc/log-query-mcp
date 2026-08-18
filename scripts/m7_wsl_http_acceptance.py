@@ -465,7 +465,7 @@ def run_real(args: argparse.Namespace, config_path: Path, target: dict[str, Any]
             {
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "m7-wsl-http-acceptance", "version": "0.1.0"},
+                "clientInfo": {"name": "m7-wsl-http-acceptance", "version": "0.2.0"},
             },
         )
         server_info = initialized["result"].get("serverInfo")

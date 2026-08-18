@@ -139,7 +139,7 @@ remote deploy/restart
 ## 快速安装
 
 ```bash
-VERSION=0.1.0
+VERSION=0.2.0
 TARGET=x86_64-unknown-linux-gnu
 BASE_URL="https://github.com/liqiangcc/log-query-mcp/releases/download/v${VERSION}"
 
@@ -246,7 +246,7 @@ curl -sS http://127.0.0.1:8000/mcp \
     "params":{
       "protocolVersion":"2025-06-18",
       "capabilities":{},
-      "clientInfo":{"name":"manual-smoke","version":"0.1.0"}
+      "clientInfo":{"name":"manual-smoke","version":"0.2.0"}
     }
   }'
 ```
@@ -339,6 +339,8 @@ bash scripts/rc_check.sh
 - [M6 安全/故障矩阵](./docs/M6_SECURITY_FAULT_MATRIX_V2.md)
 - [v2 Remote SSH + Cache 设计](./docs/REMOTE_SSH_CACHE_DESIGN_V2.md)
 - [v2 Remote 实施 TODO](./docs/REMOTE_SSH_CACHE_TODO_V2.md)
+- [生产发布迭代计划](./docs/ITERATION_PLAN.md)
+- [v2 SSH/SFTP 发布执行手册](./docs/V2_RELEASE_EXECUTION.md)
 - [v1 实现基线](./docs/IMPLEMENTATION_BASELINE_V1.md)
 - [v1 MCP API](./docs/MCP_API_V1.md)
 - [v1 错误模型](./docs/ERROR_MODEL_V1.md)
@@ -375,7 +377,7 @@ bash tests/upgrade_rollback_test.sh
 ```bash
 cargo build --release --locked --bins --target x86_64-unknown-linux-gnu
 bash scripts/package_release.sh --target x86_64-unknown-linux-gnu --out-dir dist --require-docs
-bash scripts/validate_release_package.sh dist/log-query-mcp-v0.1.0-x86_64-unknown-linux-gnu.tar.gz dist/SHA256SUMS
+bash scripts/validate_release_package.sh dist/log-query-mcp-v0.2.0-x86_64-unknown-linux-gnu.tar.gz dist/SHA256SUMS
 ```
 
 ## 当前不包含

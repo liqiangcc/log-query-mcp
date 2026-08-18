@@ -148,7 +148,10 @@ async fn full_bootstrap_and_incremental_append_stay_on_one_generation() {
     assert_eq!(second.action, SyncAction::Appended);
     assert_eq!(second.generation, first.generation);
     assert_eq!(second.cached_bytes_written, 7);
-    assert_eq!(cached_text(&cache, "m7-sync-full", "sync-full.log"), "first\nsecond\n");
+    assert_eq!(
+        cached_text(&cache, "m7-sync-full", "sync-full.log"),
+        "first\nsecond\n"
+    );
 }
 
 #[tokio::test]
@@ -174,13 +177,18 @@ async fn tail_bootstrap_keeps_only_configured_tail_then_appends() {
             start_offset: expected_start
         }
     );
-    assert_eq!(cached_text(&cache, "m7-sync-tail", "sync-tail.log"), "TAIL one\n");
+    assert_eq!(
+        cached_text(&cache, "m7-sync-tail", "sync-tail.log"),
+        "TAIL one\n"
+    );
 
     let mut fixture = OpenOptions::new()
         .append(true)
         .open(&local_file)
         .expect("open tail fixture for append");
-    fixture.write_all(b"TAIL two\n").expect("append tail fixture");
+    fixture
+        .write_all(b"TAIL two\n")
+        .expect("append tail fixture");
     fixture.sync_all().expect("sync tail fixture");
     drop(fixture);
 
@@ -215,7 +223,10 @@ async fn from_now_bootstrap_excludes_history_and_captures_future_append() {
         }
     );
     assert_eq!(first.cached_bytes_written, 0);
-    assert_eq!(cached_text(&cache, "m7-sync-from-now", "sync-from-now.log"), "");
+    assert_eq!(
+        cached_text(&cache, "m7-sync-from-now", "sync-from-now.log"),
+        ""
+    );
 
     let mut fixture = OpenOptions::new()
         .append(true)
@@ -249,7 +260,10 @@ async fn truncate_creates_a_new_generation() {
         cache_dir.path(),
     );
 
-    let first = engine.sync(&target).await.expect("truncate initial bootstrap");
+    let first = engine
+        .sync(&target)
+        .await
+        .expect("truncate initial bootstrap");
     fs::write(&local_file, b"short\n").expect("truncate remote fixture");
     let second = engine.sync(&target).await.expect("sync after truncate");
 
@@ -258,7 +272,10 @@ async fn truncate_creates_a_new_generation() {
         SyncAction::NewGeneration(SyncGenerationReason::RemoteTruncated)
     );
     assert_ne!(second.generation, first.generation);
-    assert_eq!(cached_text(&cache, "m7-sync-truncate", "sync-truncate.log"), "short\n");
+    assert_eq!(
+        cached_text(&cache, "m7-sync-truncate", "sync-truncate.log"),
+        "short\n"
+    );
 }
 
 #[tokio::test]
@@ -279,10 +296,16 @@ async fn same_path_rotation_with_same_size_content_uses_continuity_mismatch_gene
         cache_dir.path(),
     );
 
-    let first = engine.sync(&target).await.expect("rotation initial bootstrap");
+    let first = engine
+        .sync(&target)
+        .await
+        .expect("rotation initial bootstrap");
     fs::rename(&local_file, &rotated_file).expect("rotate old remote file");
     fs::write(&local_file, new).expect("create replacement remote file");
-    let second = engine.sync(&target).await.expect("sync replacement generation");
+    let second = engine
+        .sync(&target)
+        .await
+        .expect("sync replacement generation");
 
     assert_eq!(
         second.action,

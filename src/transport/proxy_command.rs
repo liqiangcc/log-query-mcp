@@ -100,7 +100,11 @@ pub(crate) fn connect_proxy_command(
 
     let mut command = Command::new(&proxy.program);
     for argument in &proxy.args {
-        command.arg(expand_argument(argument, &connection.host, connection.port)?);
+        command.arg(expand_argument(
+            argument,
+            &connection.host,
+            connection.port,
+        )?);
     }
     command
         .stdin(Stdio::piped())

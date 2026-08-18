@@ -166,7 +166,7 @@ or your spending limit needs to be increased.
 
 ## 7. 阶段 B：确定并同步版本
 
-候选分支当前仍使用 `0.1.0`，而仓库已经存在 `v0.1.0` tag，不能重复发布同一 tag。
+候选分支起始使用 `0.1.0`，而仓库已经存在 `v0.1.0` tag，不能重复发布同一 tag。
 
 默认建议新版本为 `0.2.0`，但在修改前必须确认：
 
@@ -195,6 +195,15 @@ rg -n '0\.1\.0|v0\.1\.0' README.md docs examples scripts .github Cargo.toml Carg
 不是所有历史文档中的旧版本都必须替换。历史 v1 记录应保留；只修改会影响当前 v2 发布和操作指引的引用。
 
 完成标准：新 tag 尚不存在，Cargo、发布脚本、包名、文档和 BUILDINFO 约定一致。
+
+### 阶段 B 实际状态（2026-08-18）
+
+- 状态：`PASS`（本地版本同步）；选择 `0.2.0`，远端不存在 `v0.2.0`。
+- 已同步：`Cargo.toml`、`Cargo.lock` 本包条目、README/安装指南包引用、健康检查和 WSL/manifest/test 版本夹具。
+- 保留第三方依赖 `sponge-cursor 0.1.0` 等非发布版本引用；没有替换历史 v1 记录。
+- `bash scripts/check_release_tag.sh v0.2.0`：PASS；`git diff --check`：PASS。
+- 全目标 `cargo check --locked --all-targets --all-features` 首次发现并修复 `map_ssh_transport` 未覆盖 5 个 ProxyCommand 错误；修复后：PASS。
+- 阶段记录 commit：待本阶段修复提交完成后补记；当前候选代码基线为 `848ae2d04a4f78d1acbe7d4708dbd48e4b183e1b`。
 
 ## 8. 阶段 C：本地 RC 检查
 

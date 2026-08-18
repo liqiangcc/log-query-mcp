@@ -357,6 +357,11 @@ fn map_ssh_transport(error: SshTransportError) -> ToolError {
         }
         SshTransportError::ConnectTimeout
         | SshTransportError::ConnectFailed
+        | SshTransportError::ProxyCommandNotFound
+        | SshTransportError::ProxyCommandPermissionDenied
+        | SshTransportError::ProxyCommandStartFailed
+        | SshTransportError::ProxyCommandStreamFailed
+        | SshTransportError::ProxyCommandTimeout
         | SshTransportError::ConnectionLimit
         | SshTransportError::OperationTimeout
         | SshTransportError::SshProtocol
@@ -473,5 +478,23 @@ mod v2_error_tests {
             ToolError::from(StatefulQueryError::CacheScopeExceeded).code,
             ToolErrorCode::CacheScopeExceeded
         );
+    }
+
+    #[test]
+    fn proxy_transport_failures_are_redacted_as_remote_unavailable() {
+        for error in [
+            SshTransportError::ProxyCommandNotFound,
+            SshTransportError::ProxyCommandPermissionDenied,
+            SshTransportError::ProxyCommandStartFailed,
+            SshTransportError::ProxyCommandStreamFailed,
+            SshTransportError::ProxyCommandTimeout,
+        ] {
+            let mapped = map_ssh_transport(error);
+            assert_eq!(mapped.code, ToolErrorCode::RemoteUnavailable);
+            assert_eq!(
+                mapped.message,
+                ToolErrorCode::RemoteUnavailable.default_message()
+            );
+        }
     }
 }

@@ -48,7 +48,7 @@ done
 [[ -n "${output}" ]]
 case "$(cat "${FAKE_CURL_MODE_FILE}")" in
   success)
-    printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"log-query-mcp","version":"0.1.0"}}}' >"${output}"
+    printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"log-query-mcp","version":"0.2.0"}}}' >"${output}"
     ;;
   json-error)
     printf '%s\n' '{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"bad"}}' >"${output}"

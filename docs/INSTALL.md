@@ -30,7 +30,7 @@ log-reader
 ## 2. 下载和校验发布包
 
 ```bash
-VERSION=0.1.0
+VERSION=0.2.0
 TARGET=x86_64-unknown-linux-gnu
 BASE_URL="https://github.com/liqiangcc/log-query-mcp/releases/download/v${VERSION}"
 
@@ -326,7 +326,7 @@ sudo scripts/healthcheck.sh
 curl -sS http://127.0.0.1:8000/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"manual-smoke","version":"0.1.0"}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"manual-smoke","version":"0.2.0"}}}'
 ```
 
 MCP Inspector 连接：
