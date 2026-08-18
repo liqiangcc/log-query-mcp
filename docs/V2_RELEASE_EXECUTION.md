@@ -445,6 +445,7 @@ scripts/verify_m7_evidence.py
 
 - 状态：`BLOCKED-ENV / 未执行真实目标验收`；不能把本地 OpenSSH fixture、synthetic self-test 或静态预检记作 G PASS。
 - 当前 shell 确认运行在 WSL2（kernel `5.10.16.3-microsoft-standard-WSL2`），`/etc/wsl.conf` 已包含 `systemd=true`，但当前 PID 1 仍是 `/init`，`systemctl` 无法连接 systemd bus；因此配置尚未对当前实例生效，无法证明实际 `log-query-mcp.service` 的 ActiveState、MainPID、`/proc/<pid>/exe` 和 service identity HTTP 行为。Windows interop 的 PE 文件和 binfmt 注册可见，但直接执行 `wsl.exe`、`tasklist.exe`、PowerShell 均返回 `Invalid argument`，当前不能启动 Windows helper。
+- Windows 主机 `wsl --status` 显示默认发行版 `Ubuntu-22.04`、默认 WSL 版本 `2`、kernel `5.10.16`，但 `wsl --version` 返回“命令行选项无效”。这确认当前是旧版/inbox WSL CLI；仅重启当前实例不能证明 systemd 支持，需先将 WSL 组件更新到支持 systemd 的版本，再执行 `wsl --shutdown` 后复验。
 - 当前安装的 `/opt/log-query-mcp/BUILDINFO` 仍是旧的 `v0.1.0` / `ce2abf108da6c7e8e709ddbaa3992066807f83c3`，不是本候选 `d608e946ddd3f6456ce7d7507567c8be0641cde7`；`/etc/log-query-mcp/config.json` 只有本地目录 source，未提供本次 M7 真实 Windows/VPN/SSH 目标配置。未启动、替换或重启该服务。
 - 阻塞解除条件：在真实目标 WSL 上安装并以 `log-query-mcp` service identity 启动本候选包，提供已批准的 Windows helper、VPN/目标 SSH、strict known_hosts 和脱敏 marker，然后按 Runbook 生成同一次 run 的 stdio/HTTP evidence、manifest 并执行 verifier。
 
