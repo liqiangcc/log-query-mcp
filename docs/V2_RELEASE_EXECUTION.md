@@ -479,6 +479,13 @@ TARGET=x86_64-unknown-linux-gnu bash scripts/rc_check.sh
 
 完成标准：package validator、健康检查和全部生命周期场景 PASS。
 
+### 阶段 H 实际状态（2026-08-18）
+
+- 状态：`PASS（本地 RC/package/lifecycle gate 已执行）`；产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`。
+- `scripts/rc_check.sh` 已通过 package validator、healthcheck failure matrix、upgrade/rollback matrix 和包内文件/权限检查；完整日志：`/tmp/log-query-mcp-rc-check-d608e94.log`。
+- RC 包：`/tmp/log-query-mcp-dist-d608e94/rc-check/log-query-mcp-v0.2.0-x86_64-unknown-linux-gnu.tar.gz`；外部 SHA256：`cca89fd56692c7dd18dd05c690b95179e8b0591c7d3ea243bc63e199cee876e4`。包内 `BUILDINFO` 已固定版本 `0.2.0`、target 和候选 commit。
+- 该状态只覆盖隔离本地 package/lifecycle gate；未对生产目标执行安装、升级、重启或回滚，也未替代目标 Linux/WSL 验收。
+
 ## 14. 阶段 I：目标 Linux 生产验收
 
 在预生产或等价目标环境按最新 `docs/PRODUCTION_CHECKLIST.md` 执行：
@@ -497,6 +504,12 @@ TARGET=x86_64-unknown-linux-gnu bash scripts/rc_check.sh
 - 升级和回滚演练。
 
 完成标准：发布必需项有操作者、时间和证据；未执行项保持“待验收”，不得由 CI 代签。
+
+### 阶段 I 实际状态（2026-08-18）
+
+- 状态：`待验收 / BLOCKED-ENV`；当前 WSL 没有运行中的 systemd service bus，且没有可供本轮使用的目标 Linux 预生产/生产环境和操作者批准的 SSH/VPN 验收入口。
+- 已保留本地 RC、Direct/ProxyCommand live 和性能证据；这些证据不能代签目标内核/glibc、systemd、权限、轮转、中断恢复、实际 AI 客户端、升级/回滚等生产项目。
+- 在获得目标环境和明确授权前，不执行安装、重启、升级、回滚或真实配置修改。
 
 ## 15. 阶段 J：PR Ready、合并和发布
 
@@ -523,6 +536,11 @@ reviewer
 ```
 
 如果 merge commit 与已验证候选不同，至少重跑 Rust、Contracts、Release/package；影响 SSH、缓存或 transport 的改动必须重跑对应 live/performance gates。
+
+### 阶段 J 实际状态（2026-08-18）
+
+- 状态：`BLOCKED / 未进入发布操作`；阶段 G、I 尚未完成，且用户未授权将 Draft PR 标记 Ready、合并、创建 tag/release 或部署。
+- 本地工作分支 `release/v2-rc` 仅基于 `origin/feat/v2-m1-backend-config` 做候选验证；不修改 `main`，不推送候选远端分支，不执行合并/tag/release/deploy。
 
 ### 15.3 Tag 和 Release
 
