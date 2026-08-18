@@ -203,7 +203,7 @@ rg -n '0\.1\.0|v0\.1\.0' README.md docs examples scripts .github Cargo.toml Carg
 - 保留第三方依赖 `sponge-cursor 0.1.0` 等非发布版本引用；没有替换历史 v1 记录。
 - `bash scripts/check_release_tag.sh v0.2.0`：PASS；`git diff --check`：PASS。
 - 全目标 `cargo check --locked --all-targets --all-features` 首次发现并修复 `map_ssh_transport` 未覆盖 5 个 ProxyCommand 错误；修复后：PASS。
-- 阶段记录 commit：待本阶段修复提交完成后补记；当前候选代码基线为 `848ae2d04a4f78d1acbe7d4708dbd48e4b183e1b`。
+- 阶段记录 commit：`d608e946ddd3f6456ce7d7507567c8be0641cde7`；该提交包含版本同步、ProxyCommand 错误映射修复和格式门禁修复。
 
 ## 8. 阶段 C：本地 RC 检查
 
@@ -263,6 +263,16 @@ BUILDINFO
 完成标准：脚本明确输出 `rc_check: PASS`。
 
 注意：`rc_check: PASS` 仍不能替代真实 Direct/Proxy SSH、性能、WSL 或生产验收。
+
+### 阶段 C 实际状态（2026-08-18）
+
+- 状态：`PASS`，候选 commit：`d608e946ddd3f6456ce7d7507567c8be0641cde7`。
+- 完整日志：`/tmp/log-query-mcp-rc-check-d608e94.log`；末行明确为 `rc_check: PASS`。
+- 环境：`rustc 1.97.1 (8bab26f4f 2026-07-14)`、`cargo 1.97.1`、Python 3.10.12、`jsonschema 4.23.0` Draft 2020-12；target `x86_64-unknown-linux-gnu`。
+- 发布包：`/tmp/log-query-mcp-dist-d608e94/rc-check/log-query-mcp-v0.2.0-x86_64-unknown-linux-gnu.tar.gz`。
+- 外部 archive SHA256：`cca89fd56692c7dd18dd05c690b95179e8b0591c7d3ea243bc63e199cee876e4`；包内 `SHA256SUMS` 外部文件 SHA256：`4b92f3b9a1181d6ed169afd03afcf280a9007eed96e2a15c20646eedda1008ee`。
+- BUILDINFO：version `0.2.0`、commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`、target `x86_64-unknown-linux-gnu`、rustc `1.97.1`。
+- RC 中的 live SSH/Proxy、性能和真实 WSL 检查仍按脚本保持独立门禁，未被本地 RC 的 synthetic/self-test 代签。
 
 ## 9. 阶段 D：Direct SSH/SFTP 门禁
 
