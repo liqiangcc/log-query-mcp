@@ -306,6 +306,14 @@ tests/m6_server_restart_live.rs
 
 完成标准：当前候选 SHA 上的 Direct SSH、安全、查询和恢复 live gates 全部 PASS。
 
+### 阶段 D 实际状态（2026-08-18）
+
+- 状态：`PASS`；产品代码验证 commit：`d608e946ddd3f6456ce7d7507567c8be0641cde7`（后续仅有文档状态提交）。
+- 本地 OpenSSH/SFTP fixture：`/tmp/log-query-mcp-ssh-poc-local`，严格 known_hosts、密码和加密私钥认证均实际执行。
+- 通过：`ssh_transport_live` 12/12、`m4_sync_live` 1/1、`m5_remote_query_live` 1/1、`m6_remote_security_live` 1/1、`m6_multi_server_live` 3/3、`m6_concurrency_performance_live` 2/2；M6 restart 三阶段 3/3。
+- 并发证据：`M6_CONCURRENCY_METRIC` dual-server 2 queries `2195ms`，single-server 4 queries `336ms`。
+- 当前验证为本机真实 OpenSSH/SFTP，不是 GitHub Actions；GitHub-hosted runner 的外部 Billing 阻塞仍单独记录在阶段 A。
+
 ## 10. 阶段 E：ProxyCommand 门禁
 
 必须在当前候选 SHA 上执行：
@@ -335,6 +343,14 @@ tests/m7_*.rs
 ```
 
 完成标准：上述工作流真实执行并全部 PASS，没有孤儿 helper、敏感信息泄漏或无法解释的资源泄漏。
+
+### 阶段 E 实际状态（2026-08-18）
+
+- 状态：`PASS`；本地 live 验证基于产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`，当前工作树仅增加发布状态文档。
+- 通过：ProxyCommand success/strict host key 2/2；Proxy auth 2/2；Proxy sync 5/5；failure matrix 8/8；mixed query 2/2；restart 3/3；generation 1/1；helper orphan 检查 PASS。
+- 失败处理：首次 mixed query 复用 Direct fixture 时缺少 `/home/logreader/logs/mixed.log`，导致两个测试出现 `SftpProtocol`；按 workflow 补充只读 `M7MIX remote` fixture 后复测 2/2 PASS。分类：测试夹具配置，不是产品代码失败。
+- `/usr/bin/nc` 作为管理员预置 ProxyCommand helper，SSH 仍使用 strict known_hosts、SFTP 只读操作；未增加 Exec/Shell 或任意路径能力。
+- 当前验证为本机真实 ProxyCommand→SSH→SFTP，不是 GitHub Actions；GitHub-hosted runner 的外部 Billing 阻塞仍单独记录在阶段 A。
 
 ## 11. 阶段 F：性能和资源证据
 
