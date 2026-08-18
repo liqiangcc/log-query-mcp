@@ -444,9 +444,8 @@ scripts/verify_m7_evidence.py
 ### 阶段 G 实际状态（2026-08-18）
 
 - 状态：`BLOCKED-ENV / 未执行真实目标验收`；不能把本地 OpenSSH fixture、synthetic self-test 或静态预检记作 G PASS。
-- 当前 shell 确认运行在 WSL2（kernel `5.10.16.3-microsoft-standard-WSL2`），`/etc/wsl.conf` 已包含 `systemd=true`，但当前 PID 1 仍是 `/init`，`systemctl` 无法连接 systemd bus；因此配置尚未对当前实例生效，无法证明实际 `log-query-mcp.service` 的 ActiveState、MainPID、`/proc/<pid>/exe` 和 service identity HTTP 行为。Windows interop 的 PE 文件和 binfmt 注册可见，但直接执行 `wsl.exe`、`tasklist.exe`、PowerShell 均返回 `Invalid argument`，当前不能启动 Windows helper。
-- Windows 主机随后已执行 `wsl --update` 成功；`wsl --version` 现在报告 WSL `2.7.11.0`、kernel `6.18.33.2-2`、WSLg `1.0.73.2`、Windows `10.0.19045.6456`。旧版/inbox WSL 组件阻塞已解除；仍需执行 `wsl --shutdown` 并重新进入 `Ubuntu-22.04`，复验 PID 1、systemd bus 和 Windows helper，才能更新阶段 G 状态。
-- 当前安装的 `/opt/log-query-mcp/BUILDINFO` 仍是旧的 `v0.1.0` / `ce2abf108da6c7e8e709ddbaa3992066807f83c3`，不是本候选 `d608e946ddd3f6456ce7d7507567c8be0641cde7`；`/etc/log-query-mcp/config.json` 只有本地目录 source，未提供本次 M7 真实 Windows/VPN/SSH 目标配置。未启动、替换或重启该服务。
+- WSL 更新和重启后，当前 kernel 为 `6.18.33.2-microsoft-standard-WSL2`，PID 1 为 `systemd`，`systemctl` bus 为 `249.11`；既有 `log-query-mcp.service` 已以 `log-query-mcp` 用户运行（MainPID `162`，`ActiveState=active`，监听 `127.0.0.1:8000/mcp`），证明 systemd/service identity 这一部分前置已生效。Windows interop 的 PE 文件、binfmt 和 `/run/WSL/*_interop` socket 可见，但从当前 WSL 执行 `wsl.exe`、`tasklist.exe`、PowerShell 仍返回 `Invalid argument`，当前不能启动 Windows helper。
+- Windows 主机 `wsl --update` 已成功；`wsl --version` 报告 WSL `2.7.11.0`、kernel `6.18.33.2-2`、WSLg `1.0.73.2`、Windows `10.0.19045.6456`。当前安装的 `/opt/log-query-mcp/BUILDINFO` 仍是旧的 `v0.1.0` / `ce2abf108da6c7e8e709ddbaa3992066807f83c3`，不是本候选 `d608e946ddd3f6456ce7d7507567c8be0641cde7`；`/etc/log-query-mcp/config.json` 只有本地目录 source，未提供本次 M7 真实 Windows/VPN/SSH 目标配置。未手工替换或修改该服务，WSL 重启后由既有 unit 自动启动。
 - 阻塞解除条件：在真实目标 WSL 上安装并以 `log-query-mcp` service identity 启动本候选包，提供已批准的 Windows helper、VPN/目标 SSH、strict known_hosts 和脱敏 marker，然后按 Runbook 生成同一次 run 的 stdio/HTTP evidence、manifest 并执行 verifier。
 
 ## 13. 阶段 H：发布包和生命周期验收
