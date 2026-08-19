@@ -444,14 +444,14 @@ scripts/verify_m7_evidence.py
 ### 阶段 G 实际状态（2026-08-19）
 
 - 状态：`部分 PASS / ProxyCommand BLOCKED-ENV`；Direct/TUN 真实目标候选链路已通过，但不能把它代替要求中的 Windows ProxyCommand systemd HTTP gate，也不能把本地 fixture、synthetic self-test 或静态预检记作完整 G PASS。
-- WSL 更新和重启后，当前 kernel 为 `6.18.33.2-microsoft-standard-WSL2`，PID 1 为 `systemd`，`systemctl` bus 为 `249.11`；既有 `log-query-mcp.service` 已以 `log-query-mcp` 用户运行（MainPID `162`，`ActiveState=active`，监听 `127.0.0.1:8000/mcp`），证明 systemd/service identity 这一部分前置已生效。操作者在同一 Ubuntu-22.04 交互式 root shell 和 `log-query-mcp` 用户下均成功执行 Windows `tasklist.exe`，因此 WSL interop 已确认；但 Windows `PATH` 中 `where ncat.exe` 和 `where nc.exe` 均未找到文件，当前没有可用于 ProxyCommand 的批准 TCP helper。
+- WSL 更新和重启后，当前 kernel 为 `6.18.33.2-microsoft-standard-WSL2`，PID 1 为 `systemd`，`systemctl` bus 为 `249.11`；当前 `log-query-mcp.service` 已以 `log-query-mcp` 用户运行（MainPID `42188`，`ActiveState=active`，监听 `127.0.0.1:8000/mcp`），证明 systemd/service identity 这一部分前置已生效。操作者在同一 Ubuntu-22.04 交互式 root shell 和 `log-query-mcp` 用户下均成功执行 Windows `tasklist.exe`，因此 WSL interop 已确认；但 Windows `PATH` 中 `where ncat.exe` 和 `where nc.exe` 均未找到文件，当前没有可用于 ProxyCommand 的批准 TCP helper。
 - Windows 主机 `wsl --update` 已成功；`wsl --version` 报告 WSL `2.7.11.0`、kernel `6.18.33.2-2`、WSLg `1.0.73.2`、Windows `10.0.19045.6456`。原 `/opt/log-query-mcp/BUILDINFO` 仍是旧的 `v0.1.0` / `ce2abf108da6c7e8e709ddbaa3992066807f83c3`，不是本候选 `d608e946ddd3f6456ce7d7507567c8be0641cde7`；旧 `/etc/log-query-mcp/config.json` 仍保留本地目录 source，未被覆盖。用户要求切换 MCP 配置后，当前 unit 通过 `/etc/systemd/system/log-query-mcp.service.d/v2-direct.conf` 使用 v2 Direct 配置、Secret EnvironmentFile 和候选二进制；旧二进制仍保留在原路径。
 - 当前 WSL 确有 `wsl-v2ray` TUN（`172.19.0.1/30`）；策略表 `2022` 通过 `172.19.0.2` 承接 `fwmark 0x2023`，而未带 mark 的普通目标路由仍经 `eth0` 默认网关。对用户提供的 Direct SSH 目标执行 TCP/SSH host-key 只读预检成功，但应用连接是否实际带 TUN mark 仍需在真实服务请求中确认。
 - 已在 `/etc/log-query-mcp/config-v2-direct.json` 准备未提交到仓库的 v2 Direct 配置：密码仅引用 `QAXCICD_SDWXB_PASSWORD`，远程文件为用户提供的单文件 source，无 `proxy` 字段；`/etc/log-query-mcp/known_hosts-v2-direct` 复用本机已有受信任 host key。配置 JSON Schema PASS，候选二进制以 `log-query-mcp` 用户在隔离 loopback 端口启动 PASS。
 - `/etc/log-query-mcp/secrets-v2-direct.env` 已配置 `QAXCICD_SDWXB_PASSWORD`，权限已修正为 `root:log-query-mcp 0640`。候选 v2 隔离进程以 `log-query-mcp` 用户完成 `initialize`、`tools/list`、`list_log_sources`、真实 SSH/SFTP 远程同步、`search_logs` 和 `get_log_context`：`Direct/TUN candidate MCP chain: PASS`（结果 1 条、上下文 5 行；未保存日志正文或 match_ref）。首次请求使用了不支持的 `newest_first`，按服务协议修正为 `oldest_first` 后通过，分类为测试请求错误而非产品失败。
 - 在 WSL 重启确认 systemd 后，使用与现有 unit 相同的 `NoNewPrivileges`、`PrivateTmp`、`ProtectSystem=strict`、`ProtectHome`、地址族和可写 cache 限制，以临时 unit `log-query-mcp-v2-direct-check.service` 启动候选二进制；MainPID `40383`、User `log-query-mcp`、`ActiveState=active`。该 systemd 身份下 Direct/TUN MCP 链路再次 PASS：`initialize`、`tools/list`、`list_log_sources`、真实 `search_logs`（结果 1 条）和 `get_log_context`（上下文 3 行）；临时 unit 随后已停止，旧服务仍为 PID `162`。首次 503 的根因是 `PrivateTmp` 隔离导致测试二进制放在 `/tmp` 后对 unit 不可见（退出码 127），不是远端连接、密码或产品错误。
 - 本次 Direct/TUN systemd 验证基于产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`；未保存 Secret、密码、完整日志正文或 `match_ref`。当前结果证明候选服务身份和 Direct SSH/SFTP 查询链路可用，但不证明应用层连接一定携带 TUN mark，也不替代 ProxyCommand helper gate。
-- 用户要求将 MCP 配置切换到 75 后，已新增 v2 候选二进制 `/opt/log-query-mcp/bin/log-query-mcp-v2-direct`，并通过 systemd drop-in 将 `log-query-mcp.service` 切换到 `/etc/log-query-mcp/config-v2-direct.json`；旧 `/etc/log-query-mcp/config.json` 和旧二进制未覆盖。补充 `ReadWritePaths=/var/lib/log-query-mcp/cache-v2-direct` 后，当前 service MainPID `40861`、User `log-query-mcp`、`ActiveState=active`，监听 `127.0.0.1:8000/mcp`。从当前 8000 实际执行 `initialize`、`tools/list`、`list_log_sources`、真实 `search_logs`（结果 1 条）和 `get_log_context`（上下文 3 行）：`MCP 8000 -> 10.58.168.75 Direct/TUN chain: PASS`。
+- 用户要求将 MCP 配置切换到 75 后，已新增 v2 候选二进制 `/opt/log-query-mcp/bin/log-query-mcp-v2-direct`，并通过 systemd drop-in 将 `log-query-mcp.service` 切换到 `/etc/log-query-mcp/config-v2-direct.json`；旧 `/etc/log-query-mcp/config.json` 和旧二进制未覆盖。补充 `ReadWritePaths=/var/lib/log-query-mcp/cache-v2-direct` 后，当前 service MainPID `42188`、User `log-query-mcp`、`ActiveState=active`，监听 `127.0.0.1:8000/mcp`。75 的日志 source 已统一为 `log-75-sdwxb-base`，旧 source cache 保留未删除；从当前 8000 实际执行 `initialize`、`tools/list`、`list_log_sources`、真实 `search_logs`（结果 1 条）和 `get_log_context`（上下文 3 行）：`MCP 8000 -> 10.58.168.75 Direct/TUN chain: PASS`。
 - Codex 重启后的实际 MCP 入口是 stdio，而不是上述 HTTP 端口；旧 Codex 配置曾启动 `/opt/log-query-mcp/bin/log-query-mcp-stdio` 并读取旧 `/etc/log-query-mcp/config.json`，因此只返回 `183-sdwxb-base`。已将 `/root/.codex/config.toml` 的日志 MCP 项切换为 `log-sdwxb-base-direct`、v2 stdio binary 和 `/etc/log-query-mcp/config-v2-direct.json`；密码只在启动命令中从 `/etc/log-query-mcp/secrets-v2-direct.env` 加载，未写入 Codex 配置，并保留了 `config.toml.before-log75-direct-20260819.bak`。随后将 75 的日志 source 统一命名为 `log-75-sdwxb-base`，按 Codex 同等 stdio 启动链实际验证：`list_log_sources` 返回新 source，真实 `search_logs` 和 `get_log_context` 均 PASS；PG MCP 配置未修改。
 - 上述是当前 WSL service identity 下的 Direct 配置验收，不是目标 Linux 生产 MainPID 验收；原 M7 ProxyCommand 和完整真实目标 systemd HTTP gate 仍保持未执行。
 - 阻塞解除条件：在真实目标 WSL 上安装并以 `log-query-mcp` service identity 启动本候选包，提供已批准的 Windows helper、VPN/目标 SSH、strict known_hosts 和脱敏 marker，然后按 Runbook 生成同一次 run 的 stdio/HTTP evidence、manifest 并执行 verifier。
@@ -545,9 +545,9 @@ reviewer
 
 如果 merge commit 与已验证候选不同，至少重跑 Rust、Contracts、Release/package；影响 SSH、缓存或 transport 的改动必须重跑对应 live/performance gates。
 
-### 阶段 J 实际状态（2026-08-18）
+### 阶段 J 实际状态（2026-08-19）
 
-- 状态：`BLOCKED / 未进入发布操作`；阶段 G、I 尚未完成，且用户未授权将 Draft PR 标记 Ready、合并、创建 tag/release 或部署。
+- 状态：`BLOCKED / 未进入发布操作`；阶段 A、G、I 尚未完成，GitHub runner/Billing、ProxyCommand helper 和目标 Linux 生产验收仍是硬门禁，不能直接创建 tag/release 或部署。
 - 本地工作分支 `release/v2-rc` 仅基于 `origin/feat/v2-m1-backend-config` 做候选验证；不修改 `main`，不推送候选远端分支，不执行合并/tag/release/deploy。
 
 ### 15.3 Tag 和 Release
