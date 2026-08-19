@@ -1,6 +1,6 @@
 # Log Query MCP 生产运维指南
 
-本文面向负责运行 Log Query MCP 的运维和开发人员，覆盖 Local/Remote 日志来源、Direct/ProxyCommand SSH Transport、监控、配置变更、SSH/SFTP、Cache、升级回滚和故障排查。
+本文面向负责运行 Log Query MCP 的运维和开发人员，覆盖 Local/Remote 日志来源、Direct SSH/SFTP Transport、监控、配置变更、SSH/SFTP、Cache、升级回滚和故障排查。ProxyCommand 运维内容保留为 post-v2 延后参考，不属于 v2.0 发布门禁。
 
 ## 1. 服务模型
 
@@ -77,7 +77,7 @@ sudo scripts/healthcheck.sh
 
 每次配置变更至少记录：变更人、时间、source/connection 变化、Direct/ProxyCommand 变化、Secret/known_hosts 变化、权限变化、cache limit 变化、验证结果和回滚方案。
 
-ProxyCommand 变更还必须记录：helper 程序来源/版本、程序路径、argv 模板、为何 Direct 不适用、目标网络路径和服务身份下的执行验证。
+ProxyCommand 变更还必须记录：helper 程序来源/版本、程序路径、argv 模板、为何 Direct 不适用、目标网络路径和服务身份下的执行验证；这些记录只适用于未来重新纳入 ProxyCommand 的版本。
 
 ## 4. 安全边界
 
@@ -140,7 +140,9 @@ environment: ORDER_LOG_PASSWORD=<secret>
 
 Private key 模式应把 key 文件权限限制给服务账户读取；加密私钥的 passphrase 仍通过 Secret reference 提供。ProxyCommand 不参与 Secret resolution。
 
-### 5.4 ProxyCommand / WSL 运维
+### 5.4 ProxyCommand / WSL 运维（post-v2 延后）
+
+本节不属于 v2.0 运维验收。v2.0 只验收 Direct SSH；ProxyCommand 代码和诊断路径保留，待 post-v2 重新授权并完成独立 live/performance/WSL 验收后再作为发布能力使用。
 
 典型路径：
 
@@ -328,12 +330,11 @@ bash scripts/validate_release_package.sh \
   SHA256SUMS
 ```
 
-Package validator 现在还要求：
+v2.0 Package validator 现在要求：
 
-- v2 example 同时存在 Direct SSH 与 ProxyCommand connection；
-- ProxyCommand example 仅使用 `{host}` / `{port}` placeholder；
 - 包含 `schemas/log-query-mcp-config-v2.schema.json`；
-- 包含 ProxyCommand 设计、实现/验证和性能交付文档。
+- v2 example 只包含 Direct SSH connection；
+- 包含 INSTALL/OPERATIONS/PRODUCTION_CHECKLIST 与 M6 基线文档。
 
 本地仓库 Final Candidate 检查：
 
@@ -341,11 +342,11 @@ Package validator 现在还要求：
 bash scripts/rc_check.sh
 ```
 
-它覆盖所有非 live-SSH 的仓库 Gate，并显式检查 ProxyCommand release contract。真实 Direct/Proxy SSH、M7 functional/performance gates、真实 WSL 目标验收仍需单独执行。
+它覆盖所有非 live-SSH 的 v2.0 仓库 Gate，并显式检查 Direct-only release contract。真实 Direct SSH、Direct performance 和目标生产验收仍需单独执行；ProxyCommand functional/performance/WSL workflow 属于 post-v2 延后验证。
 
 Release workflow 在 tag 上验证 tag/version，构建 release binaries，运行 transport smoke、protocol health 负向矩阵、upgrade/rollback 演练，组装并验证 tarball。普通 branch/PR package job 只有 `contents: read`；只有 tag publish job 获得 `contents: write`。
 
-Rust、Contracts、SSH Transport、M7 gates、Release 均需要当前 candidate 的真实执行证据。当前 Actions runner 启动被 GitHub Billing/Spending Limit 外部阻塞，跟踪于 Issue #23。
+Rust、Contracts、SSH Transport、Direct performance、Release 均需要当前 candidate 的真实执行证据。当前 Actions runner 启动被 GitHub Billing/Spending Limit 外部阻塞，跟踪于 Issue #23；ProxyCommand workflow 不再是 v2.0 required gate。
 
 ## 13. Remote / ProxyCommand 故障排查
 
@@ -377,7 +378,7 @@ M6 历史 Direct 大文件基线：
 - local cache scan：0 remote bytes。
 - 300 次连续 range read：已验证 SFTP handle 确定关闭。
 
-M7 已实现 paired Direct/Proxy performance gate：5-session setup、100MiB/1GiB/10GiB-tail、incremental bounded transfer、Proxy 300 range reads、2 Direct + 2 Proxy concurrency、normal-path helper cleanup。当前 Billing 阻塞导致 `steps=null`，所以尚无当前 M7 性能实测数字。
+M7 已实现 paired Direct/Proxy performance harness。v2.0 只要求当前候选 Direct 性能证据；Proxy 300 range reads、混合并发和 helper cleanup 保留为 post-v2 非阻塞回归项。当前 Billing 阻塞导致对应 workflow `steps=null`，不能把它当作 PASS。
 
 这些数字只用于回归对比，不是 SLA。详见 `M6_PERFORMANCE_BASELINE_V2.md` 与 `M7_PROXY_PERFORMANCE_GATE_V2.md`。
 

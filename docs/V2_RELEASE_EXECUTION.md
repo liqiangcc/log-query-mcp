@@ -4,7 +4,7 @@
 >
 > 最近核对：2026-08-19
 >
-> 当前结论：本地 A～F、H 门禁和 Direct/TUN 真实 SSH/SFTP 候选链路已通过；ProxyCommand、目标 Linux 生产验收、合并和正式发布仍未完成。
+> 当前结论：v2.0 发布范围已正式限定为 Local + Direct SSH/SFTP；本地 A～D、H 门禁和 Direct/TUN 真实候选链路已通过。ProxyCommand 实现与测试保留为 post-v2 延后项；目标 Linux 生产验收、合并和正式发布仍未完成。
 
 ### 本轮接手核对（2026-08-19）
 
@@ -13,19 +13,19 @@
 - 工作区原有用户修改已保留：`README.md` 的文档索引变更和本手册文件；未覆盖或丢弃。
 - PR #25：open、Draft、未合并，head/base 与上述候选和 `main` 一致。
 - Issue #23：open，仍跟踪 GitHub Actions Billing/Spending Limit 与最终 CI/Performance/Release 门禁恢复。
-- Issue #26：open，真实 Windows + WSL + VPN 目标验收尚未完成；Issue #27：open，`main` 发布保护/程序化 fallback 尚未完成。
+- Issue #26：当前仍 open，待本轮正式标记为 ProxyCommand post-v2 延后并关闭；Issue #27：open，`main` 发布保护/程序化 fallback 尚未完成。
 - 候选 `848ae2d` 的最新 Actions runs（Contracts `31455716785`、Rust `31455716801`、Release `31455716807`、M7 ProxyCommand `31455716797`、Proxy Auth `31455716800`、Proxy Sync `31455716795`、ProxyCommand Failures `31455716794`、Mixed Query `31455716806`、Proxy Generation `31455716792`、Proxy Restart `31455716812`）均为 `completed/failure`，对应 job 的 `steps=null`；未执行 checkout/build/test/package，按外部 runner/Billing 阻塞处理，不能视为代码失败或 PASS。
 - 本机 `gh` token 已失效且无法访问 GitHub API；上述 PR、Issue 和 Actions 事实已通过连接器重新核对。发布手册中的候选 SHA、PR/Issue 阻塞状态没有过期，无需改写为其他远端事实。
 
 ## 1. 最终目标
 
-将 `feat/v2-m1-backend-config` 上的 Remote SSH/SFTP、缓存和 ProxyCommand 能力完成验证后合并到 `main`，创建新的版本 tag 和 GitHub Release，并在目标环境完成安装、查询、升级和回滚验收。
+将 `feat/v2-m1-backend-config` 上的 Remote SSH/SFTP（v2.0 为 Direct TCP）、缓存能力完成验证后合并到 `main`，创建新的版本 tag 和 GitHub Release，并在目标环境完成安装、查询、升级和回滚验收。ProxyCommand 实现不删除，正式延后到 post-v2。
 
 发布完成必须同时满足：
 
 1. 候选提交上的本地 RC 检查通过。
-2. GitHub Actions 的 Rust、Contracts、Direct SSH、ProxyCommand、性能和 Release 门禁全部真实执行并通过。
-3. 真实 WSL/Windows ProxyCommand 验收形成可追溯的脱敏证据。
+2. GitHub Actions 的 Rust、Contracts、Direct SSH、Direct 性能和 Release 门禁全部真实执行并通过。
+3. 按目标部署需要完成 Direct/WSL 验收并形成可追溯的脱敏证据；不要求 Windows ProxyCommand helper。
 4. 目标 Linux 环境生产验收通过。
 5. PR 完成评审并合并到 `main`。
 6. 新版本 tag 与 `Cargo.toml` 版本一致。
@@ -47,7 +47,7 @@ Draft PR                          #25
 - `main` 当前为 v1 基线，只读取 MCP 所在 Linux 服务器上的本地日志。
 - v1 的远程访问方式是客户端通过 MCP Streamable HTTP 调用远端服务，不是由服务通过 SSH 拉取其他服务器日志。
 - v2 候选分支比 `main` 多 387 个提交。
-- v2 候选实现了 Direct SSH、SFTP 只读访问、ProxyCommand、本地 generation cache、增量同步，以及 Local/Remote 混合查询。
+- v2 候选实现了 Direct SSH、SFTP 只读访问、本地 generation cache、增量同步，以及 Local/Remote 混合查询；ProxyCommand 实现保留但已移出 v2.0 发布范围。
 - PR #25 当前为 Draft，尚未合并。
 - GitHub Actions 最近因 Billing/Spending Limit 在 runner 启动前失败。此类 `FAILURE` 不是代码测试失败，也不能视为 PASS。
 
@@ -74,15 +74,15 @@ gh issue view 23 --json state,title,updatedAt,url
 - `russh + russh-sftp` Direct SSH/SFTP 只读传输。
 - 密码、私钥和加密私钥认证。
 - strict `known_hosts` 主机身份校验。
-- 管理员配置的 ProxyCommand raw byte-stream 传输。
+- 管理员配置的 ProxyCommand raw byte-stream 传输（post-v2 延后实现，不是 v2.0 发布能力）。
 - Remote 日志 generation cache、quota、GC 和 crash recovery。
 - Full、Tail、FromNow 和增量同步。
 - 日志追加、轮转、截断和替换处理。
 - Remote cursor、`match_ref` 和 generation snapshot 一致性。
-- Local、Direct Remote 和 Proxy Remote 混合查询。
+- Local、Direct Remote 混合查询；Proxy Remote 混合查询保留为 post-v2 回归范围。
 - `list_log_sources`、`search_logs`、`get_log_context` 完整 MCP 链路。
 - 安装、健康检查、升级、自动回滚和手工回滚脚本。
-- Direct SSH、ProxyCommand、故障、安全、并发、性能和 WSL 验收工具。
+- Direct SSH、故障、安全、并发和性能验收工具；ProxyCommand/WSL helper 验收工具保留为 post-v2。
 
 ## 4. 不可改变的安全边界
 
@@ -239,9 +239,8 @@ bash scripts/rc_check.sh
 该脚本应覆盖：
 
 - v1/v2 contract 验证。
-- ProxyCommand release contract。
-- WSL 验收工具静态检查。
-- evidence verifier 和 run manifest 自测。
+- Direct-only v2 release contract。
+- evidence verifier 和 run manifest 自测（synthetic only）。
 - rustfmt。
 - Clippy `-D warnings`。
 - 全部非 live Rust tests。
@@ -263,7 +262,7 @@ BUILDINFO
 
 完成标准：脚本明确输出 `rc_check: PASS`。
 
-注意：`rc_check: PASS` 仍不能替代真实 Direct/Proxy SSH、性能、WSL 或生产验收。
+注意：`rc_check: PASS` 仍不能替代真实 Direct SSH、Direct 性能、适用的 WSL 或生产验收；ProxyCommand 不属于 v2.0 required gate。
 
 ### 阶段 C 实际状态（2026-08-18）
 
@@ -273,7 +272,7 @@ BUILDINFO
 - 发布包：`/tmp/log-query-mcp-dist-d608e94/rc-check/log-query-mcp-v0.2.0-x86_64-unknown-linux-gnu.tar.gz`。
 - 外部 archive SHA256：`cca89fd56692c7dd18dd05c690b95179e8b0591c7d3ea243bc63e199cee876e4`；包内 `SHA256SUMS` 外部文件 SHA256：`4b92f3b9a1181d6ed169afd03afcf280a9007eed96e2a15c20646eedda1008ee`。
 - BUILDINFO：version `0.2.0`、commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`、target `x86_64-unknown-linux-gnu`、rustc `1.97.1`。
-- RC 中的 live SSH/Proxy、性能和真实 WSL 检查仍按脚本保持独立门禁，未被本地 RC 的 synthetic/self-test 代签。
+- RC 中的 Direct live/performance 和适用的真实 WSL 检查仍保持独立门禁，未被本地 RC 的 synthetic/self-test 代签；ProxyCommand live/performance 检查转为 post-v2。
 
 ## 9. 阶段 D：Direct SSH/SFTP 门禁
 
@@ -315,9 +314,11 @@ tests/m6_server_restart_live.rs
 - 并发证据：`M6_CONCURRENCY_METRIC` dual-server 2 queries `2195ms`，single-server 4 queries `336ms`。
 - 当前验证为本机真实 OpenSSH/SFTP，不是 GitHub Actions；GitHub-hosted runner 的外部 Billing 阻塞仍单独记录在阶段 A。
 
-## 10. 阶段 E：ProxyCommand 门禁
+## 10. 阶段 E：ProxyCommand post-v2 延后门禁
 
-必须在当前候选 SHA 上执行：
+ProxyCommand 已正式移出 v2.0 发布范围。本阶段保留完整的未来验证清单，供 v2.1/post-v2 重新纳入时使用；当前不作为 v2.0 RC 的 required gate，也不因 GitHub Actions Billing 或 Windows helper 缺失阻塞 v2.0。
+
+post-v2 仍需在独立候选 SHA 上执行：
 
 1. ProxyCommand → OpenSSH → SFTP 成功链路。
 2. 密码、私钥、加密私钥认证。
@@ -343,86 +344,71 @@ tests/m6_server_restart_live.rs
 tests/m7_*.rs
 ```
 
-完成标准：上述工作流真实执行并全部 PASS，没有孤儿 helper、敏感信息泄漏或无法解释的资源泄漏。
+post-v2 完成标准：上述工作流真实执行并全部 PASS，没有孤儿 helper、敏感信息泄漏或无法解释的资源泄漏。v2.0 不宣称这些结果已通过。
 
 ### 阶段 E 实际状态（2026-08-18）
 
-- 状态：`PASS`；本地 live 验证基于产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`，当前工作树仅增加发布状态文档。
+- 状态：`POST-V2 DEFERRED`；下列结果是历史本地 live 证据，不是 v2.0 required gate，也不改变本次正式 scope decision。验证基于产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`。
 - 通过：ProxyCommand success/strict host key 2/2；Proxy auth 2/2；Proxy sync 5/5；failure matrix 8/8；mixed query 2/2；restart 3/3；generation 1/1；helper orphan 检查 PASS。
 - 失败处理：首次 mixed query 复用 Direct fixture 时缺少 `/home/logreader/logs/mixed.log`，导致两个测试出现 `SftpProtocol`；按 workflow 补充只读 `M7MIX remote` fixture 后复测 2/2 PASS。分类：测试夹具配置，不是产品代码失败。
 - `/usr/bin/nc` 作为管理员预置 ProxyCommand helper，SSH 仍使用 strict known_hosts、SFTP 只读操作；未增加 Exec/Shell 或任意路径能力。
-- 当前验证为本机真实 ProxyCommand→SSH→SFTP，不是 GitHub Actions；GitHub-hosted runner 的外部 Billing 阻塞仍单独记录在阶段 A。
+- 当前验证为本机真实 ProxyCommand→SSH→SFTP，不是 GitHub Actions；该证据保留给 post-v2，不能代替未来 post-v2 candidate workflow。
 
-## 11. 阶段 F：性能和资源证据
+## 11. 阶段 F：Direct 性能和资源证据
 
-运行 M7 Direct/Proxy paired performance gate，至少采集：
+v2.0 运行 Direct 性能 gate，至少采集：
 
-- Direct 与 Proxy 各 5 次 session setup latency。
+- Direct 5 次 session setup latency。
 - 100 MiB Full bootstrap。
 - 1 GiB Full bootstrap。
 - 10 GiB logical file 的 Tail 64 MiB bootstrap。
 - unchanged continuity probe 传输量不超过设计上限。
 - incremental append 只传输追加数据和有界探测。
 - cache-local scan 不产生远程字节。
-- ProxyCommand 300 次 range reads。
-- 2 Direct + 2 Proxy 并发查询。
+- Direct 并发查询。
 - CPU、最大 RSS、elapsed time、磁盘占用和网络字节。
 - 每阶段结束后的 helper orphan 检查。
 
 入口：
 
 ```text
-.github/workflows/m7-proxy-performance.yml
-tests/m7_proxy_performance_live.rs
-docs/M7_PROXY_PERFORMANCE_GATE_V2.md
+Direct SSH performance workflow/test and the M6/M7 Direct performance evidence
 ```
 
-完成标准：workflow PASS，指标和环境信息作为 artifact 保存，并确认没有无法解释的性能、内存、句柄、磁盘或进程回归。
+完成标准：Direct performance workflow PASS，指标和环境信息作为 artifact 保存，并确认没有无法解释的性能、内存、句柄、磁盘或进程回归。Proxy paired performance 留在阶段 E 的 post-v2 范围。
 
 历史 M6 指标只能作为对照，不能替代当前 M7 候选执行。
 
 ### 阶段 F 实际状态（2026-08-18）
 
-- 状态：`PASS（本地不可由 GitHub Actions 代替的 live/performance gate）`；测试产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`。
-- M7 transport 性能：Direct setup 5 次 `767 ms`，ProxyCommand setup 5 次 `692 ms`，ProxyCommand 300 次 range read `519 ms`，2 Direct + 2 Proxy 并发 `221 ms`；孤儿 helper 检查 PASS。
-- 100 MiB Full：Direct cold `3509 ms`、Proxy cold `3775 ms`；unchanged probe 仅远程读取 `65536` bytes；local scan 远程 `0` bytes；incremental 远程读取 `1179648` bytes、缓存写入 `1048576` bytes。
-- 1 GiB Full：Direct cold `29434 ms`、Proxy cold `28413 ms`；unchanged probe 仅远程读取 `65536` bytes；local scan 远程 `0` bytes；incremental 远程读取 `104988672` bytes、缓存写入 `104857600` bytes。
-- 10 GiB logical/Tail 64 MiB：Direct cold `1747 ms`、Proxy cold `1905 ms`；unchanged probe 仅远程读取 `65536` bytes；local scan 远程 `0` bytes、扫描 `67108864` bytes；incremental 远程读取 `1179648` bytes、缓存写入 `1048576` bytes。
-- 资源证据：六次 profile 的 `/usr/bin/time -v`、metrics、磁盘检查和输出日志保存在 `/tmp/log-query-mcp-m7-perf-local/`；最大 RSS 约 `72 MiB`，测试期间磁盘可用空间保持 `217–221 GiB`，未发现 `nc 127.0.0.1:2235` 孤儿进程。
-- 该阶段验证的是本机真实 SSH/SFTP、ProxyCommand、缓存、增量和资源边界；GitHub Actions 仍需在 Billing 恢复后执行其对应 workflow，不能用本地结果伪造 Actions required check。
+- 状态：`PASS（本地 Direct live/performance gate）`；历史本地证据基于产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`，但当前 v2.0 scope 变更后应在最终候选上重跑 Direct performance。
+- Direct 证据：100 MiB cold `3509 ms`、1 GiB cold `29434 ms`、10 GiB logical/Tail 64 MiB cold `1747 ms`；unchanged probe 仅远程读取 `65536` bytes；local scan 远程 `0` bytes；incremental 传输和缓存写入符合有界设计。
+- 资源证据：本地 profile 的 `/usr/bin/time -v`、metrics、磁盘检查和输出日志保存在 `/tmp/log-query-mcp-m7-perf-local/`；最大 RSS 约 `72 MiB`，未发现资源回归。
+- Proxy paired 数字和 helper orphan 检查仍保留在历史记录中，归入 post-v2，不作为 v2.0 performance PASS。
 
-## 12. 阶段 G：真实 WSL/Windows 验收
+## 12. 阶段 G：真实 Direct/WSL 验收
 
 ### 12.1 必须证明的场景
 
 ```text
-WSL Direct target path unavailable
+WSL service identity
     +
-Windows Host/VPN path available
-    +
-log-query-mcp service identity launches approved Windows helper
-    +
-ProxyCommand -> SSH -> strict known_hosts -> auth -> SFTP
+Direct TCP -> SSH -> strict known_hosts -> auth -> SFTP
     +
 list_log_sources/search_logs/get_log_context PASS
     +
-normal/failure/cancel helper cleanup PASS
+direct failure/recovery and no sensitive error leakage PASS
 ```
 
 ### 12.2 执行入口
 
-严格按照候选分支中的最新说明执行：
+严格按照候选分支中的最新 Direct 说明执行；ProxyCommand/Windows helper 脚本不再是 v2.0 入口：
 
 ```text
-docs/M7_REAL_TARGET_EXECUTION_RUNBOOK_V2.md
-docs/M7_WSL_ACCEPTANCE_V2.md
-docs/M7_WSL_SYSTEMD_HTTP_ACCEPTANCE_V2.md
-scripts/m7_real_target_acceptance.sh
-scripts/m7_real_target_manifest.py
-scripts/m7_wsl_acceptance.sh
-scripts/m7_wsl_acceptance.py
-scripts/m7_wsl_http_acceptance.py
-scripts/verify_m7_evidence.py
+docs/PRODUCTION_CHECKLIST.md
+docs/INSTALL.md
+scripts/healthcheck.sh
+MCP stdio/HTTP smoke and the Direct target evidence procedure
 ```
 
 不得自行简化 service identity、binary SHA、systemd 或 helper cleanup 校验。
@@ -430,32 +416,32 @@ scripts/verify_m7_evidence.py
 ### 12.3 必须保存的证据
 
 - 候选 commit、binary SHA256 和 BUILDINFO。
-- WSL/Windows/目标 SSH 环境描述。
-- Direct path 不可用和 Windows/VPN path 可用证据。
+- WSL/目标 SSH 环境描述（如部署使用 WSL）。
+- Direct TCP 可达性和路由证据。
 - 实际 systemd User、MainPID 和 `/proc/<pid>/exe` 对应候选 binary 的证据。
 - stdio 和 Streamable HTTP MCP initialize/tools/list/三工具结果。
-- helper 前后进程计数及失败/取消清理结果。
+- Direct 失败/恢复和服务身份证据。
 - strict host-key 和认证结果。
-- evidence verifier PASS 结果。
+- 脱敏 evidence verifier 或等价检查结果。
 
 证据必须脱敏，不保存 Secret、私钥、密码、完整日志正文、match_ref 或不必要的内部主机信息。
 
-完成标准：真实 stdio 与 systemd HTTP 两套验收均 PASS，manifest 完整且 evidence verifier PASS。
+完成标准：适用的真实 stdio/HTTP Direct 查询验收 PASS，证据完整且脱敏。Windows helper/ProxyCommand evidence 不属于 v2.0 完成条件。
 
 ### 阶段 G 实际状态（2026-08-19）
 
-- 状态：`部分 PASS / ProxyCommand BLOCKED-ENV`；Direct/TUN 真实目标候选链路已通过，但不能把它代替要求中的 Windows ProxyCommand systemd HTTP gate，也不能把本地 fixture、synthetic self-test 或静态预检记作完整 G PASS。
+- 状态：`Direct/TUN PASS；ProxyCommand POST-V2 DEFERRED`；Direct/TUN 真实目标候选链路已通过。ProxyCommand systemd HTTP gate 已从 v2.0 scope 移除，不再作为 G 的 required 条件。
 - WSL 更新和重启后，当前 kernel 为 `6.18.33.2-microsoft-standard-WSL2`，PID 1 为 `systemd`，`systemctl` bus 为 `249.11`；当前 `log-query-mcp.service` 已以 `log-query-mcp` 用户运行（MainPID `42188`，`ActiveState=active`，监听 `127.0.0.1:8000/mcp`），证明 systemd/service identity 这一部分前置已生效。操作者在同一 Ubuntu-22.04 交互式 root shell 和 `log-query-mcp` 用户下均成功执行 Windows `tasklist.exe`，因此 WSL interop 已确认；但 Windows `PATH` 中 `where ncat.exe` 和 `where nc.exe` 均未找到文件，当前没有可用于 ProxyCommand 的批准 TCP helper。
 - Windows 主机 `wsl --update` 已成功；`wsl --version` 报告 WSL `2.7.11.0`、kernel `6.18.33.2-2`、WSLg `1.0.73.2`、Windows `10.0.19045.6456`。原 `/opt/log-query-mcp/BUILDINFO` 仍是旧的 `v0.1.0` / `ce2abf108da6c7e8e709ddbaa3992066807f83c3`，不是本候选 `d608e946ddd3f6456ce7d7507567c8be0641cde7`；旧 `/etc/log-query-mcp/config.json` 仍保留本地目录 source，未被覆盖。用户要求切换 MCP 配置后，当前 unit 通过 `/etc/systemd/system/log-query-mcp.service.d/v2-direct.conf` 使用 v2 Direct 配置、Secret EnvironmentFile 和候选二进制；旧二进制仍保留在原路径。
 - 当前 WSL 确有 `wsl-v2ray` TUN（`172.19.0.1/30`）；策略表 `2022` 通过 `172.19.0.2` 承接 `fwmark 0x2023`，而未带 mark 的普通目标路由仍经 `eth0` 默认网关。对用户提供的 Direct SSH 目标执行 TCP/SSH host-key 只读预检成功，但应用连接是否实际带 TUN mark 仍需在真实服务请求中确认。
 - 已在 `/etc/log-query-mcp/config-v2-direct.json` 准备未提交到仓库的 v2 Direct 配置：密码仅引用 `QAXCICD_SDWXB_PASSWORD`，远程文件为用户提供的单文件 source，无 `proxy` 字段；`/etc/log-query-mcp/known_hosts-v2-direct` 复用本机已有受信任 host key。配置 JSON Schema PASS，候选二进制以 `log-query-mcp` 用户在隔离 loopback 端口启动 PASS。
 - `/etc/log-query-mcp/secrets-v2-direct.env` 已配置 `QAXCICD_SDWXB_PASSWORD`，权限已修正为 `root:log-query-mcp 0640`。候选 v2 隔离进程以 `log-query-mcp` 用户完成 `initialize`、`tools/list`、`list_log_sources`、真实 SSH/SFTP 远程同步、`search_logs` 和 `get_log_context`：`Direct/TUN candidate MCP chain: PASS`（结果 1 条、上下文 5 行；未保存日志正文或 match_ref）。首次请求使用了不支持的 `newest_first`，按服务协议修正为 `oldest_first` 后通过，分类为测试请求错误而非产品失败。
 - 在 WSL 重启确认 systemd 后，使用与现有 unit 相同的 `NoNewPrivileges`、`PrivateTmp`、`ProtectSystem=strict`、`ProtectHome`、地址族和可写 cache 限制，以临时 unit `log-query-mcp-v2-direct-check.service` 启动候选二进制；MainPID `40383`、User `log-query-mcp`、`ActiveState=active`。该 systemd 身份下 Direct/TUN MCP 链路再次 PASS：`initialize`、`tools/list`、`list_log_sources`、真实 `search_logs`（结果 1 条）和 `get_log_context`（上下文 3 行）；临时 unit 随后已停止，旧服务仍为 PID `162`。首次 503 的根因是 `PrivateTmp` 隔离导致测试二进制放在 `/tmp` 后对 unit 不可见（退出码 127），不是远端连接、密码或产品错误。
-- 本次 Direct/TUN systemd 验证基于产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`；未保存 Secret、密码、完整日志正文或 `match_ref`。当前结果证明候选服务身份和 Direct SSH/SFTP 查询链路可用，但不证明应用层连接一定携带 TUN mark，也不替代 ProxyCommand helper gate。
+- 本次 Direct/TUN systemd 验证基于产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`；未保存 Secret、密码、完整日志正文或 `match_ref`。当前结果证明候选服务身份和 Direct SSH/SFTP 查询链路可用；应用层 TUN mark 仍按部署环境记录，不再需要 ProxyCommand helper gate。
 - 用户要求将 MCP 配置切换到 75 后，已新增 v2 候选二进制 `/opt/log-query-mcp/bin/log-query-mcp-v2-direct`，并通过 systemd drop-in 将 `log-query-mcp.service` 切换到 `/etc/log-query-mcp/config-v2-direct.json`；旧 `/etc/log-query-mcp/config.json` 和旧二进制未覆盖。补充 `ReadWritePaths=/var/lib/log-query-mcp/cache-v2-direct` 后，当前 service MainPID `42188`、User `log-query-mcp`、`ActiveState=active`，监听 `127.0.0.1:8000/mcp`。75 的日志 source 已统一为 `log-75-sdwxb-base`，旧 source cache 保留未删除；从当前 8000 实际执行 `initialize`、`tools/list`、`list_log_sources`、真实 `search_logs`（结果 1 条）和 `get_log_context`（上下文 3 行）：`MCP 8000 -> 10.58.168.75 Direct/TUN chain: PASS`。
 - Codex 重启后的实际 MCP 入口是 stdio，而不是上述 HTTP 端口；旧 Codex 配置曾启动 `/opt/log-query-mcp/bin/log-query-mcp-stdio` 并读取旧 `/etc/log-query-mcp/config.json`，因此只返回 `183-sdwxb-base`。已将 `/root/.codex/config.toml` 的日志 MCP 项切换为 `log-sdwxb-base-direct`、v2 stdio binary 和 `/etc/log-query-mcp/config-v2-direct.json`；密码只在启动命令中从 `/etc/log-query-mcp/secrets-v2-direct.env` 加载，未写入 Codex 配置，并保留了 `config.toml.before-log75-direct-20260819.bak`。随后将 75 的日志 source 统一命名为 `log-75-sdwxb-base`，按 Codex 同等 stdio 启动链实际验证：`list_log_sources` 返回新 source，真实 `search_logs` 和 `get_log_context` 均 PASS；PG MCP 配置未修改。
-- 上述是当前 WSL service identity 下的 Direct 配置验收，不是目标 Linux 生产 MainPID 验收；原 M7 ProxyCommand 和完整真实目标 systemd HTTP gate 仍保持未执行。
-- 阻塞解除条件：在真实目标 WSL 上安装并以 `log-query-mcp` service identity 启动本候选包，提供已批准的 Windows helper、VPN/目标 SSH、strict known_hosts 和脱敏 marker，然后按 Runbook 生成同一次 run 的 stdio/HTTP evidence、manifest 并执行 verifier。
+- 上述是当前 WSL service identity 下的 Direct 配置验收，不是目标 Linux 生产 MainPID 验收；原 M7 ProxyCommand 和 Windows helper gate 已转为 post-v2，不影响 v2.0。
+- v2.0 后续条件：在真实目标环境按 Direct 配置完成安装、service identity、stdio/HTTP 查询、权限、故障恢复和脱敏证据验收。
 
 ## 13. 阶段 H：发布包和生命周期验收
 
@@ -472,9 +458,9 @@ TARGET=x86_64-unknown-linux-gnu bash scripts/rc_check.sh
 - BUILDINFO 的版本、commit、target 和构建时间。
 - 两个 binary 可执行。
 - v1/v2 example 和 v2 machine schema 存在。
-- Direct + Proxy 示例均存在。
+- v2 example 为 Direct-only；ProxyCommand schema/code 不作为 v2.0 package acceptance。
 - install/uninstall/healthcheck/upgrade/rollback 脚本可执行。
-- M6/M7 Release Readiness 和验收文档包含在包内。
+- M6 Release Readiness 和 v2.0 验收文档包含在包内；ProxyCommand/M7 WSL helper 文档归 post-v2。
 
 在隔离环境执行：
 
@@ -507,7 +493,7 @@ TARGET=x86_64-unknown-linux-gnu bash scripts/rc_check.sh
 - `known_hosts`、Secret、私钥及 cache 目录权限。
 - 默认 loopback 监听和上层 ACL/TLS/认证边界。
 - MCP initialize、tools/list、三个工具。
-- Local、Direct、Proxy 和混合查询。
+- Local、Direct 和 Local+Direct 混合查询。
 - 日志轮转、SSH 中断、权限变化、缓存损坏和恢复。
 - 实际 AI 客户端调用。
 - 升级和回滚演练。
@@ -517,7 +503,7 @@ TARGET=x86_64-unknown-linux-gnu bash scripts/rc_check.sh
 ### 阶段 I 实际状态（2026-08-19）
 
 - 状态：`待验收 / BLOCKED-ENV`；当前 WSL 的 systemd service bus 已在重启后确认正常，但没有可供本轮使用的目标 Linux 预生产/生产环境和操作者批准的生产安装、升级、重启或回滚入口。
-- 已保留本地 RC、Direct/ProxyCommand live 和性能证据；这些证据不能代签目标内核/glibc、systemd、权限、轮转、中断恢复、实际 AI 客户端、升级/回滚等生产项目。
+- 已保留本地 RC、Direct live 和性能证据；这些证据不能代签目标内核/glibc、systemd、权限、轮转、中断恢复、实际 AI 客户端、升级/回滚等生产项目。ProxyCommand 历史证据不属于 v2.0 release gate。
 - 在获得目标环境和明确授权前，不执行安装、重启、升级、回滚或真实配置修改。
 
 ## 15. 阶段 J：PR Ready、合并和发布
@@ -548,7 +534,7 @@ reviewer
 
 ### 阶段 J 实际状态（2026-08-19）
 
-- 状态：`BLOCKED / 未进入发布操作`；阶段 A、G、I 尚未完成，GitHub runner/Billing、ProxyCommand helper、Issue #26 真实目标验收、Issue #27 发布保护以及目标 Linux 生产验收仍是硬门禁，不能直接创建 tag/release 或部署。
+- 状态：`BLOCKED / 未进入发布操作`；阶段 A、G、I 尚未完成，GitHub runner/Billing、Issue #27 发布保护以及目标 Linux 生产验收仍是硬门禁，不能直接创建 tag/release 或部署。ProxyCommand helper/Issue #26 不再是 v2.0 硬门禁，已转为 post-v2 跟踪。
 - 本地工作分支 `release/v2-rc` 仅基于 `origin/feat/v2-m1-backend-config` 做候选验证；不修改 `main`，不推送候选远端分支，不执行合并/tag/release/deploy。
 
 ### 15.3 Tag 和 Release
@@ -586,9 +572,8 @@ git push origin v0.2.0
 | Local RC | `scripts/rc_check.sh` PASS |
 | Rust/Contracts | 当前候选 GitHub Actions PASS |
 | Direct SSH | auth/security/sync/query/fault gates PASS |
-| ProxyCommand | success/auth/sync/failure/mixed/restart/generation gates PASS |
-| Performance | 当前候选 M7 metrics 和 artifact 完整，无未解释回归 |
-| WSL | 真实 stdio + systemd HTTP evidence PASS |
+| Performance | 当前候选 Direct metrics 和 artifact 完整，无未解释回归 |
+| Direct/WSL | 适用的真实 stdio/HTTP Direct evidence PASS |
 | Package | checksum/BUILDINFO/package validator PASS |
 | Lifecycle | install/health/upgrade/rollback PASS |
 | Production | 目标 Linux 和实际 AI 客户端验收 PASS |
@@ -599,8 +584,8 @@ git push origin v0.2.0
 
 - 代码已写但 live tests 未执行。
 - workflow 因 Billing 在 runner 启动前失败。
-- 只有历史 M6 证据，没有当前 M7 候选证据。
-- 只有 WSL 静态检查，没有真实 Windows/VPN/SSH 链路。
+- 只有历史 M6 证据，没有当前 Direct 候选证据。
+- 只有 WSL 静态检查，没有适用的真实 Direct/SSH 链路。
 - PR 仍为 Draft 或尚未合并。
 - tag 已创建但 Release 产物未验证。
 - CI 通过但目标环境安装、查询和回滚未验收。

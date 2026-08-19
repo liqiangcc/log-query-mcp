@@ -6,7 +6,7 @@ Log Query MCP 只向 AI 暴露受控的日志语义能力，不暴露 Shell、�
 
 ## 部署模式
 
-支持 Local 与 Remote SSH 来源，并且可以在同一个查询中混合使用。Remote SSH 又支持 Direct TCP 和管理员配置的 ProxyCommand 两种底层连接方式。
+v2.0 发布范围支持 Local 与 Remote SSH 来源，并且可以在同一个查询中混合使用；Remote SSH 的 v2.0 发布契约只接受 Direct TCP。仓库中的 ProxyCommand 实现保留为 post-v2 延后能力，不属于 v2.0 的示例、发布包或阻塞门禁。
 
 ### Local Source
 
@@ -47,7 +47,7 @@ Remote Source 的关键边界：
 - cursor 和 `match_ref` 固定到本地 cache snapshot/generation，日志轮转后旧引用在 TTL 内仍可稳定读取。
 - Tail / FromNow 缓存范围不足时返回 `CACHE_SCOPE_EXCEEDED`，不会把不完整缓存误报成“没有匹配”。
 
-#### Direct TCP 与 ProxyCommand
+#### Direct TCP
 
 默认不配置 `proxy` 时，SSH 使用 Direct TCP：
 
@@ -55,17 +55,17 @@ Remote Source 的关键边界：
 log-query-mcp → TCP → SSH/SFTP target
 ```
 
-当 MCP 运行环境无法直接访问目标，但管理员控制的本地/宿主机 helper 可以访问目标时，可使用 ProxyCommand：
+v2.0 使用 Direct TCP：
 
 ```text
-log-query-mcp
-  → spawn admin-configured program + argv[]
-  → stdin/stdout raw byte stream
-  → SSH handshake / strict known_hosts / auth / SFTP
-  → remote logs
+log-query-mcp → TCP → SSH handshake / strict known_hosts / auth / SFTP → remote logs
 ```
 
-典型 WSL 场景：WSL 网络无法访问企业 VPN 内的 SSH Server，但 Windows 宿主机可以访问，此时可让 WSL 内的 `log-query-mcp` 启动 Windows `ncat.exe` 等纯 TCP helper。
+#### ProxyCommand（post-v2 延后）
+
+ProxyCommand 的实现和 WSL/Windows helper 验收文档仍保留在仓库，供 post-v2 单独验证；v2.0 不承诺该路径，也不把 Windows helper 作为发布前置条件。
+
+post-v2 的 ProxyCommand 配置示例（不属于 v2.0 发布示例）如下：
 
 示例：
 
@@ -210,9 +210,9 @@ log-reader
 - `/etc/log-query-mcp/known_hosts`
 - Password 对应的环境变量 Secret，或只读 private key 文件
 - `/var/lib/log-query-mcp/cache` 可写空间
-- 若使用 ProxyCommand：管理员批准的 helper 可执行文件以及服务用户可执行权限
+- v2.0 使用 Direct TCP；ProxyCommand helper 只在未来 post-v2 重新纳入时准备
 
-WSL + Windows helper 还需要确认：
+WSL + Windows helper（post-v2 延后）还需要确认：
 
 - Windows executable interop 对运行 `log-query-mcp` 的服务身份可用；
 - helper 通过 Windows/VPN 网络可以连接目标 `host:port`；
@@ -223,7 +223,7 @@ WSL + Windows helper 还需要确认：
 示例配置：
 
 - [v1 Local 示例](./examples/log-query-mcp.v1.json)
-- [v2 Local + Direct Remote + ProxyCommand 示例](./examples/log-query-mcp.v2.remote.json)
+- [v2 Local + Direct Remote 示例](./examples/log-query-mcp.v2.remote.json)
 
 ## 快速验证
 
@@ -290,24 +290,25 @@ M6 已建立 Direct SSH 的可重复工程 benchmark，而不是产品 SLA。历
 - 10 GiB logical log 可只缓存 64 MiB tail；
 - 300 次连续 bounded range read 不泄漏 SFTP file handle。
 
-M7 已新增 paired Direct/ProxyCommand performance harness，覆盖 5 次 connection setup、100 MiB/1 GiB/10 GiB-tail、incremental bounded transfer、300 Proxy range reads、2 Direct + 2 Proxy concurrency 和正常路径 helper 回收。当前 M7 workflow 仍因 GitHub Actions Billing 在 runner 启动前被阻断，因此尚无 M7 实测数字，不能把 M6 数字冒充 M7 结果。
+M7 已新增 paired Direct/ProxyCommand performance harness。v2.0 只要求 Direct 路径的当前候选性能证据；ProxyCommand 性能和 helper 回收保留为 post-v2 非阻塞回归门禁。历史 M6 数字不能冒充当前候选证据。
 
 详见 [M6 性能基线](./docs/M6_PERFORMANCE_BASELINE_V2.md) 与 [M7 Proxy Performance Gate](./docs/M7_PROXY_PERFORMANCE_GATE_V2.md)。
 
 ## Release Candidate 状态
 
-M0-M6 历史实现/证据已完成；M7 ProxyCommand 的核心实现、功能/故障/同步/性能 harness 和 Release Integration 已进入候选分支。当前仍有两个不可省略的最终条件：
+M0-M6 历史实现/证据已完成；v2.0 的 Direct SSH、缓存和 Release Integration 已进入候选分支。ProxyCommand 的核心实现、功能/故障/同步/性能 harness 保留为 post-v2 延后工作。当前仍有两个不可省略的最终条件：
 
-1. GitHub Actions Billing/Spending Limit 恢复后，让当前 candidate 的所有 gates 真正执行并 PASS；
-2. 完成真实 `WSL → Windows Host helper → Remote SSH` 目标环境验收。
+1. GitHub Actions Billing/Spending Limit 恢复后，让 v2.0 required gates 真正执行并 PASS；
+2. 完成 v2.0 目标环境的 Direct SSH/WSL（如适用）验收。
 
 当前状态：
 
 ```text
-M7 implementation/harness  IMPLEMENTED
+v2.0 Direct implementation  IMPLEMENTED
+ProxyCommand implementation   IMPLEMENTED / POST-V2 DEFERRED
 release integration        IMPLEMENTED
 latest candidate CI        BLOCKED externally
-WSL target acceptance      PENDING
+Direct/WSL acceptance      PENDING where applicable
 RC Ready                   NO
 formal Release             NOT CREATED
 ```
@@ -318,7 +319,7 @@ formal Release             NOT CREATED
 bash scripts/rc_check.sh
 ```
 
-`rc_check.sh` 现在还验证 v2 release example 同时保留 Direct SSH 与 ProxyCommand，并要求 release package 包含 v2 machine schema 和 M7 ProxyCommand 交付文档。该命令不能替代真实 Direct/Proxy SSH live Gate，也不能替代目标 WSL/生产服务器验收。
+`rc_check.sh` 现在验证 v2 release example 为 Direct-only，并检查 Direct v2 release package。该命令不能替代真实 Direct SSH live/performance Gate 或目标生产服务器验收；ProxyCommand workflow 属于 post-v2 延后验证。
 
 ## 文档索引
 
@@ -326,14 +327,7 @@ bash scripts/rc_check.sh
 - [生产运维指南](./docs/OPERATIONS.md)
 - [生产验收清单](./docs/PRODUCTION_CHECKLIST.md)
 - [v2 Release Readiness](./docs/RELEASE_READINESS_V2.md)
-- [ProxyCommand Transport 设计](./docs/PROXY_COMMAND_TRANSPORT_V2.md)
-- [M7 ProxyCommand 实现基线](./docs/M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md)
-- [M7 ProxyCommand Failure Matrix](./docs/M7_PROXY_COMMAND_FAILURE_MATRIX_V2.md)
-- [M7 Proxy Auth Gate](./docs/M7_PROXY_AUTH_GATE_V2.md)
-- [M7 Proxy Sync Gate](./docs/M7_PROXY_SYNC_GATE_V2.md)
-- [M7 Proxy Restart Gate](./docs/M7_PROXY_RESTART_GATE_V2.md)
-- [M7 Proxy Generation Gate](./docs/M7_PROXY_GENERATION_GATE_V2.md)
-- [M7 Proxy Performance Gate](./docs/M7_PROXY_PERFORMANCE_GATE_V2.md)
+- ProxyCommand 设计、M7 harness 和 WSL helper 文档保留在仓库，统一作为 post-v2 延后工作，不随 v2.0 发布包提供。
 - [M6 Final Baseline](./docs/M6_FINAL_BASELINE_V2.md)
 - [M6 性能基线](./docs/M6_PERFORMANCE_BASELINE_V2.md)
 - [M6 安全/故障矩阵](./docs/M6_SECURITY_FAULT_MATRIX_V2.md)

@@ -1,6 +1,7 @@
 # Log Query MCP v2 M7 ProxyCommand 实施 TODO
 
-> 状态：Core + functional + performance harness + release integration + WSL acceptance tooling implemented / CI & real target validation blocked  
+> 发布范围决策（2026-08-19）：ProxyCommand 正式移出 v2.0 发布范围，延后到 v2.1/post-v2。本文只跟踪延后能力，不是 v2.0 required gate；未完成项不构成 v2.0 RC 阻塞。
+> 状态：Core + functional + performance harness + release integration + WSL acceptance tooling implemented / post-v2 validation deferred
 > 日期：2026-08-10  
 > 设计：[`PROXY_COMMAND_TRANSPORT_V2.md`](./PROXY_COMMAND_TRANSPORT_V2.md)  
 > 实现基线：[`M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md`](./M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md)  
@@ -187,14 +188,14 @@ M7 Proxy Sync
 - [x] INSTALL WSL/helper dependency、服务身份、systemd hardening 注意事项。
 - [x] OPERATIONS Proxy diagnostics/error categories/helper lifecycle。
 - [x] PRODUCTION_CHECKLIST ProxyCommand + WSL security/acceptance matrix。
-- [x] v2 example config 同时包含 Direct + ProxyCommand。
-- [x] Release package 强制包含 v2 machine Schema、示例和 M7 交付文档。
-- [x] Release package 包含 stdio/service-identity/systemd HTTP WSL acceptance tooling 与文档。
-- [x] `validate_release_package.sh` 验证 Direct+Proxy example、placeholder、`ProxyCommandConfig` machine schema 与两套 WSL acceptance clients。
-- [x] `rc_check.sh` 增加 non-live ProxyCommand contract + 两套 WSL acceptance static precheck。
-- [ ] 当前 candidate package/rc_check 实际 PASS — **BLOCKED until runner/local gate executes**。
+- [x] 历史 v2 example config 曾同时包含 Direct + ProxyCommand；当前 v2.0 example 已改为 Direct-only。
+- [ ] post-v2 Release package 重新纳入 ProxyCommand schema/example 和 M7 交付文档。
+- [ ] post-v2 Release package 重新纳入 WSL acceptance tooling 与文档。
+- [ ] post-v2 `validate_release_package.sh` 重新验证 Proxy example、placeholder 和 WSL acceptance clients。
+- [ ] post-v2 `rc_check.sh` 重新启用 ProxyCommand contract/static precheck。
+- [ ] post-v2 candidate package/rc_check 实际 PASS — **deferred**。
 
-## 10. Final Gate
+## 10. Post-v2 Final Gate
 
 - [ ] Contracts PASS。
 - [ ] rustfmt PASS。
@@ -215,7 +216,7 @@ M7 Proxy Sync
 - [ ] Release/package/lifecycle PASS。
 - [ ] no unexplained critical failure。
 
-GitHub Actions Billing blocker 仍需解除。任何 `steps=null` 的 workflow failure 都不能视为 code failure，也不能视为 PASS。
+GitHub Actions Billing blocker 仍需解除后才能执行本 post-v2 gate。任何 `steps=null` 的 workflow failure 都不能视为 code failure，也不能视为 PASS；这些结果不影响 v2.0 Direct-only RC 判定。
 
 ## 11. 当前完成定义
 
@@ -239,8 +240,8 @@ release integration               IMPLEMENTED / VALIDATION BLOCKED
 WSL stdio acceptance tooling      IMPLEMENTED
 systemd HTTP acceptance tooling   IMPLEMENTED
 real WSL/systemd evidence         PENDING REAL TARGET
-final gates                       BLOCKED / NOT PASS
-RC ready                          NO
+final gates                       DEFERRED / NOT A v2.0 GATE
+v2.0 RC ready                     TRACKED IN V2_RELEASE_EXECUTION.md
 ```
 
 架构边界继续保持：

@@ -1,7 +1,9 @@
 # Log Query MCP v2 Release Readiness
 
 > Status: production-readiness contract for v2  
-> Scope: Local Source + Remote SSH/SFTP Source + optional administrator-configured ProxyCommand Transport
+> Scope: Local Source + Remote SSH/SFTP Source over Direct TCP
+>
+> ProxyCommand is implemented in the repository but explicitly deferred to post-v2. It is not a v2.0 supported transport, release-package example, or release-blocking gate. The related code, tests, and design documents remain for a later v2.1/post-v2 validation cycle.
 
 ## 1. Release boundary
 
@@ -13,9 +15,9 @@ search_logs
 get_log_context
 ```
 
-The release supports local Linux logs and administrator-configured remote SSH/SFTP logs. Remote SSH can use Direct TCP or an optional ProxyCommand raw-stream adapter. Remote logs are synchronized into a local generation cache before the existing scanner/query engine reads them.
+The release supports local Linux logs and administrator-configured remote SSH/SFTP logs over Direct TCP. Remote logs are synchronized into a local generation cache before the existing scanner/query engine reads them.
 
-ProxyCommand does not create a new MCP tool. It is only a connection adapter below SSH:
+The deferred ProxyCommand implementation does not create a new MCP tool. If enabled in a future post-v2 release, it remains only a connection adapter below SSH:
 
 ```text
 Direct       : TCP -> SSH -> auth/known_hosts -> SFTP
@@ -26,26 +28,18 @@ The release does **not** provide remote shell execution, arbitrary path reads, u
 
 ## 2. Required automated gates
 
-A release candidate is not ready unless all of the following are green on the candidate commit:
+A v2.0 release candidate is not ready unless all of the following are green on the candidate commit:
 
 ```text
 Rust                         cargo fmt + clippy -D warnings + all tests + release build
 Contracts                    v1/v2 config/schema contract validation
 Direct SSH Transport         auth + host key + range read + M4/M5 + M6 security/fault/live gates
-M7 ProxyCommand              success + strict host-key live path
-M7 Proxy Auth                password/private/encrypted-key auth through ProxyCommand
-M7 Proxy Sync                full/tail/from_now/incremental/rotation/truncate
-M7 ProxyCommand Failures     startup/EOF/timeout/cancel/auth/crash/Broken/isolation
-M7 Mixed Query               Local + Direct + Proxy + failed-Proxy isolation
-M7 Proxy Restart             stale-cache fail-closed + restart/recovery
-M7 Proxy Generation          cursor/match_ref/generation/cache-only context
-M7 Proxy Performance         Direct/Proxy paired profiles + 300 reads + concurrency + cleanup
 Release                      transport smoke + protocol health + package validation + upgrade/rollback
 ```
 
-M6 historical performance evidence is recorded in `M6_PERFORMANCE_BASELINE_V2.md`; M7 current-candidate performance must come from `M7 Proxy Performance`. Historical elapsed numbers are comparison evidence, not a substitute for current M7 execution and not an SLA.
+M6 historical performance evidence is recorded in `M6_PERFORMANCE_BASELINE_V2.md`; current-candidate Direct performance evidence must be recorded separately. Historical elapsed numbers are comparison evidence, not an SLA. M7 ProxyCommand workflows remain post-v2 regression gates and are not required for v2.0.
 
-For non-live validation outside GitHub Actions, `bash scripts/rc_check.sh` runs all repository-local gates in one command. It also validates the ProxyCommand release contract: Direct + Proxy example shape, allowed placeholders, packaged v2 machine schema and required M7 delivery documents. It does **not** replace real Direct/Proxy SSH live gates, M7 performance evidence, or target WSL/production acceptance.
+For non-live validation outside GitHub Actions, `bash scripts/rc_check.sh` runs all repository-local v2 gates in one command. It validates the Direct-only v2 example and package contract. It does **not** replace real Direct SSH live/performance evidence or target production acceptance. ProxyCommand validation remains a separate post-v2 workflow and is not silently treated as a v2.0 PASS.
 
 ## 3. Release package contract
 
@@ -73,15 +67,6 @@ docs/INSTALL.md
 docs/OPERATIONS.md
 docs/PRODUCTION_CHECKLIST.md
 docs/CONFIG_SCHEMA_V2.md
-docs/PROXY_COMMAND_TRANSPORT_V2.md
-docs/M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md
-docs/M7_PROXY_COMMAND_LIVE_GATE_V2.md
-docs/M7_PROXY_AUTH_GATE_V2.md
-docs/M7_PROXY_SYNC_GATE_V2.md
-docs/M7_PROXY_COMMAND_FAILURE_MATRIX_V2.md
-docs/M7_PROXY_RESTART_GATE_V2.md
-docs/M7_PROXY_GENERATION_GATE_V2.md
-docs/M7_PROXY_PERFORMANCE_GATE_V2.md
 docs/M6_PERFORMANCE_BASELINE_V2.md
 docs/M6_FINAL_BASELINE_V2.md
 docs/RELEASE_READINESS_V2.md
@@ -89,11 +74,11 @@ BUILDINFO
 SHA256SUMS
 ```
 
-The packaged v2 example must retain at least one Direct SSH connection and at least one `proxy.type=command` connection. Packaged ProxyCommand placeholders are restricted to whole-argument `{host}` / `{port}`. The packaged machine schema must contain `ProxyCommandConfig`.
+The packaged v2 example must contain at least one Direct SSH connection and must not contain a `proxy` connection. The v2.0 package does not promise ProxyCommand support. The machine schema may retain the deferred `ProxyCommandConfig` definition for forward compatibility, but it is not part of the v2.0 example or acceptance contract.
 
 `BUILDINFO` records version, target, Git commit/ref, UTC build time, and rustc version. The package contains an internal `SHA256SUMS`; the release directory also publishes a checksum for the archive itself.
 
-`scripts/validate_release_package.sh` must accept the generated archive and verify package completeness, executable release helpers, ProxyCommand release-contract shape, internal checksums, outer archive checksum and BUILDINFO/version consistency.
+`scripts/validate_release_package.sh` must accept the generated archive and verify package completeness, Direct-only v2 example shape, internal checksums, outer archive checksum and BUILDINFO/version consistency.
 
 ## 4. Protocol health contract
 
@@ -134,7 +119,7 @@ sudo scripts/rollback.sh /var/lib/log-query-mcp/backups/<backup-dir>
 
 Rollback also requires the restored service to pass the same protocol-level health check.
 
-For deployments using ProxyCommand, post-upgrade and post-rollback acceptance must additionally re-run a known Proxy source query and verify helper cleanup. Upgrade/rollback must not rewrite the existing production ProxyCommand configuration with the packaged example.
+ProxyCommand upgrade/rollback acceptance is deferred with the transport itself and is not a v2.0 release condition. v2.0 upgrade/rollback must preserve administrator configuration and pass the Direct/local protocol health checks.
 
 ## 6. Security invariants
 
@@ -166,29 +151,23 @@ CI evidence is necessary but not sufficient for the first production deployment.
 - real known_hosts and Secret provisioning;
 - cache capacity review;
 - MCP initialize/tools/search/context smoke tests;
-- SSH/Proxy outage, log rotation, restart, upgrade and rollback operator exercises where applicable.
+- Direct SSH outage, log rotation, restart, upgrade and rollback operator exercises where applicable.
 
-For M7, at least one traceable real WSL acceptance is required before RC completion when ProxyCommand is release-critical for the intended WSL/host-network use case:
+For v2.0, WSL/Windows-helper acceptance is deferred with ProxyCommand. If the selected deployment uses WSL, the release acceptance must cover the configured Direct TCP path; no Windows helper is required by the v2.0 contract:
 
 ```text
-WSL Direct path unavailable
+WSL service identity
     +
-Windows Host/VPN path available
-    +
-service identity can launch approved Windows helper
-    +
-ProxyCommand -> SSH handshake -> strict known_hosts -> auth -> SFTP
+Direct TCP -> SSH handshake -> strict known_hosts -> auth -> SFTP
     +
 list_log_sources/search_logs/get_log_context PASS
-    +
-no orphan helper / no sensitive error leakage
 ```
 
 Items that have not been executed on the target server remain `待验收`; CI must never mark them as completed on behalf of production operations.
 
 ## 8. Current external verification blocker
 
-M7 core implementation, functional/performance harnesses and Release Integration are present on Draft PR #25, but the current candidate GitHub Actions jobs remain blocked before runner start by the account Billing/Spending Limit condition tracked in GitHub Issue #23.
+Core v2 implementation and Direct release integration are present on Draft PR #25. The current candidate GitHub Actions jobs remain blocked before runner start by the account Billing/Spending Limit condition tracked in GitHub Issue #23. ProxyCommand jobs are retained as post-v2 validation and do not block the v2.0 release scope.
 
 This must be treated as **verification blocked**, not as PASS and not as a known code failure. `steps=null` means the job did not execute its test steps.
 
@@ -198,8 +177,9 @@ Therefore the current state is:
 implementation/harness       present
 release integration          present
 current candidate CI         blocked
-current M7 performance data  none
-real WSL acceptance          pending
+current Direct performance data pending
+real Direct/WSL acceptance   pending where deployment requires it
+ProxyCommand v2.0 gate       deferred / non-blocking
 RC Ready                     NO
 ```
 
@@ -212,9 +192,9 @@ candidate commit
     ↓
 repository-local rc_check PASS
     ↓
-Direct SSH + all M7 live/performance gates green
+Direct SSH + current Direct performance gate green
     ↓
-real WSL acceptance recorded
+real Direct/WSL acceptance recorded where applicable
     ↓
 release dry-run package validated
     ↓
@@ -235,4 +215,4 @@ install/upgrade
 production checklist
 ```
 
-Marking the PR Ready, merging the PR and creating the release tag are separate publication actions. A formal Release must not be created while Issue #23 remains unresolved, real WSL acceptance is missing, or any required Final Gate is not green.
+Marking the PR Ready, merging the PR and creating the release tag are separate publication actions. A formal Release must not be created while Issue #23 remains unresolved, required Direct/production acceptance is missing, or any required v2.0 Final Gate is not green. Deferred ProxyCommand jobs are not v2.0 Final Gates.

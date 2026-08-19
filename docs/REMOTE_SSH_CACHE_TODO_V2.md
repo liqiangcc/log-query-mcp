@@ -1,5 +1,7 @@
 # Log Query MCP v2 Remote SSH/Cache 实施 TODO
 
+> v2.0 发布范围已在 2026-08-19 正式限定为 Local + Direct SSH/SFTP。ProxyCommand 实现和 M7 harness 保留为 post-v2 延后项，不属于 v2.0 发布包、required gate 或 RC Ready 条件。
+
 > 状态：M0-M6 historical implementation complete / M7 implementation + harness + release integration complete / Final RC not ready  
 > 日期：2026-08-10  
 > 总方案：[`REMOTE_SSH_CACHE_DESIGN_V2.md`](./REMOTE_SSH_CACHE_DESIGN_V2.md)  
@@ -73,7 +75,7 @@ M7 修改了 SSH Transport，因此这些历史证据仍是重要回归基线，
 
 基线：[`M6_PERFORMANCE_BASELINE_V2.md`](./M6_PERFORMANCE_BASELINE_V2.md)
 
-M7 已新增 Direct/Proxy paired performance gate；M6 elapsed 数字不作为 M7 PASS threshold。
+M7 已新增 Direct/Proxy paired performance gate；v2.0 只要求当前候选 Direct 性能证据，Proxy 部分为 post-v2 非阻塞回归项。M6 elapsed 数字不作为当前候选 PASS threshold。
 
 ## 4. M6 Production Readiness — PRE-M7 BASELINE COMPLETE
 
@@ -132,7 +134,7 @@ M7 Release Integration 已在此基础上补充 ProxyCommand schema/example/docs
 - [x] server restart / stale-cache fail-closed / recovery。
 - [x] cursor/match_ref/generation pin consistency。
 
-### Performance harness
+### Performance harness（post-v2 ProxyCommand）
 
 - [x] Direct/Proxy 5-session setup paired measurement。
 - [x] 100 MiB / 1 GiB / 10 GiB-tail paired profiles。
@@ -143,20 +145,22 @@ M7 Release Integration 已在此基础上补充 ProxyCommand schema/example/docs
 - [x] environment/metrics/time/disk artifact wiring。
 - [ ] actual M7 performance metrics — **BLOCKED by Billing**。
 
-### Release Integration
+### Release Integration（post-v2 ProxyCommand）
 
 - [x] README Direct/Proxy/WSL/security guidance。
 - [x] INSTALL service-identity/helper/systemd-hardening guidance。
 - [x] OPERATIONS diagnostics/error categories/lifecycle guidance。
 - [x] PRODUCTION_CHECKLIST Proxy/WSL/performance acceptance。
-- [x] v2 example contains Direct + Proxy connections/sources。
-- [x] release package includes v2 machine schema and M7 delivery docs。
-- [x] release validator checks Direct+Proxy example, placeholders and machine schema。
-- [x] `rc_check.sh` includes ProxyCommand release-contract non-live check。
+- [x] 历史 v2 example 曾包含 Direct + Proxy connections/sources；v2.0 example 已改为 Direct-only。
+- [ ] post-v2 release package 重新纳入 v2 machine schema、Proxy example 和 M7 delivery docs。
+- [ ] post-v2 release validator 重新检查 Direct+Proxy example、placeholders 和 Proxy schema。
+- [ ] post-v2 `rc_check.sh` 重新启用 ProxyCommand release-contract non-live check。
 
 详细阶段与验收项见 [`PROXY_COMMAND_TODO_V2.md`](./PROXY_COMMAND_TODO_V2.md)。
 
-## 6. WSL Acceptance — PENDING REAL TARGET
+## 6. WSL Acceptance — POST-V2 DEFERRED
+
+本节只跟踪未来 ProxyCommand/Windows helper 重新纳入后的验收，不属于 v2.0 RC。
 
 必须形成可追溯的真实证据：
 
@@ -189,10 +193,8 @@ normal/failure/cancel helper cleanup PASS
 - [ ] candidate Rust Gate PASS。
 - [ ] candidate Contracts Gate PASS。
 - [ ] candidate Direct SSH Gate PASS。
-- [ ] candidate M7 ProxyCommand success/auth/sync/failure/mixed/restart/generation Gates PASS。
-- [ ] candidate M7 Proxy Performance PASS + metrics/artifact recorded。
 - [ ] candidate Release/package/lifecycle PASS。
-- [ ] WSL acceptance evidence recorded。
+- [ ] v2.0 Direct/WSL acceptance evidence recorded where applicable。
 - [ ] no unexplained critical failure。
 
 GitHub Actions Billing/Spending Limit 仍是外部 blocker，Issue #23 为 canonical tracking issue。`steps=null` 既不是 code PASS，也不是已知 code failure。
@@ -204,19 +206,19 @@ GitHub Actions Billing/Spending Limit 仍是外部 blocker，Issue #23 为 canon
 - [ ] merge main — Ready/review 后且需显式授权。
 - [ ] 创建 `v{Cargo.toml version}` tag — Final Gate 全绿后且需显式授权。
 - [ ] GitHub Release — tag workflow，Final Gate 未绿时禁止发布。
-- [ ] 目标生产服务器 INSTALL / Remote / ProxyCommand / AI-client / upgrade / rollback 人工验收。
+- [ ] 目标生产服务器 INSTALL / Direct Remote / AI-client / upgrade / rollback 人工验收。
 
 ## 9. 当前判断
 
 ```text
 M0-M6 historical implementation       COMPLETE
 M6 historical evidence                COMPLETE / reference only
-M7 ProxyCommand design/config/core    IMPLEMENTED
-M7 functional/fault/query harnesses   IMPLEMENTED
-M7 performance harness                IMPLEMENTED
-M7 release integration                IMPLEMENTED
-M7 current-candidate execution        BLOCKED externally
-M7 WSL acceptance                     PENDING target environment
+M7 ProxyCommand design/config/core    IMPLEMENTED / POST-V2 DEFERRED
+M7 functional/fault/query harnesses   IMPLEMENTED / POST-V2 DEFERRED
+M7 performance harness                IMPLEMENTED / POST-V2 DEFERRED
+v2.0 Direct release integration       IMPLEMENTED
+M7 current-candidate execution        POST-V2 NON-BLOCKING
+v2.0 Direct/WSL acceptance            PENDING target environment
 GitHub Actions Billing                BLOCKED externally
 Draft PR                              OPEN (#25)
 RC Ready                              NO
@@ -224,4 +226,4 @@ formal Release                        NOT CREATED
 production target acceptance          PENDING
 ```
 
-当前下一步应从“继续扩实现”切换到**真实 WSL acceptance 准备与 Final Gate 执行**。在 Billing 恢复、所有 candidate gates 真正 PASS、WSL evidence 完成之前，不应把 PR 标 Ready、merge、tag 或 release。
+当前下一步应从“继续扩实现”切换到**v2.0 Direct acceptance 准备与 Final Gate 执行**。在 Billing 恢复、所有 v2.0 required gates 真正 PASS、适用的 Direct/WSL evidence 完成之前，不应把 PR 标 Ready、merge、tag 或 release。ProxyCommand 继续作为 post-v2 独立工作跟踪。
