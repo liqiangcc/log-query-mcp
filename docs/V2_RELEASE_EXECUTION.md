@@ -18,6 +18,7 @@
 - 本轮 scope decision 已落地在本地独立分支 commit `b680f73`：v2.0 package/example/required gates 改为 Direct-only；ProxyCommand 实现、测试和历史设计文档保留为 post-v2。
 - v2.0 RC 入口移除 post-v2 WSL evidence/manifest synthetic self-test 的清理提交为 `a02bc63`；RC 仍保留 contracts、Rust、package/lifecycle 等 v2.0 检查。
 - 候选 `848ae2d` 的最新 Actions runs（Contracts `31455716785`、Rust `31455716801`、Release `31455716807`、M7 ProxyCommand `31455716797`、Proxy Auth `31455716800`、Proxy Sync `31455716795`、ProxyCommand Failures `31455716794`、Mixed Query `31455716806`、Proxy Generation `31455716792`、Proxy Restart `31455716812`）均为 `completed/failure`，对应 job 的 `steps=null`；未执行 checkout/build/test/package，按外部 runner/Billing 阻塞处理，不能视为代码失败或 PASS。
+- 独立 PR #30 的 head `7a39458eb44fba6e2c54518cb7c85346b365550c` 已触发新一轮 Actions；Contracts `32212531957`、Rust `32212531923`、Release `32212531905` 及 7 个历史 M7 workflow 均为 `completed/failure`，job `steps=[]`。Contracts check annotation 明确为 `recent account payments have failed or your spending limit needs to be increased`；因此仍是 Billing/runner 外部阻塞，不是代码失败，也不能视为 PASS。
 - 本机 `gh` CLI 当前已登录 `liqiangcc`，Git 操作使用 HTTPS；PR、Issue 和 Actions 事实已重新核对。候选 SHA、PR/Issue 阻塞状态以冻结候选为准；独立 scope PR #30 已记录为新的远端验证入口。
 
 ## 1. 最终目标
@@ -161,12 +162,12 @@ or your spending limit needs to be increased.
 
 如果当前 AI 无权处理 Billing，应报告该外部阻塞，同时继续执行不依赖 GitHub runner 的本地检查；不得宣称发布完成。
 
-### 阶段 A 实际状态（2026-08-18）
+### 阶段 A 实际状态（2026-08-19）
 
 - 状态：`BLOCKED-EXTERNAL`，已确认但无法由当前会话解除。
-- 证据：PR [#25](https://github.com/liqiangcc/log-query-mcp/pull/25) 和 Issue [#23](https://github.com/liqiangcc/log-query-mcp/issues/23) 仍为 Draft/open；当前候选的上述 Actions jobs 全部 `steps=null`，没有 runner 执行日志。
+- 证据：PR [#25](https://github.com/liqiangcc/log-query-mcp/pull/25) 仍为 Draft，Issue [#23](https://github.com/liqiangcc/log-query-mcp/issues/23) 仍 open；独立 PR [#30](https://github.com/liqiangcc/log-query-mcp/pull/30) 也是 Draft。PR #30 head `7a39458` 的 Contracts `32212531957`、Rust `32212531923`、Release `32212531905` 等 Actions jobs 全部在启动前失败，`steps=[]`，check annotation 指向账户付款/Spending Limit。
 - 当前会话无仓库 Billing/Spending Limit 管理权限；未重试或伪造 PASS，也未关闭 Issue #23。
-- 阶段记录 commit：`848ae2d04a4f78d1acbe7d4708dbd48e4b183e1b`（候选未改动）。
+- 阶段记录 commit：`7a39458eb44fba6e2c54518cb7c85346b365550c`（独立 scope 分支；候选 `848ae2d` 未改动）。
 - 后续动作：继续执行不依赖 GitHub runner 的阶段 B～H 本地检查；阶段 A 只有在管理员恢复 Billing 并重新运行轻量 Contracts/Rust workflow 后才能转为 `PASS`。
 
 ## 7. 阶段 B：确定并同步版本
@@ -540,7 +541,7 @@ reviewer
 ### 阶段 J 实际状态（2026-08-19）
 
 - 状态：`BLOCKED / 未进入发布操作`；阶段 A、G、I 尚未完成，GitHub runner/Billing、Issue #27 发布保护以及目标 Linux 生产验收仍是硬门禁，不能直接创建 tag/release 或部署。ProxyCommand helper/Issue #26 不再是 v2.0 硬门禁，已转为 post-v2 跟踪。
-- 独立 `release/v2-rc` 已推送并创建 Draft PR #30，head=`eab4ab2`、base=`feat/v2-m1-backend-config`；不修改 `main` 或远端候选分支，不执行合并/tag/release/deploy。
+- 独立 `release/v2-rc` 已推送并创建 Draft PR #30，当前 head=`7a39458`、base=`feat/v2-m1-backend-config`；不修改 `main` 或远端候选分支，不执行合并/tag/release/deploy。
 
 ### 15.3 Tag 和 Release
 
