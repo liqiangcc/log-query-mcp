@@ -128,10 +128,7 @@ async fn proxy_cursor_and_match_refs_remain_bound_to_their_original_generations(
     .expect("reset proxy source A fixture");
     fs::write(
         &remote_b,
-        concat!(
-            "M7KEEP source-b-stable\n",
-            "M7B source-b-only\n"
-        ),
+        concat!("M7KEEP source-b-stable\n", "M7B source-b-only\n"),
     )
     .expect("reset proxy source B fixture");
 

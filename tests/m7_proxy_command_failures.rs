@@ -183,12 +183,7 @@ async fn missing_proxy_program_has_stable_classification() {
 #[tokio::test]
 #[ignore = "requires the M7 ProxyCommand failure workflow fixture"]
 async fn non_executable_proxy_program_has_stable_classification() {
-    let connection = proxy_connection(
-        "nonexec",
-        &required("M7_NONEXEC_PROGRAM"),
-        Vec::new(),
-        1000,
-    );
+    let connection = proxy_connection("nonexec", &required("M7_NONEXEC_PROGRAM"), Vec::new(), 1000);
     let manager = SshConnectionManager::from_config(&config(vec![connection], "nonexec"))
         .expect("connection manager should build");
 

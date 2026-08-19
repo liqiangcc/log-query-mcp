@@ -145,11 +145,7 @@ async fn dual_server_concurrent_queries_record_baseline() {
     let cache = TempDir::new().expect("dual-server concurrency cache");
     let query = service(config(
         vec![
-            password_connection(
-                "server-a",
-                port("M2_SSH_PORT"),
-                &required("M2_KNOWN_HOSTS"),
-            ),
+            password_connection("server-a", port("M2_SSH_PORT"), &required("M2_KNOWN_HOSTS")),
             private_key_connection(
                 "server-b",
                 port("M6_SSH_B_PORT"),

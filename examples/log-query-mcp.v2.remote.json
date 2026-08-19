@@ -35,31 +35,6 @@
       "connect_timeout_millis": 5000,
       "operation_timeout_millis": 30000,
       "keepalive_seconds": 30
-    },
-    {
-      "connection_id": "inventory-vpn-proxy-ssh",
-      "type": "ssh",
-      "host": "inventory-vpn.internal",
-      "port": 22,
-      "username": "log-reader",
-      "auth": {
-        "type": "password",
-        "secret_ref": "LOG_QUERY_MCP_INVENTORY_PASSWORD"
-      },
-      "host_key": {
-        "known_hosts_file": "/etc/log-query-mcp/known_hosts"
-      },
-      "proxy": {
-        "type": "command",
-        "program": "ncat.exe",
-        "args": [
-          "{host}",
-          "{port}"
-        ]
-      },
-      "connect_timeout_millis": 5000,
-      "operation_timeout_millis": 30000,
-      "keepalive_seconds": 30
     }
   ],
   "sources": [
@@ -134,32 +109,6 @@
         "connection_id": "analytics-prod-ssh"
       },
       "root": "/srv/log/analytics-service",
-      "files": [
-        "application.log"
-      ],
-      "sync": {
-        "freshness": "on_query",
-        "bootstrap": {
-          "type": "tail",
-          "bytes": 67108864
-        },
-        "allow_stale_on_error": false
-      }
-    },
-    {
-      "source_id": "inventory-remote-via-host",
-      "name": "库存服务宿主机代理日志",
-      "description": "WSL-friendly ProxyCommand source; ncat.exe is an administrator-installed host-side TCP helper",
-      "service": "inventory-service",
-      "environment": "test",
-      "tags": ["inventory", "remote", "proxy-command", "wsl"],
-      "enabled": true,
-      "encoding": "utf-8",
-      "backend": {
-        "type": "ssh",
-        "connection_id": "inventory-vpn-proxy-ssh"
-      },
-      "root": "/srv/log/inventory-service",
       "files": [
         "application.log"
       ],

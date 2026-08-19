@@ -205,7 +205,7 @@ def self_test() -> None:
         stdio_bin.write_bytes(b"stdio-candidate")
         http_bin.write_bytes(b"http-candidate")
         buildinfo.write_text(
-            "version=0.1.0\n"
+            "version=0.2.0\n"
             "target=x86_64-unknown-linux-gnu\n"
             f"git_commit={'c' * 40}\n"
             "git_ref=self-test\n"

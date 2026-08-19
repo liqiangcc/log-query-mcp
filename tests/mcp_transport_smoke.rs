@@ -144,7 +144,7 @@ fn initialize_request(id: u64) -> Value {
             "capabilities": {},
             "clientInfo": {
                 "name": "transport-smoke",
-                "version": "0.1.0"
+                "version": "0.2.0"
             }
         }
     })

@@ -9,8 +9,7 @@ use std::{
 
 use log_query_mcp::{
     AppConfigV2, CONTINUITY_FINGERPRINT_WINDOW_BYTES, CacheStore, RemoteSyncTarget, ScanLimits,
-    ScanRequest, SyncAction, SyncEngine, scan_reader,
-    transport::SshConnectionManager,
+    ScanRequest, SyncAction, SyncEngine, scan_reader, transport::SshConnectionManager,
 };
 use serde_json::{Value, json};
 
@@ -237,7 +236,10 @@ async fn sync_and_scan_profile() {
         SyncAction::NewGeneration(_)
     ));
     assert_eq!(bootstrap_outcome.remote_size, logical_size);
-    assert_eq!(bootstrap_outcome.cached_bytes_written, expected_cached_bytes);
+    assert_eq!(
+        bootstrap_outcome.cached_bytes_written,
+        expected_cached_bytes
+    );
     assert_eq!(
         bootstrap_outcome.remote_bytes_read,
         expected_cached_bytes + CONTINUITY_FINGERPRINT_WINDOW_BYTES.min(logical_size)

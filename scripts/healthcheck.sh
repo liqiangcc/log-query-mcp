@@ -23,7 +23,7 @@ command -v "${curl_bin}" >/dev/null 2>&1 || die "curl command not found: ${curl_
 response="$(mktemp)"
 trap 'rm -f "${response}"' EXIT
 
-request='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"production-healthcheck","version":"0.1.0"}}}'
+request='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"production-healthcheck","version":"0.2.0"}}}'
 
 "${curl_bin}" \
   --fail \

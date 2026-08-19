@@ -4,7 +4,7 @@
 
 ## 1. 自动验证项
 
-这些项目由 CI 或本地可重复验证覆盖；当前 candidate 的 GitHub Actions runner 仍受 Billing/Spending Limit 外部阻塞，因此所有 M7 live/performance 项必须区分“harness 已实现”和“PASS evidence”。
+这些项目由 CI 或本地可重复验证覆盖；当前 candidate 的 GitHub Actions runner 仍受 Billing/Spending Limit 外部阻塞，因此 v2.0 required 项必须区分“harness 已实现”和“PASS evidence”。ProxyCommand 项目已明确延后到 post-v2，不是 v2.0 required gate。
 
 | 项目 | 状态 | 证据 |
 |---|---|---|
@@ -12,22 +12,16 @@
 | Clippy 严格检查 | 历史通过；当前 candidate 待重跑 | `cargo clippy --locked --all-targets --all-features -- -D warnings` |
 | 全量测试 | 历史通过；当前 candidate 待重跑 | `cargo test --locked --all-targets --all-features` |
 | v1/v2 contract/schema | harness 已实现；当前 candidate 待重跑 | `python3 scripts/validate_contracts.py` |
-| ProxyCommand release contract | 已接入本地 RC；当前 candidate 待实际执行 | `scripts/rc_check.sh` |
+| Direct-only v2 release contract | 已接入本地 RC；当前 candidate 待实际执行 | `scripts/rc_check.sh` |
 | release binaries | 历史通过；当前 candidate 待重跑 | `cargo build --release --locked --bins` |
 | stdio / Streamable HTTP smoke | 历史通过；当前 candidate 待重跑 | `tests/mcp_transport_smoke.rs` |
 | Direct Password/private-key/host-key/timeout SFTP live matrix | 历史通过；M7 修改后待重跑 | `SSH Transport` workflow |
-| M7 ProxyCommand success + strict host-key | harness 已实现 / execution blocked | `M7 ProxyCommand` |
-| M7 private/encrypted-key auth | harness 已实现 / execution blocked | `M7 Proxy Auth` |
-| M7 full/tail/from_now/incremental/rotation/truncate | harness 已实现 / execution blocked | `M7 Proxy Sync` |
-| M7 startup/auth/timeout/cancel/crash failure matrix | harness 已实现 / execution blocked | `M7 ProxyCommand Failures` |
-| Local + Direct + Proxy mixed query / failed-Proxy isolation | harness 已实现 / execution blocked | `M7 Mixed Query` |
-| Proxy restart / stale-cache fail-closed / recovery | harness 已实现 / execution blocked | `M7 Proxy Restart` |
-| Proxy cursor/match_ref/generation pin | harness 已实现 / execution blocked | `M7 Proxy Generation` |
-| Direct/Proxy paired performance + 300 reads + concurrency | harness 已实现 / execution blocked | `M7 Proxy Performance` |
+| ProxyCommand functional/auth/sync/failure/query/restart/generation | post-v2 harness retained / non-blocking | M7 Proxy workflows |
+| ProxyCommand paired performance + helper cleanup | post-v2 harness retained / non-blocking | `M7 Proxy Performance` |
 | M6 100 MiB / 1 GiB / 10 GiB-tail historical benchmark | 历史 evidence 已有 | `M6_PERFORMANCE_BASELINE_V2.md` |
 | protocol health failure matrix | 本地已验证；当前 candidate 待重跑 | `tests/healthcheck_test.sh` |
-| release package assembly | 脚本已支持 M7 artifacts；当前 candidate 待重跑 | `scripts/package_release.sh` |
-| package completeness + 内/外 SHA256 + Proxy release contract | validator 已实现；当前 candidate 待重跑 | `scripts/validate_release_package.sh` |
+| release package assembly | Direct-only v2 package；当前 candidate 待重跑 | `scripts/package_release.sh` |
+| package completeness + 内/外 SHA256 + Direct release contract | validator 已实现；当前 candidate 待重跑 | `scripts/validate_release_package.sh` |
 | upgrade/rollback 隔离演练 | 本地历史验证；当前 candidate 待重跑 | `tests/upgrade_rollback_test.sh` |
 | 全部非 live-SSH 本地 RC Gate | 一键入口已实现 | `scripts/rc_check.sh` |
 | tag 与 Cargo version 一致性 | Gate 已存在 | `scripts/check_release_tag.sh` |
@@ -42,22 +36,14 @@
 - [ ] Rust workflow 在**候选 commit**成功。
 - [ ] Contracts workflow 在**候选 commit**成功。
 - [ ] Direct SSH Transport workflow 在**候选 commit**成功。
-- [ ] `M7 ProxyCommand` success/host-key gate 成功。
-- [ ] `M7 Proxy Auth` 成功。
-- [ ] `M7 Proxy Sync` 成功。
-- [ ] `M7 ProxyCommand Failures` 成功。
-- [ ] `M7 Mixed Query` 成功。
-- [ ] `M7 Proxy Restart` 成功。
-- [ ] `M7 Proxy Generation` 成功。
-- [ ] `M7 Proxy Performance` 成功，并产出当前 candidate Direct/Proxy paired metrics。
 - [ ] Release package job 在**候选 commit**成功。
 - [ ] Release artifact 通过 `validate_release_package.sh`。
 - [ ] `healthcheck_test.sh` 成功。
 - [ ] `upgrade_rollback_test.sh` 成功。
-- [ ] 真实 WSL → Windows Host helper → Remote SSH acceptance 可追溯并成功。
+- [ ] 真实 Direct SSH/WSL acceptance（目标部署需要时）可追溯并成功。
 - [ ] 没有未解释的 workflow failure/cancelled/skipped critical step。
 
-只有 Billing/runner 等外部阻塞解除、全部 Gate 执行并通过、真实 WSL acceptance 完成后，才可标记 RC Ready。
+只有 Billing/runner 等外部阻塞解除、全部 v2.0 required Gate 执行并通过、适用的 Direct/WSL acceptance 完成后，才可标记 RC Ready。ProxyCommand workflow 不属于 v2.0 required Gate。
 
 ## 3. 发布包验收
 
@@ -71,12 +57,10 @@
 | `BUILDINFO` 包含 version/target/commit/ref/build time/rustc | 待正式发布验收 |  |
 | 包含 install/uninstall/healthcheck/upgrade/rollback | 待正式发布验收 |  |
 | 包含 v1/v2 example | 待正式发布验收 |  |
-| v2 example 同时包含 Direct SSH 与 ProxyCommand | 待正式发布验收 |  |
+| v2 example 只包含 Direct SSH | 待正式发布验收 |  |
 | 包含 `schemas/log-query-mcp-config-v2.schema.json` | 待正式发布验收 |  |
-| v2 machine schema 包含 `ProxyCommandConfig` | 待正式发布验收 |  |
 | 包含 INSTALL/OPERATIONS/PRODUCTION_CHECKLIST | 待正式发布验收 |  |
-| 包含 CONFIG_SCHEMA_V2 / PROXY_COMMAND_TRANSPORT_V2 | 待正式发布验收 |  |
-| 包含 M7 implementation/live/auth/sync/failure/restart/generation/performance docs | 待正式发布验收 |  |
+| 包含 CONFIG_SCHEMA_V2 | 待正式发布验收 |  |
 | 包含 M6_PERFORMANCE/M6_FINAL/RELEASE_READINESS | 待正式发布验收 |  |
 
 ## 4. 目标服务器安装验收
@@ -94,8 +78,7 @@
 | cache root 位于受控 `/var/lib/log-query-mcp/cache` | 待验收 |  |
 | systemd unit 正确安装 | 待验收 |  |
 | config 仅 root 可写、服务组可读 | 待验收 |  |
-| 如使用 ProxyCommand，helper 程序来源/路径/版本已审批 | 待验收或不适用 |  |
-| 如使用 ProxyCommand，服务身份可执行 helper | 待验收或不适用 |  |
+| ProxyCommand helper（post-v2） | v2.0 不适用 |  |
 
 ## 5. Local Source 配置/权限验收
 
@@ -124,7 +107,9 @@
 | 服务端没有为 MCP 开放 Remote Exec/Shell | 待验收 |  |
 | Remote 账号不能写/删目标日志 | 待验收 |  |
 
-### 6.1 ProxyCommand 专项验收
+### 6.1 ProxyCommand 专项验收（post-v2，不阻塞 v2.0）
+
+以下项目保留为未来版本重新纳入 ProxyCommand 时的验收清单；v2.0 不执行、不宣称 PASS，也不因其未完成阻塞 Direct-only 发布。
 
 | 项目 | 状态 | 记录 |
 |---|---|---|
@@ -144,9 +129,9 @@
 | Proxy outage 时 `allow_stale_on_error=false` 不返回 stale-success | 待验收 |  |
 | Proxy 恢复后可重新同步并查询 | 待验收 |  |
 
-## 7. WSL → Windows Host 验收
+## 7. WSL → Windows Host 验收（post-v2 ProxyCommand，不阻塞 v2.0）
 
-该项只在目标部署确实依赖 WSL/宿主机网络时适用，但 M7 RC 必须有至少一份可追溯真实 acceptance evidence。
+该项只在未来版本重新纳入 ProxyCommand 且目标部署确实依赖 WSL/宿主机网络时适用；v2.0 不要求 Windows helper acceptance。
 
 | 项目 | 状态 | 记录 |
 |---|---|---|
@@ -190,8 +175,8 @@
 | list/result/error 不泄露 host、username、secret、remote/cache absolute path、Proxy argv/stderr | 待验收 |  |
 | Local `search_logs` 返回已知样例 | 待验收 |  |
 | Direct Remote `search_logs` 返回已知样例 | 待验收 |  |
-| Proxy Remote `search_logs` 返回已知样例 | 待验收 |  |
-| Local + Direct + Proxy mixed query 正确 | 待验收 |  |
+| Proxy Remote `search_logs` 返回已知样例（post-v2） | v2.0 不适用 |  |
+| Local + Direct mixed query 正确 | 待验收 |  |
 | `get_log_context(match_ref)` 返回有限上下文 | 待验收 |  |
 
 ## 10. Remote 故障/恢复验收
@@ -199,7 +184,7 @@
 | 项目 | 状态 | 记录 |
 |---|---|---|
 | SSH server 不可用时 fail-closed | 待验收 |  |
-| Proxy helper 不可用/early exit/timeout 时 fail-closed | 待验收或不适用 |  |
+| Proxy helper 不可用/early exit/timeout 时 fail-closed（post-v2） | v2.0 不适用 |  |
 | auth failure 不泄露 Secret | 待验收 |  |
 | host key 变化时拒绝连接 | 待验收 |  |
 | server restart 后查询恢复 | 待验收 |  |
@@ -207,24 +192,22 @@
 | rotation/truncate/replacement 创建正确 generation | 待验收 |  |
 | 同步失败不破坏最后有效 cache | 待验收 |  |
 | `allow_stale_on_error=false` 不把旧 cache 当成功结果 | 待验收 |  |
-| 一台 Remote/Proxy Server 失败不污染另一台 cache | 待验收 |  |
+| 一台 Remote Server 失败不污染另一台 cache | 待验收 |  |
 | existing cursor/match_ref 继续绑定 pinned generation | 待验收 |  |
 
 ## 11. 性能/资源验收
 
 | 项目 | 状态 | 记录 |
 |---|---|---|
-| M7 Direct 5-session setup metric 已记录 | 待当前 candidate evidence |  |
-| M7 Proxy 5-session setup metric 已记录 | 待当前 candidate evidence |  |
-| 100 MiB Direct + Proxy paired full profile PASS | 待当前 candidate evidence |  |
-| 1 GiB Direct + Proxy paired full profile PASS | 待当前 candidate evidence |  |
-| 10 GiB logical tail Direct + Proxy paired profile PASS | 待当前 candidate evidence |  |
+| Direct 5-session setup metric 已记录 | 待当前 candidate evidence |  |
+| 100 MiB Direct full profile PASS | 待当前 candidate evidence |  |
+| 1 GiB Direct full profile PASS | 待当前 candidate evidence |  |
+| 10 GiB logical tail Direct profile PASS | 待当前 candidate evidence |  |
 | unchanged remote read `<= 64 KiB` | 待当前 candidate evidence |  |
 | append remote read `<= payload + 2 × 64 KiB` | 待当前 candidate evidence |  |
 | cache local scan remote bytes = 0 | 待当前 candidate evidence |  |
-| Proxy 300 bounded range reads PASS | 待当前 candidate evidence |  |
-| 2 Direct + 2 Proxy concurrency PASS | 待当前 candidate evidence |  |
-| benchmark 后无 orphan Proxy helper | 待当前 candidate evidence |  |
+| Proxy 300 bounded range reads / helper cleanup（post-v2） | v2.0 不适用 |  |
+| Direct concurrency PASS | 待当前 candidate evidence |  |
 | 无未解释 memory/disk/network regression | 待当前 candidate evidence |  |
 
 M6 elapsed 数字仅作历史对照，不是 M7 PASS threshold，也不是产品 SLA。
@@ -243,7 +226,7 @@ CI/本地测试证明脚本逻辑，但目标服务器仍需执行一次受控�
 | 显式 `rollback.sh` 成功恢复旧版本 | 待验收 |  |
 | restart/protocol-health failure 的自动 rollback 已演练 | 待验收 |  |
 | rollback 后 `healthcheck.sh` + MCP smoke query 正常 | 待验收 |  |
-| Proxy config/helper 在升级和回滚后仍按预期工作 | 待验收或不适用 |  |
+| Proxy config/helper 在升级和回滚后仍按预期工作（post-v2） | v2.0 不适用 |  |
 | backup retention/清理策略已确定 | 待验收 |  |
 
 ## 13. 实际 AI 客户端验收
@@ -282,14 +265,7 @@ Release workflow run:
 Rust run:
 Contracts run:
 Direct SSH run:
-M7 Proxy success run:
-M7 Proxy Auth run:
-M7 Proxy Sync run:
-M7 Proxy Failure run:
-M7 Mixed Query run:
-M7 Proxy Restart run:
-M7 Proxy Generation run:
-M7 Proxy Performance run/artifact:
+Post-v2 Proxy runs/artifacts (not required for v2.0):
 WSL acceptance evidence:
 发布包 SHA256:
 目标服务器:

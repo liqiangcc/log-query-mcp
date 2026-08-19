@@ -97,11 +97,7 @@ fn local_source(root: &Path) -> Value {
     })
 }
 
-fn config(
-    local_root: &Path,
-    cache_root: &Path,
-    include_failed_proxy: bool,
-) -> AppConfigV2 {
+fn config(local_root: &Path, cache_root: &Path, include_failed_proxy: bool) -> AppConfigV2 {
     let mut connections = vec![
         direct_connection("direct-good"),
         proxy_connection("proxy-good", &required("M7_MIXED_PROXY_PROGRAM")),
@@ -148,8 +144,7 @@ fn service(config: AppConfigV2) -> StatefulQueryService {
 async fn local_direct_and_proxy_sources_query_through_one_service() {
     let cache = TempDir::new().expect("M7 mixed cache");
     let local = TempDir::new().expect("M7 local source");
-    fs::write(local.path().join("mixed.log"), "M7MIX local\n")
-        .expect("write local mixed fixture");
+    fs::write(local.path().join("mixed.log"), "M7MIX local\n").expect("write local mixed fixture");
 
     let query = service(config(local.path(), cache.path(), false));
     let result = query
@@ -213,7 +208,10 @@ async fn failed_proxy_source_does_not_poison_local_direct_or_other_proxy_sources
         ))
         .await
         .expect_err("failed ProxyCommand source must fail explicitly");
-    assert_eq!(ToolError::from(error).code, ToolErrorCode::RemoteUnavailable);
+    assert_eq!(
+        ToolError::from(error).code,
+        ToolErrorCode::RemoteUnavailable
+    );
 
     let healthy = query
         .search(

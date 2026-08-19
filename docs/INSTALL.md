@@ -1,6 +1,6 @@
 # Log Query MCP 生产安装指南
 
-本文说明如何从正式发布包安装、配置、启动、验证、升级、回滚和卸载 Log Query MCP。v2 同时支持 Local Source 与 Remote SSH/SFTP Source；Remote SSH 可使用 Direct TCP 或管理员配置的 ProxyCommand；AI-facing MCP 工具保持不变。
+本文说明如何从正式发布包安装、配置、启动、验证、升级、回滚和卸载 Log Query MCP。v2.0 发布范围支持 Local Source 与 Remote SSH/SFTP Source over Direct TCP；ProxyCommand 实现延后到 post-v2，AI-facing MCP 工具保持不变。
 
 ## 1. 前置条件
 
@@ -13,7 +13,7 @@ MCP 主机要求：
 - root 或 sudo 权限用于安装。
 - 默认只需要本机 loopback 访问 MCP endpoint。
 - Remote Direct 模式需要 MCP 运行环境可直接连接目标 SSH Server。
-- Remote ProxyCommand 模式需要管理员安装并批准一个能把 stdin/stdout 映射到目标 TCP 字节流的本地/宿主机 helper。
+- ProxyCommand/Windows helper 仅属于 post-v2 延后验证，不是 v2.0 安装前置条件。
 - 足够的本地 cache 空间。
 
 首批发布只提供 `tar.gz + systemd`，不提供 `.deb`、RPM 或 OCI image。
@@ -30,7 +30,7 @@ log-reader
 ## 2. 下载和校验发布包
 
 ```bash
-VERSION=0.1.0
+VERSION=0.2.0
 TARGET=x86_64-unknown-linux-gnu
 BASE_URL="https://github.com/liqiangcc/log-query-mcp/releases/download/v${VERSION}"
 
@@ -74,15 +74,6 @@ docs/INSTALL.md
 docs/OPERATIONS.md
 docs/PRODUCTION_CHECKLIST.md
 docs/CONFIG_SCHEMA_V2.md
-docs/PROXY_COMMAND_TRANSPORT_V2.md
-docs/M7_PROXY_COMMAND_IMPLEMENTATION_BASELINE_V2.md
-docs/M7_PROXY_COMMAND_LIVE_GATE_V2.md
-docs/M7_PROXY_AUTH_GATE_V2.md
-docs/M7_PROXY_SYNC_GATE_V2.md
-docs/M7_PROXY_COMMAND_FAILURE_MATRIX_V2.md
-docs/M7_PROXY_RESTART_GATE_V2.md
-docs/M7_PROXY_GENERATION_GATE_V2.md
-docs/M7_PROXY_PERFORMANCE_GATE_V2.md
 docs/M6_PERFORMANCE_BASELINE_V2.md
 docs/M6_FINAL_BASELINE_V2.md
 docs/RELEASE_READINESS_V2.md
@@ -106,7 +97,7 @@ sudo scripts/install.sh
 - 安装 `/etc/systemd/system/log-query-mcp.service`。
 - 执行 `systemctl daemon-reload`。
 
-安装器不会自动启动服务。先完成配置、Secret、known_hosts、Proxy helper（如使用）和权限检查，再启动。
+安装器不会自动启动服务。先完成配置、Secret、known_hosts 和权限检查，再启动。
 
 ## 4. Local Source 配置
 
@@ -141,7 +132,7 @@ sudo chown root:log-query-mcp /etc/log-query-mcp/config.json
 sudo chmod 0640 /etc/log-query-mcp/config.json
 ```
 
-该示例同时包含 Direct SSH 和 ProxyCommand 连接。生产环境只保留实际需要的 connection/source。
+该 v2.0 示例只包含 Direct SSH 连接。生产环境只保留实际需要的 connection/source；ProxyCommand 配置不属于 v2.0 发布契约。
 
 架构：
 
@@ -192,7 +183,9 @@ sudo install -m 0644 /tmp/server.known_hosts /etc/log-query-mcp/known_hosts
 
 Host key 变化默认 fail-closed。不要配置“自动接受新 key”。无论 Direct 还是 ProxyCommand，known_hosts 身份都针对配置中的逻辑目标 `host:port`，不是 helper 进程或宿主机。
 
-### 5.4 ProxyCommand / WSL
+### 5.4 ProxyCommand / WSL（post-v2 延后）
+
+本节记录保留在仓库中的 post-v2 设计，不属于 v2.0 安装、示例或发布验收。v2.0 只使用 Direct TCP。只有未来版本明确重新纳入该能力后，才能按本节配置和验收 ProxyCommand。
 
 ProxyCommand 只在 Direct TCP 不适用而管理员控制的本地/宿主机网络路径可用时启用。配置形态：
 
@@ -283,7 +276,7 @@ remote deploy/restart
 
 规划容量时考虑：bootstrap 范围、日志增长率、retention、多 generation、active cursor/match_ref pin 和安全余量。
 
-超大日志建议优先使用 Tail bootstrap。M6 工程基线中 10 GiB logical file 使用 64 MiB Tail，只同步/cache 约 64 MiB，而不是完整 10 GiB。该数字是回归基线，不是生产 SLA。M7 ProxyCommand 沿用相同 transfer/cache 不变量，当前 paired performance harness 尚待真实 runner 执行。
+超大日志建议优先使用 Tail bootstrap。M6 工程基线中 10 GiB logical file 使用 64 MiB Tail，只同步/cache 约 64 MiB，而不是完整 10 GiB。该数字是回归基线，不是生产 SLA。ProxyCommand 将沿用相同 transfer/cache 不变量，但属于 post-v2 验证。
 
 ## 8. 启动服务
 
@@ -326,7 +319,7 @@ sudo scripts/healthcheck.sh
 curl -sS http://127.0.0.1:8000/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"manual-smoke","version":"0.1.0"}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"manual-smoke","version":"0.2.0"}}}'
 ```
 
 MCP Inspector 连接：
@@ -425,9 +418,9 @@ Secret rotation：更新 Secret 来源后重启服务，使用一个已知 Remot
 bash scripts/rc_check.sh
 ```
 
-该脚本执行 Contracts、ProxyCommand release contract、rustfmt、Clippy、全量测试、release build、protocol health-check 负向矩阵、upgrade/rollback 演练、release package 生成与 validator。package validator 要求 v2 示例同时包含 Direct/ProxyCommand，并要求 tarball 包含 v2 machine schema 与 M7 交付文档。
+该脚本执行 Contracts、Direct-only v2 release contract、rustfmt、Clippy、全量测试、release build、protocol health-check 负向矩阵、upgrade/rollback 演练、release package 生成与 validator。package validator 要求 v2 示例为 Direct-only，并检查 v2.0 发布包的标准文件。
 
-它不替代真实 Direct/Proxy SSH live Gate、M7 performance Gate、真实 WSL → Windows Host acceptance 或目标生产环境验收。
+它不替代真实 Direct SSH live/performance Gate、目标生产环境验收；ProxyCommand workflow 属于 post-v2 延后验证。
 
 ## 16. 卸载
 
