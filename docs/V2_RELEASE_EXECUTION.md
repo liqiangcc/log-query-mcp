@@ -13,6 +13,7 @@
 - 工作区原有用户修改已保留：`README.md` 的文档索引变更和本手册文件；未覆盖或丢弃。
 - PR #25：open、Draft、未合并，head/base 与上述候选和 `main` 一致。
 - Issue #23：open，仍跟踪 GitHub Actions Billing/Spending Limit 与最终 CI/Performance/Release 门禁恢复。
+- Issue #26：open，真实 Windows + WSL + VPN 目标验收尚未完成；Issue #27：open，`main` 发布保护/程序化 fallback 尚未完成。
 - 候选 `848ae2d` 的最新 Actions runs（Contracts `31455716785`、Rust `31455716801`、Release `31455716807`、M7 ProxyCommand `31455716797`、Proxy Auth `31455716800`、Proxy Sync `31455716795`、ProxyCommand Failures `31455716794`、Mixed Query `31455716806`、Proxy Generation `31455716792`、Proxy Restart `31455716812`）均为 `completed/failure`，对应 job 的 `steps=null`；未执行 checkout/build/test/package，按外部 runner/Billing 阻塞处理，不能视为代码失败或 PASS。
 - 本机 `gh` token 已失效且无法访问 GitHub API；上述 PR、Issue 和 Actions 事实已通过连接器重新核对。发布手册中的候选 SHA、PR/Issue 阻塞状态没有过期，无需改写为其他远端事实。
 
@@ -547,7 +548,7 @@ reviewer
 
 ### 阶段 J 实际状态（2026-08-19）
 
-- 状态：`BLOCKED / 未进入发布操作`；阶段 A、G、I 尚未完成，GitHub runner/Billing、ProxyCommand helper 和目标 Linux 生产验收仍是硬门禁，不能直接创建 tag/release 或部署。
+- 状态：`BLOCKED / 未进入发布操作`；阶段 A、G、I 尚未完成，GitHub runner/Billing、ProxyCommand helper、Issue #26 真实目标验收、Issue #27 发布保护以及目标 Linux 生产验收仍是硬门禁，不能直接创建 tag/release 或部署。
 - 本地工作分支 `release/v2-rc` 仅基于 `origin/feat/v2-m1-backend-config` 做候选验证；不修改 `main`，不推送候选远端分支，不执行合并/tag/release/deploy。
 
 ### 15.3 Tag 和 Release
