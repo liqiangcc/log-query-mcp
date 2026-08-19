@@ -40,10 +40,6 @@ for script in \
   bash -n "${script}"
 done
 
-python3 -m py_compile \
-  scripts/verify_m7_evidence.py \
-  scripts/m7_real_target_manifest.py
-
 echo "rc_check: contracts"
 python3 scripts/validate_contracts.py
 
@@ -59,12 +55,6 @@ connections = example.get("connections", [])
 assert any("proxy" not in connection for connection in connections), "v2 example must retain Direct SSH"
 assert all("proxy" not in connection for connection in connections), "v2 release example must be Direct-only"
 PY
-
-echo "rc_check: M7 evidence verifier synthetic self-test"
-python3 scripts/verify_m7_evidence.py --self-test
-
-echo "rc_check: M7 run manifest synthetic self-test"
-python3 scripts/m7_real_target_manifest.py self-test
 
 echo "rc_check: rustfmt"
 cargo fmt --all -- --check
@@ -92,4 +82,4 @@ archive="$(find "${out_dir}" -maxdepth 1 -type f -name 'log-query-mcp-v*.tar.gz'
 bash scripts/validate_release_package.sh "${archive}" "${out_dir}/SHA256SUMS"
 
 echo "rc_check: PASS"
-echo "rc_check: note: verifier self-test and run-manifest self-test/lifecycle are synthetic/non-live only; Direct SSH live/performance gates and target production evidence remain separate gates; ProxyCommand is deferred post-v2"
+echo "rc_check: note: Direct SSH live/performance gates and target production evidence remain separate gates; ProxyCommand and WSL helper evidence are deferred post-v2"

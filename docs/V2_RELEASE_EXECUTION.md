@@ -241,7 +241,6 @@ bash scripts/rc_check.sh
 
 - v1/v2 contract 验证。
 - Direct-only v2 release contract。
-- evidence verifier 和 run manifest 自测（synthetic only）。
 - rustfmt。
 - Clippy `-D warnings`。
 - 全部非 live Rust tests。
@@ -350,7 +349,7 @@ post-v2 完成标准：上述工作流真实执行并全部 PASS，没有孤儿 
 ### 阶段 E 实际状态（2026-08-18）
 
 - 状态：`POST-V2 DEFERRED`；下列结果是历史本地 live 证据，不是 v2.0 required gate，也不改变本次正式 scope decision。验证基于产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`。
-- scope decision 记录 commit：`b680f73`（本地独立工作分支，尚未推送到远端候选分支）。
+- scope decision 记录 commit：`b680f73`（本地独立工作分支，尚未推送到远端候选分支）；v2.0 RC 入口不再执行 post-v2 WSL evidence/manifest self-test。
 - 通过：ProxyCommand success/strict host key 2/2；Proxy auth 2/2；Proxy sync 5/5；failure matrix 8/8；mixed query 2/2；restart 3/3；generation 1/1；helper orphan 检查 PASS。
 - 失败处理：首次 mixed query 复用 Direct fixture 时缺少 `/home/logreader/logs/mixed.log`，导致两个测试出现 `SftpProtocol`；按 workflow 补充只读 `M7MIX remote` fixture 后复测 2/2 PASS。分类：测试夹具配置，不是产品代码失败。
 - `/usr/bin/nc` 作为管理员预置 ProxyCommand helper，SSH 仍使用 strict known_hosts、SFTP 只读操作；未增加 Exec/Shell 或任意路径能力。
