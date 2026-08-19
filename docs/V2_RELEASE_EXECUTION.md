@@ -8,17 +8,17 @@
 
 ### 本轮接手核对（2026-08-19）
 
-- 本地/远端独立工作分支：`release/v2-rc`，从 `origin/feat/v2-m1-backend-config` 创建；当前已发布 head 为 `5392d71f0421b456517a9be4c6e20504868a93d6`（短 SHA：`5392d71`）。冻结候选仍为 `848ae2d04a4f78d1acbe7d4708dbd48e4b183e1b`。
+- 本地/远端独立工作分支：`release/v2-rc`，从 `origin/feat/v2-m1-backend-config` 创建；当前已发布 head 为 `6ee2cd55e3fb30b229c02204d582b84dd1572401`（短 SHA：`6ee2cd5`）。冻结候选仍为 `848ae2d04a4f78d1acbe7d4708dbd48e4b183e1b`。
 - `origin/main` 仍为 `ce2abf108da6c7e8e709ddbaa3992066807f83c3`；候选远端引用同步后无变化。
 - 工作区原有用户修改已保留：`README.md` 的文档索引变更和本手册文件；未覆盖或丢弃。
 - PR #25：open、Draft、未合并，head/base 与上述候选和 `main` 一致。
-- 独立 scope PR #30：open、Draft、未合并，head=`release/v2-rc`/`5392d71`，base=`feat/v2-m1-backend-config`/`848ae2d`；仅用于在不改动候选分支的前提下运行本轮 v2.0 scope 变更的远端检查。
+- 独立 scope PR #30：open、Draft、未合并，head=`release/v2-rc`/`6ee2cd5`，base=`feat/v2-m1-backend-config`/`848ae2d`；仅用于在不改动候选分支的前提下运行本轮 v2.0 scope 变更的远端检查。
 - Issue #23：open；Billing/Spending Limit 阻塞已解除，但按手册保持打开，直到目标验收和最终发布门禁完成。
 - Issue #26：已由本轮 scope decision 关闭，state reason=`not_planned`；原因是 ProxyCommand 已移出 v2.0 范围，不代表功能 PASS。Issue #27：open；owner 已明确本 RC 不需要 `main` branch protection，并接受手册定义的 procedural fallback，但这不等于 Ready/merge/tag/release 授权。
 - 本轮 scope decision 已落地在本地独立分支 commit `b680f73`：v2.0 package/example/required gates 改为 Direct-only；ProxyCommand 实现、测试和历史设计文档保留为 post-v2。
 - v2.0 RC 入口移除 post-v2 WSL evidence/manifest synthetic self-test 的清理提交为 `a02bc63`；RC 仍保留 contracts、Rust、package/lifecycle 等 v2.0 检查。
 - 候选 `848ae2d` 的最新 Actions runs（Contracts `31455716785`、Rust `31455716801`、Release `31455716807`、M7 ProxyCommand `31455716797`、Proxy Auth `31455716800`、Proxy Sync `31455716795`、ProxyCommand Failures `31455716794`、Mixed Query `31455716806`、Proxy Generation `31455716792`、Proxy Restart `31455716812`）均为 `completed/failure`，对应 job 的 `steps=null`；未执行 checkout/build/test/package，按外部 runner/Billing 阻塞处理，不能视为代码失败或 PASS。
-- 独立 PR #30 的 required Actions 已在 public 仓库标准 `ubuntu-latest` runner 上真实执行并通过：Contracts `32212739893`、Rust `32212739852`、Release `32212739935`；对应 checkout、fmt/Clippy、Rust tests/build、transport smoke、healthcheck、upgrade/rollback、package/checksum 步骤均有成功记录。Release 的 tag-only publish job 按预期 skipped。ProxyCommand/M7 旧 workflow 不属于 v2.0 required gate。
+- 独立 PR #30 的 required Actions 已在 public 仓库标准 `ubuntu-latest` runner 上真实执行并通过：Contracts `32221530366`、Rust `32221530412`、Release `32221530335`；对应 checkout、fmt/Clippy、Rust tests/build、transport smoke、healthcheck、upgrade/rollback、package/checksum 步骤均有成功记录。Release 的 tag-only publish job 按预期 skipped。ProxyCommand/M7 旧 workflow 不属于 v2.0 required gate。
 - 本机 `gh` CLI 当前已登录 `liqiangcc`，Git 操作使用 HTTPS；仓库当前 visibility=`public`。候选 SHA、PR/Issue 状态以最新远端事实为准；独立 scope PR #30 已记录为新的远端验证入口。
 
 ## 1. 最终目标
@@ -507,7 +507,7 @@ TARGET=x86_64-unknown-linux-gnu bash scripts/rc_check.sh
 
 ### 阶段 I 实际状态（2026-08-19）
 
-- 状态：`待验收 / BLOCKED-ENV`；当前 WSL 的 systemd service bus 已在重启后确认正常，但没有可供本轮使用的目标 Linux 预生产/生产环境和操作者批准的生产安装、升级、重启或回滚入口。
+- 状态：`待验收 / BLOCKED-ENV`；只读复核确认当前 WSL systemd service bus 正常，`log-query-mcp.service` 为 `active/running`、User=`log-query-mcp`、MainPID=`42188`，监听 `127.0.0.1:8000`，`bash scripts/healthcheck.sh` 返回 PASS；但没有可供本轮使用的目标 Linux 预生产/生产环境和操作者批准的生产安装、升级、重启或回滚入口。
 - 已保留本地 RC、Direct live 和性能证据；这些证据不能代签目标内核/glibc、systemd、权限、轮转、中断恢复、实际 AI 客户端、升级/回滚等生产项目。ProxyCommand 历史证据不属于 v2.0 release gate。
 - 在获得目标环境和明确授权前，不执行安装、重启、升级、回滚或真实配置修改。
 
