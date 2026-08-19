@@ -355,6 +355,7 @@ post-v2 完成标准：上述工作流真实执行并全部 PASS，没有孤儿 
 - scope decision 记录 commit：`b680f73`（已包含在独立 `release/v2-rc` 分支，不写入远端候选分支）；v2.0 RC 入口不再执行 post-v2 WSL evidence/manifest self-test。
 - RC 入口最终清理 commit：`a02bc63`；本轮最终本地 RC 日志：`/tmp/log-query-mcp-v2-scope-rc-final.log`，末行明确为 `rc_check: PASS`。
 - 当前 head `aef4e628628c890fc8c840709899caecf6dd7d3a` 的最终本地 RC 复核日志：`/tmp/log-query-mcp-v2-final-rc-aef4e62.log`，末行明确为 `rc_check: PASS`；本次生成的临时 package 已移动到 `/tmp/log-query-mcp-final-rc-dist.VhLdao/`，未留在工作区。
+- 最新 head `5f30e13` 的 post-v2 `proxy-generation-live` run `32223714164` 因 job 达到 GitHub 最大执行时间 15 分钟而取消，步骤停在 `Install OpenSSH and stdio proxy helper`，未进入 ProxyCommand 产品测试；`proxy-sync-live` run `32223714103` 同样停在 helper 安装前置阶段。该基础设施超时不属于 v2.0 required gate，也不改变 v2.0 required Actions PASS。
 - 通过：ProxyCommand success/strict host key 2/2；Proxy auth 2/2；Proxy sync 5/5；failure matrix 8/8；mixed query 2/2；restart 3/3；generation 1/1；helper orphan 检查 PASS。
 - 失败处理：首次 mixed query 复用 Direct fixture 时缺少 `/home/logreader/logs/mixed.log`，导致两个测试出现 `SftpProtocol`；按 workflow 补充只读 `M7MIX remote` fixture 后复测 2/2 PASS。分类：测试夹具配置，不是产品代码失败。
 - `/usr/bin/nc` 作为管理员预置 ProxyCommand helper，SSH 仍使用 strict known_hosts、SFTP 只读操作；未增加 Exec/Shell 或任意路径能力。
