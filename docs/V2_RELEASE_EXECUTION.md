@@ -14,6 +14,7 @@
 - PR #25：open、Draft、未合并，head/base 与上述候选和 `main` 一致。
 - Issue #23：open，仍跟踪 GitHub Actions Billing/Spending Limit 与最终 CI/Performance/Release 门禁恢复。
 - Issue #26：当前仍 open，待本轮正式标记为 ProxyCommand post-v2 延后并关闭；Issue #27：open，`main` 发布保护/程序化 fallback 尚未完成。
+- 本轮 scope decision 已落地在本地独立分支 commit `b680f73`：v2.0 package/example/required gates 改为 Direct-only；ProxyCommand 实现、测试和历史设计文档保留为 post-v2。
 - 候选 `848ae2d` 的最新 Actions runs（Contracts `31455716785`、Rust `31455716801`、Release `31455716807`、M7 ProxyCommand `31455716797`、Proxy Auth `31455716800`、Proxy Sync `31455716795`、ProxyCommand Failures `31455716794`、Mixed Query `31455716806`、Proxy Generation `31455716792`、Proxy Restart `31455716812`）均为 `completed/failure`，对应 job 的 `steps=null`；未执行 checkout/build/test/package，按外部 runner/Billing 阻塞处理，不能视为代码失败或 PASS。
 - 本机 `gh` token 已失效且无法访问 GitHub API；上述 PR、Issue 和 Actions 事实已通过连接器重新核对。发布手册中的候选 SHA、PR/Issue 阻塞状态没有过期，无需改写为其他远端事实。
 
@@ -349,6 +350,7 @@ post-v2 完成标准：上述工作流真实执行并全部 PASS，没有孤儿 
 ### 阶段 E 实际状态（2026-08-18）
 
 - 状态：`POST-V2 DEFERRED`；下列结果是历史本地 live 证据，不是 v2.0 required gate，也不改变本次正式 scope decision。验证基于产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`。
+- scope decision 记录 commit：`b680f73`（本地独立工作分支，尚未推送到远端候选分支）。
 - 通过：ProxyCommand success/strict host key 2/2；Proxy auth 2/2；Proxy sync 5/5；failure matrix 8/8；mixed query 2/2；restart 3/3；generation 1/1；helper orphan 检查 PASS。
 - 失败处理：首次 mixed query 复用 Direct fixture 时缺少 `/home/logreader/logs/mixed.log`，导致两个测试出现 `SftpProtocol`；按 workflow 补充只读 `M7MIX remote` fixture 后复测 2/2 PASS。分类：测试夹具配置，不是产品代码失败。
 - `/usr/bin/nc` 作为管理员预置 ProxyCommand helper，SSH 仍使用 strict known_hosts、SFTP 只读操作；未增加 Exec/Shell 或任意路径能力。
