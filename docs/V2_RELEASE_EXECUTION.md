@@ -354,6 +354,7 @@ post-v2 完成标准：上述工作流真实执行并全部 PASS，没有孤儿 
 - 状态：`POST-V2 DEFERRED`；下列结果是历史本地 live 证据，不是 v2.0 required gate，也不改变本次正式 scope decision。验证基于产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`。
 - scope decision 记录 commit：`b680f73`（已包含在独立 `release/v2-rc` 分支，不写入远端候选分支）；v2.0 RC 入口不再执行 post-v2 WSL evidence/manifest self-test。
 - RC 入口最终清理 commit：`a02bc63`；本轮最终本地 RC 日志：`/tmp/log-query-mcp-v2-scope-rc-final.log`，末行明确为 `rc_check: PASS`。
+- 当前 head `aef4e628628c890fc8c840709899caecf6dd7d3a` 的最终本地 RC 复核日志：`/tmp/log-query-mcp-v2-final-rc-aef4e62.log`，末行明确为 `rc_check: PASS`；本次生成的临时 package 已移动到 `/tmp/log-query-mcp-final-rc-dist.VhLdao/`，未留在工作区。
 - 通过：ProxyCommand success/strict host key 2/2；Proxy auth 2/2；Proxy sync 5/5；failure matrix 8/8；mixed query 2/2；restart 3/3；generation 1/1；helper orphan 检查 PASS。
 - 失败处理：首次 mixed query 复用 Direct fixture 时缺少 `/home/logreader/logs/mixed.log`，导致两个测试出现 `SftpProtocol`；按 workflow 补充只读 `M7MIX remote` fixture 后复测 2/2 PASS。分类：测试夹具配置，不是产品代码失败。
 - `/usr/bin/nc` 作为管理员预置 ProxyCommand helper，SSH 仍使用 strict known_hosts、SFTP 只读操作；未增加 Exec/Shell 或任意路径能力。
@@ -479,10 +480,11 @@ TARGET=x86_64-unknown-linux-gnu bash scripts/rc_check.sh
 
 完成标准：package validator、健康检查和全部生命周期场景 PASS。
 
-### 阶段 H 实际状态（2026-08-18）
+### 阶段 H 实际状态（2026-08-19）
 
 - 状态：`PASS（本地 RC/package/lifecycle gate 已执行）`；产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`。
 - `scripts/rc_check.sh` 已通过 package validator、healthcheck failure matrix、upgrade/rollback matrix 和包内文件/权限检查；完整日志：`/tmp/log-query-mcp-rc-check-d608e94.log`。
+- 在独立分支当前 head `aef4e62` 上再次执行 `scripts/rc_check.sh`，完整日志 `/tmp/log-query-mcp-v2-final-rc-aef4e62.log`，末行 `rc_check: PASS`；本次为文档/发布状态变更后的最终 RC 复核。
 - RC 包：`/tmp/log-query-mcp-dist-d608e94/rc-check/log-query-mcp-v0.2.0-x86_64-unknown-linux-gnu.tar.gz`；外部 SHA256：`cca89fd56692c7dd18dd05c690b95179e8b0591c7d3ea243bc63e199cee876e4`。包内 `BUILDINFO` 已固定版本 `0.2.0`、target 和候选 commit。
 - 该状态只覆盖隔离本地 package/lifecycle gate；未对生产目标执行安装、升级、重启或回滚，也未替代目标 Linux/WSL 验收。
 
