@@ -11,8 +11,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::{
-    FileIdentity, MAX_SCAN_BYTES, MAX_SCAN_KEYWORD_CHARS, MAX_SCAN_RESULTS, QuerySummary,
-    SourceFileSnapshot,
+    FileIdentity, GenerationPin, MAX_SCAN_BYTES, MAX_SCAN_KEYWORD_CHARS, MAX_SCAN_RESULTS,
+    QuerySummary, SourceFileSnapshot,
 };
 
 const CURSOR_PREFIX: &str = "cur_";
@@ -630,6 +630,14 @@ impl MatchReferenceStore {
     }
 
     pub fn insert(&self, data: MatchReferenceData) -> Result<String, QueryStateError> {
+        self.insert_with_pin(data, None)
+    }
+
+    pub fn insert_with_pin(
+        &self,
+        data: MatchReferenceData,
+        generation_pin: Option<GenerationPin>,
+    ) -> Result<String, QueryStateError> {
         data.validate()?;
         let now = Instant::now();
         let expires_at = expiration(now, self.ttl)?;
@@ -640,13 +648,25 @@ impl MatchReferenceStore {
         }
         let token = unique_token(MATCH_REFERENCE_PREFIX, &state.entries);
         state.order.push_back(token.clone());
-        state
-            .entries
-            .insert(token.clone(), StoredMatch { data, expires_at });
+        state.entries.insert(
+            token.clone(),
+            StoredMatch {
+                data,
+                generation_pin,
+                expires_at,
+            },
+        );
         Ok(token)
     }
 
     pub fn resolve(&self, token: &str) -> Result<MatchReferenceData, QueryStateError> {
+        self.resolve_with_pin(token).map(|(data, _)| data)
+    }
+
+    pub fn resolve_with_pin(
+        &self,
+        token: &str,
+    ) -> Result<(MatchReferenceData, Option<GenerationPin>), QueryStateError> {
         validate_token(token, MATCH_REFERENCE_PREFIX)?;
         let now = Instant::now();
         let mut state = self.lock_state();
@@ -654,7 +674,7 @@ impl MatchReferenceStore {
         state
             .entries
             .get(token)
-            .map(|entry| entry.data.clone())
+            .map(|entry| (entry.data.clone(), entry.generation_pin.clone()))
             .ok_or(QueryStateError::UnknownOrExpired)
     }
 
@@ -711,6 +731,7 @@ impl MatchStoreState {
 #[derive(Debug)]
 struct StoredMatch {
     data: MatchReferenceData,
+    generation_pin: Option<GenerationPin>,
     expires_at: Instant,
 }
 

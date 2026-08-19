@@ -17,12 +17,17 @@ install_root="/opt/log-query-mcp"
 bin_dir="${install_root}/bin"
 config_dir="/etc/log-query-mcp"
 config_path="${config_dir}/config.json"
+data_dir="/var/lib/log-query-mcp"
+cache_dir="${data_dir}/cache"
 unit_path="/etc/systemd/system/log-query-mcp.service"
 
 [[ -x "${package_root}/bin/log-query-mcp" ]] || die "missing ${package_root}/bin/log-query-mcp"
 [[ -x "${package_root}/bin/log-query-mcp-stdio" ]] || die "missing ${package_root}/bin/log-query-mcp-stdio"
 [[ -f "${package_root}/systemd/log-query-mcp.service" ]] || die "missing systemd unit"
 [[ -f "${package_root}/examples/log-query-mcp.v1.json" ]] || die "missing example config"
+[[ -f "${package_root}/BUILDINFO" ]] || die "missing ${package_root}/BUILDINFO"
+build_git_commit="$(sed -n 's/^git_commit=//p' "${package_root}/BUILDINFO")"
+[[ "${build_git_commit}" =~ ^[0-9a-f]{40,64}$ ]] || die "BUILDINFO git_commit is missing or not traceable"
 
 if ! getent group "${service_group}" >/dev/null; then
   groupadd --system "${service_group}"
@@ -39,11 +44,10 @@ fi
 install -d -m 0755 "${bin_dir}"
 install -m 0755 "${package_root}/bin/log-query-mcp" "${bin_dir}/log-query-mcp"
 install -m 0755 "${package_root}/bin/log-query-mcp-stdio" "${bin_dir}/log-query-mcp-stdio"
-if [[ -f "${package_root}/BUILDINFO" ]]; then
-  install -m 0644 "${package_root}/BUILDINFO" "${install_root}/BUILDINFO"
-fi
+install -m 0644 "${package_root}/BUILDINFO" "${install_root}/BUILDINFO"
 
 install -d -m 0750 -o root -g "${service_group}" "${config_dir}"
+install -d -m 0700 -o "${service_user}" -g "${service_group}" "${data_dir}" "${cache_dir}"
 if [[ ! -e "${config_path}" ]]; then
   install -m 0640 -o root -g "${service_group}" "${package_root}/examples/log-query-mcp.v1.json" "${config_path}"
   echo "install: wrote example config to ${config_path}" >&2

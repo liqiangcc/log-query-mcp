@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
     sync::Arc,
@@ -8,9 +8,12 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    AppConfig, ConfigValidationError, DirectoryDiscoveryRule, DirectoryRule, FileIdentity,
-    LimitsConfig, SafeFile, SafeOpenError, SafeRoot, SourceDiscoveryError, TimestampRule,
-    discover_regular_files,
+    AppConfig, AppConfigV2, BackendType, CacheCoverage, CacheStore, CacheStoreError,
+    ConfigDocument, ConfigV2ValidationError, ConfigValidationError, FileIdentity, GenerationPin,
+    LimitsConfig, SafeFile, SafeOpenError, SourceDiscoveryError, SyncEngine, SyncError,
+    TimestampRule,
+    backend::{LocalBackend, RemoteBackend, SnapshotFile, SourceBackend},
+    transport::{SshConnectionManager, SshTransportError},
 };
 
 pub const MAX_REGISTERED_FILES_PER_SOURCE: usize = 10_000;
@@ -32,6 +35,8 @@ pub struct SourceFileSnapshot {
     relative_path: PathBuf,
     identity: FileIdentity,
     size_at_snapshot: u64,
+    coverage: Option<CacheCoverage>,
+    generation_pin: Option<GenerationPin>,
 }
 
 impl SourceFileSnapshot {
@@ -61,6 +66,25 @@ impl SourceFileSnapshot {
     }
 
     #[must_use]
+    pub fn coverage(&self) -> Option<&CacheCoverage> {
+        self.coverage.as_ref()
+    }
+
+    #[must_use]
+    pub fn has_complete_coverage(&self) -> bool {
+        match self.coverage.as_ref() {
+            None | Some(CacheCoverage::Full) => true,
+            Some(CacheCoverage::Tail { start_offset })
+            | Some(CacheCoverage::FromNow { start_offset }) => *start_offset == 0,
+        }
+    }
+
+    #[must_use]
+    pub fn generation_pin(&self) -> Option<&GenerationPin> {
+        self.generation_pin.as_ref()
+    }
+
+    #[must_use]
     pub fn display_name(&self) -> String {
         self.relative_path.to_string_lossy().into_owned()
     }
@@ -69,10 +93,7 @@ impl SourceFileSnapshot {
 #[derive(Debug)]
 pub struct ConfiguredSource {
     descriptor: SourceDescriptor,
-    root: Arc<SafeRoot>,
-    explicit_files: Vec<PathBuf>,
-    directory_configs: Vec<DirectoryRule>,
-    discovery_rules: Vec<DirectoryDiscoveryRule>,
+    backend: SourceBackend,
     timestamp_rule: Option<TimestampRule>,
 }
 
@@ -98,105 +119,99 @@ impl ConfiguredSource {
             });
         }
 
-        let mut candidates = BTreeMap::<PathBuf, (FileIdentity, u64)>::new();
-        for (index, relative_path) in self.explicit_files.iter().enumerate() {
-            let file = self
-                .root
-                .open_regular_file(relative_path)
-                .map_err(|source| SourceRegistryError::ExplicitFileUnavailable {
-                    source_id: self.descriptor.source_id.clone(),
-                    file_index: index,
-                    source,
-                })?;
-            candidates.insert(relative_path.clone(), (file.identity(), file.size()));
-        }
+        let snapshots = self
+            .backend
+            .snapshot_files(&self.descriptor.source_id, max_files)?;
 
-        let discovered = discover_regular_files(&self.root, &self.discovery_rules, max_files)
-            .map_err(|source| SourceRegistryError::DiscoveryFailed {
+        Ok(snapshots
+            .into_iter()
+            .enumerate()
+            .map(|(index, snapshot)| SourceFileSnapshot {
                 source_id: self.descriptor.source_id.clone(),
-                source,
-            })?;
-        for file in discovered {
-            candidates
-                .entry(file.relative_path)
-                .or_insert((file.identity, file.size));
-        }
+                file_id: stable_file_id(&self.descriptor.source_id, &snapshot.relative_path, index),
+                relative_path: snapshot.relative_path,
+                identity: snapshot.identity,
+                size_at_snapshot: snapshot.size_at_snapshot,
+                coverage: snapshot.coverage,
+                generation_pin: snapshot.generation_pin,
+            })
+            .collect())
+    }
 
-        if candidates.len() > max_files {
+    pub async fn query_snapshot_files(
+        &self,
+        max_files: usize,
+    ) -> Result<Vec<SourceFileSnapshot>, SourceRegistryError> {
+        if max_files == 0 || max_files > MAX_REGISTERED_FILES_PER_SOURCE {
             return Err(SourceRegistryError::TooManyFiles {
                 source_id: self.descriptor.source_id.clone(),
                 limit: max_files,
             });
         }
-
-        Ok(candidates
+        let snapshots = self
+            .backend
+            .query_snapshot_files(&self.descriptor.source_id, max_files)
+            .await?;
+        Ok(snapshots
             .into_iter()
             .enumerate()
-            .map(
-                |(index, (relative_path, (identity, size_at_snapshot)))| SourceFileSnapshot {
-                    source_id: self.descriptor.source_id.clone(),
-                    file_id: stable_file_id(&self.descriptor.source_id, &relative_path, index),
-                    relative_path,
-                    identity,
-                    size_at_snapshot,
-                },
-            )
+            .map(|(index, snapshot)| SourceFileSnapshot {
+                source_id: self.descriptor.source_id.clone(),
+                file_id: stable_file_id(&self.descriptor.source_id, &snapshot.relative_path, index),
+                relative_path: snapshot.relative_path,
+                identity: snapshot.identity,
+                size_at_snapshot: snapshot.size_at_snapshot,
+                coverage: snapshot.coverage,
+                generation_pin: snapshot.generation_pin,
+            })
             .collect())
     }
 
     pub fn open_snapshot_file(
         &self,
         snapshot: &SourceFileSnapshot,
-    ) -> Result<SafeFile, SourceRegistryError> {
+    ) -> Result<SnapshotFile, SourceRegistryError> {
         if snapshot.source_id != self.descriptor.source_id {
             return Err(SourceRegistryError::SnapshotSourceMismatch);
         }
-        if !self.path_is_configured(&snapshot.relative_path) {
-            return Err(SourceRegistryError::PathNotConfigured);
-        }
 
-        let file = self
-            .root
-            .open_regular_file(&snapshot.relative_path)
-            .map_err(|source| SourceRegistryError::FileUnavailable {
-                source_id: self.descriptor.source_id.clone(),
-                source,
-            })?;
-        if file.identity() != snapshot.identity || file.size() < snapshot.size_at_snapshot {
-            return Err(SourceRegistryError::FileChanged {
-                source_id: self.descriptor.source_id.clone(),
-                file_id: snapshot.file_id.clone(),
-            });
-        }
-        Ok(file)
+        self.backend.open_snapshot_file(
+            &self.descriptor.source_id,
+            &snapshot.relative_path,
+            snapshot.identity,
+            snapshot.size_at_snapshot,
+            &snapshot.file_id,
+            snapshot.generation_pin.as_ref(),
+        )
+    }
+
+    pub fn open_referenced_file(
+        &self,
+        relative_path: impl AsRef<Path>,
+        identity: FileIdentity,
+        size_at_match: u64,
+        file_id: &str,
+    ) -> Result<SnapshotFile, SourceRegistryError> {
+        self.backend.open_referenced_file(
+            &self.descriptor.source_id,
+            relative_path.as_ref(),
+            identity,
+            size_at_match,
+            file_id,
+        )
     }
 
     pub fn open_configured_file(
         &self,
         relative_path: impl AsRef<Path>,
     ) -> Result<SafeFile, SourceRegistryError> {
-        let relative_path = relative_path.as_ref();
-        if !self.path_is_configured(relative_path) {
-            return Err(SourceRegistryError::PathNotConfigured);
-        }
-
-        self.root
-            .open_regular_file(relative_path)
-            .map_err(|source| SourceRegistryError::FileUnavailable {
-                source_id: self.descriptor.source_id.clone(),
-                source,
-            })
+        self.backend
+            .open_configured_file(&self.descriptor.source_id, relative_path.as_ref())
     }
 
     #[must_use]
     pub fn path_is_configured(&self, relative_path: &Path) -> bool {
-        self.explicit_files
-            .iter()
-            .any(|candidate| candidate == relative_path)
-            || self
-                .directory_configs
-                .iter()
-                .any(|rule| directory_rule_allows(rule, relative_path))
+        self.backend.path_is_configured(relative_path)
     }
 }
 
@@ -208,6 +223,86 @@ pub struct SourceRegistry {
 }
 
 impl SourceRegistry {
+    pub fn from_document(config: ConfigDocument) -> Result<Self, SourceRegistryError> {
+        match config {
+            ConfigDocument::V1(config) => Self::from_config(config),
+            ConfigDocument::V2(config) => Self::from_config_v2(config),
+        }
+    }
+
+    pub fn from_config_v2(config: AppConfigV2) -> Result<Self, SourceRegistryError> {
+        config.validate()?;
+        let limits = config.limits.local_limits();
+        let has_remote = config
+            .sources
+            .iter()
+            .any(|source| source.enabled && source.backend.backend_type == BackendType::Ssh);
+        let remote_runtime = if has_remote {
+            let cache_config = config
+                .cache
+                .as_ref()
+                .ok_or(SourceRegistryError::RemoteConfigurationInvalid)?;
+            let cache = CacheStore::from_config(cache_config)
+                .map_err(SourceRegistryError::CacheInitialization)?;
+            let connections = SshConnectionManager::from_config(&config)
+                .map_err(SourceRegistryError::TransportInitialization)?;
+            let sync = SyncEngine::new(
+                cache.clone(),
+                connections.clone(),
+                config.limits.max_sync_bytes_per_query,
+            )
+            .map_err(SourceRegistryError::SyncInitialization)?;
+            Some((cache, connections, sync))
+        } else {
+            None
+        };
+
+        let mut sources = Vec::new();
+        let mut by_id = HashMap::new();
+        for source_config in config.sources.into_iter().filter(|source| source.enabled) {
+            let source_id = source_config.source_id.clone();
+            let backend = match source_config.backend.backend_type {
+                BackendType::Local => SourceBackend::Local(LocalBackend::from_config(
+                    &source_id,
+                    &source_config.to_v1_config(),
+                )?),
+                BackendType::Ssh => {
+                    let (cache, connections, sync) = remote_runtime
+                        .as_ref()
+                        .ok_or(SourceRegistryError::RemoteConfigurationInvalid)?;
+                    SourceBackend::Remote(Box::new(RemoteBackend::new(
+                        source_config.clone(),
+                        cache.clone(),
+                        sync.clone(),
+                        connections.clone(),
+                        config.limits.max_remote_files_per_source,
+                    )?))
+                }
+            };
+            let configured = Arc::new(ConfiguredSource {
+                descriptor: SourceDescriptor {
+                    source_id: source_config.source_id.clone(),
+                    name: source_config.name,
+                    description: source_config.description,
+                    service: source_config.service,
+                    environment: source_config.environment,
+                    tags: source_config.tags,
+                },
+                backend,
+                timestamp_rule: source_config.timestamp_rule,
+            });
+            configured.backend.startup_validate(&source_id)?;
+            let index = sources.len();
+            by_id.insert(source_id, index);
+            sources.push(configured);
+        }
+        Ok(Self {
+            sources,
+            by_id,
+            limits,
+        })
+    }
+
     pub fn from_config(config: AppConfig) -> Result<Self, SourceRegistryError> {
         config.validate()?;
         let limits = config.limits.clone();
@@ -216,27 +311,8 @@ impl SourceRegistry {
 
         for source_config in config.sources.into_iter().filter(|source| source.enabled) {
             let source_id = source_config.source_id.clone();
-            let root = Arc::new(SafeRoot::open(&source_config.root).map_err(|source| {
-                SourceRegistryError::RootUnavailable {
-                    source_id: source_id.clone(),
-                    source,
-                }
-            })?);
-
-            let discovery_rules = source_config
-                .directories
-                .iter()
-                .enumerate()
-                .map(|(index, rule)| {
-                    DirectoryDiscoveryRule::from_config(rule).map_err(|source| {
-                        SourceRegistryError::DirectoryRuleInvalid {
-                            source_id: source_id.clone(),
-                            rule_index: index,
-                            source,
-                        }
-                    })
-                })
-                .collect::<Result<Vec<_>, SourceRegistryError>>()?;
+            let backend =
+                SourceBackend::Local(LocalBackend::from_config(&source_id, &source_config)?);
 
             let configured = Arc::new(ConfiguredSource {
                 descriptor: SourceDescriptor {
@@ -247,16 +323,13 @@ impl SourceRegistry {
                     environment: source_config.environment,
                     tags: source_config.tags,
                 },
-                root,
-                explicit_files: source_config.files,
-                directory_configs: source_config.directories,
-                discovery_rules,
+                backend,
                 timestamp_rule: source_config.timestamp_rule,
             });
 
-            // Fail startup for unsafe explicit files, invalid directory roots,
+            // Fail startup for unsafe local explicit files, invalid directory roots,
             // or a discovery result beyond the absolute v1 hard limit.
-            configured.snapshot_files(MAX_REGISTERED_FILES_PER_SOURCE)?;
+            configured.backend.startup_validate(&source_id)?;
 
             let index = sources.len();
             by_id.insert(source_id, index);
@@ -315,30 +388,6 @@ impl SourceRegistry {
     }
 }
 
-fn directory_rule_allows(rule: &DirectoryRule, relative_path: &Path) -> bool {
-    let Some(file_name) = relative_path.file_name().and_then(|value| value.to_str()) else {
-        return false;
-    };
-    if !rule
-        .include_suffixes
-        .iter()
-        .any(|suffix| file_name.ends_with(suffix))
-    {
-        return false;
-    }
-
-    let remainder = if rule.path == Path::new(".") {
-        relative_path
-    } else {
-        let Ok(remainder) = relative_path.strip_prefix(&rule.path) else {
-            return false;
-        };
-        remainder
-    };
-    let component_count = remainder.components().count();
-    component_count > 0 && (rule.recursive || component_count == 1)
-}
-
 fn stable_file_id(source_id: &str, relative_path: &Path, index: usize) -> String {
     const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -361,6 +410,74 @@ fn stable_file_id(source_id: &str, relative_path: &Path, index: usize) -> String
 pub enum SourceRegistryError {
     #[error(transparent)]
     InvalidConfiguration(#[from] ConfigValidationError),
+
+    #[error(transparent)]
+    InvalidV2Configuration(#[from] ConfigV2ValidationError),
+
+    #[error("configured source backend is not available yet: {source_id}/{backend}")]
+    BackendUnavailable {
+        source_id: String,
+        backend: &'static str,
+    },
+
+    #[error("configured source backend requires asynchronous query preparation")]
+    AsyncBackendRequired,
+
+    #[error("remote source configuration is invalid")]
+    RemoteConfigurationInvalid,
+
+    #[error("remote recursive directory discovery is not supported in the v2 MVP: {source_id}")]
+    RemoteRecursiveDiscoveryUnsupported { source_id: String },
+
+    #[error("remote configured path is invalid")]
+    RemotePathInvalid,
+
+    #[error("remote explicit file is not a regular file: {source_id}/{file_index}")]
+    RemoteExplicitFileNotRegular {
+        source_id: String,
+        file_index: usize,
+    },
+
+    #[error("remote snapshot is missing its cache generation pin")]
+    RemoteSnapshotMissingPin,
+
+    #[error("failed to initialize remote cache")]
+    CacheInitialization(#[source] CacheStoreError),
+
+    #[error("failed to initialize SSH transport")]
+    TransportInitialization(#[source] SshTransportError),
+
+    #[error("failed to initialize remote synchronization")]
+    SyncInitialization(#[source] SyncError),
+
+    #[error("remote source transport is unavailable: {source_id}")]
+    RemoteTransport {
+        source_id: String,
+        #[source]
+        source: SshTransportError,
+    },
+
+    #[error("remote source synchronization failed: {source_id}")]
+    RemoteSync {
+        source_id: String,
+        #[source]
+        source: SyncError,
+    },
+
+    #[error("remote refresh worker failed: {source_id}")]
+    RemoteTaskJoin {
+        source_id: String,
+        #[source]
+        source: tokio::task::JoinError,
+    },
+
+    #[error("cached generation is unavailable: {source_id}/{file_id}")]
+    CachedGenerationUnavailable {
+        source_id: String,
+        file_id: String,
+        #[source]
+        source: CacheStoreError,
+    },
 
     #[error("configured log source root is unavailable: {source_id}")]
     RootUnavailable {
@@ -423,7 +540,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use crate::{CONFIG_VERSION, Encoding};
+    use crate::{CONFIG_VERSION, DirectoryRule, Encoding};
 
     use super::*;
 

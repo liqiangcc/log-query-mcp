@@ -66,7 +66,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
 if [[ -n "${tag}" ]]; then
-  scripts/check_release_tag.sh "${tag}"
+  bash scripts/check_release_tag.sh "${tag}"
 fi
 
 version="$(
@@ -85,10 +85,13 @@ fi
 
 [[ -x "${bin_dir}/log-query-mcp" ]] || die "missing executable ${bin_dir}/log-query-mcp"
 [[ -x "${bin_dir}/log-query-mcp-stdio" ]] || die "missing executable ${bin_dir}/log-query-mcp-stdio"
-[[ -f examples/log-query-mcp.v1.json ]] || die "missing example config"
+[[ -f examples/log-query-mcp.v1.json ]] || die "missing v1 example config"
+[[ -f examples/log-query-mcp.v2.remote.json ]] || die "missing v2 remote example config"
+[[ -f schemas/log-query-mcp-config-v2.schema.json ]] || die "missing v2 machine config schema"
 [[ -f systemd/log-query-mcp.service ]] || die "missing systemd unit"
-[[ -f scripts/install.sh ]] || die "missing install script"
-[[ -f scripts/uninstall.sh ]] || die "missing uninstall script"
+for script in install.sh uninstall.sh upgrade.sh rollback.sh healthcheck.sh; do
+  [[ -f "scripts/${script}" ]] || die "missing ${script}"
+done
 
 rm -rf "${out_dir:?}/${package_name}"
 mkdir -p "${out_dir}/${package_name}/bin"
@@ -96,21 +99,33 @@ mkdir -p "${out_dir}/${package_name}/bin"
 install -m 0755 "${bin_dir}/log-query-mcp" "${out_dir}/${package_name}/bin/log-query-mcp"
 install -m 0755 "${bin_dir}/log-query-mcp-stdio" "${out_dir}/${package_name}/bin/log-query-mcp-stdio"
 install -D -m 0644 examples/log-query-mcp.v1.json "${out_dir}/${package_name}/examples/log-query-mcp.v1.json"
+install -D -m 0644 examples/log-query-mcp.v2.remote.json "${out_dir}/${package_name}/examples/log-query-mcp.v2.remote.json"
+install -D -m 0644 schemas/log-query-mcp-config-v2.schema.json "${out_dir}/${package_name}/schemas/log-query-mcp-config-v2.schema.json"
 install -D -m 0644 systemd/log-query-mcp.service "${out_dir}/${package_name}/systemd/log-query-mcp.service"
-install -D -m 0755 scripts/install.sh "${out_dir}/${package_name}/scripts/install.sh"
-install -D -m 0755 scripts/uninstall.sh "${out_dir}/${package_name}/scripts/uninstall.sh"
+for script in install.sh uninstall.sh upgrade.sh rollback.sh healthcheck.sh; do
+  install -D -m 0755 "scripts/${script}" "${out_dir}/${package_name}/scripts/${script}"
+done
+install -D -m 0644 README.md "${out_dir}/${package_name}/README.md"
 
-for doc in docs/INSTALL.md docs/OPERATIONS.md docs/PRODUCTION_CHECKLIST.md; do
+for doc in \
+  docs/INSTALL.md \
+  docs/OPERATIONS.md \
+  docs/PRODUCTION_CHECKLIST.md \
+  docs/CONFIG_SCHEMA_V2.md \
+  docs/M6_PERFORMANCE_BASELINE_V2.md \
+  docs/M6_FINAL_BASELINE_V2.md \
+  docs/RELEASE_READINESS_V2.md; do
   if [[ -f "${doc}" ]]; then
     install -D -m 0644 "${doc}" "${out_dir}/${package_name}/${doc}"
   elif [[ "${require_docs}" -eq 1 ]]; then
     die "missing required production doc ${doc}"
   else
-    echo "package_release: warning: ${doc} not present; PR E will add production docs" >&2
+    echo "package_release: warning: ${doc} not present" >&2
   fi
 done
 
-git_commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+git_commit="$(git rev-parse HEAD 2>/dev/null)" || die "unable to resolve release git commit"
+[[ "${git_commit}" =~ ^[0-9a-f]{40,64}$ ]] || die "release git commit is not traceable"
 git_ref="$(git describe --always --dirty --tags 2>/dev/null || echo unknown)"
 built_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 rustc_version="$(rustc --version)"

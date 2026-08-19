@@ -1,7 +1,6 @@
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashSet},
-    fs::File,
     io::{ErrorKind, Read, Seek, SeekFrom},
     sync::Arc,
     time::{Duration, Instant},
@@ -169,7 +168,8 @@ impl QueryEngine {
         check_interrupted(&request.cancellation, deadline)?;
 
         let selected_sources = self.registry.selected(&request.source_ids)?;
-        let candidates = build_candidates(&selected_sources, limits.max_scan_files_per_query)?;
+        let candidates =
+            build_candidates(&selected_sources, limits.max_scan_files_per_query).await?;
 
         let mut summary = QuerySummary {
             files_considered: candidates.len(),
@@ -210,7 +210,7 @@ impl QueryEngine {
                 };
 
                 let safe_file = candidate.source.open_snapshot_file(&candidate.snapshot)?;
-                let mut file = safe_file.into_file();
+                let mut file = safe_file;
                 seek_to_scan_position(&mut file, position, candidate.snapshot.size_at_snapshot())?;
 
                 let chunk_result_limit = chunk_result_limit(limits.max_line_bytes);
@@ -307,7 +307,7 @@ struct FileCandidate {
     timestamp_parser: Option<TimestampParser>,
 }
 
-fn build_candidates(
+async fn build_candidates(
     sources: &[Arc<ConfiguredSource>],
     max_files: usize,
 ) -> Result<Vec<FileCandidate>, QueryError> {
@@ -318,7 +318,13 @@ fn build_candidates(
         if remaining == 0 {
             return Err(QueryError::FileLimitExceeded);
         }
-        let snapshots = source.snapshot_files(remaining)?;
+        let snapshots = source.query_snapshot_files(remaining).await?;
+        if snapshots
+            .iter()
+            .any(|snapshot| !snapshot.has_complete_coverage())
+        {
+            return Err(QueryError::CacheScopeExceeded);
+        }
         let timestamp_parser = source
             .timestamp_rule()
             .map(TimestampParser::new)
@@ -357,12 +363,7 @@ fn process_matches(
     }
 
     let mut prefix_file = if candidate.timestamp_parser.is_some() {
-        Some(
-            candidate
-                .source
-                .open_snapshot_file(&candidate.snapshot)?
-                .into_file(),
-        )
+        Some(candidate.source.open_snapshot_file(&candidate.snapshot)?)
     } else {
         None
     };
@@ -566,8 +567,8 @@ fn check_interrupted(
     Ok(())
 }
 
-fn seek_to_scan_position(
-    file: &mut File,
+fn seek_to_scan_position<R: Read + Seek>(
+    file: &mut R,
     position: ScanPosition,
     snapshot_size: u64,
 ) -> Result<(), QueryError> {
@@ -598,8 +599,8 @@ fn validated_next_position(
     Ok(next)
 }
 
-fn read_line_prefix(
-    file: &mut File,
+fn read_line_prefix<R: Read + Seek>(
+    file: &mut R,
     line_start_offset: u64,
     snapshot_size: u64,
     maximum_bytes: usize,
@@ -744,6 +745,9 @@ pub enum QueryError {
 
     #[error("scanner stopped without a safe continuation position")]
     UnsafeContinuation,
+
+    #[error("query cannot prove that the local cache covers the requested remote log scope")]
+    CacheScopeExceeded,
 
     #[error("query resource counter overflowed")]
     ResourceCounterOverflow,

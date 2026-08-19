@@ -1,0 +1,90 @@
+name: M7 Proxy Generation
+
+on:
+  push:
+    branches:
+      - "feat/**"
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/**"
+      - "tests/m7_proxy_generation_live.rs"
+      - ".github/workflows/m7-proxy-generation.yml"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/**"
+      - "tests/m7_proxy_generation_live.rs"
+      - ".github/workflows/m7-proxy-generation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proxy-generation-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install OpenSSH and stdio proxy helper
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server netcat-openbsd
+          sudo mkdir -p /run/sshd /tmp/log-query-mcp-m7-generation
+          sudo chown "$USER":"$(id -gn)" /tmp/log-query-mcp-m7-generation
+          test -x /usr/bin/nc
+
+      - name: Prepare generation-consistency SSH fixture
+        run: |
+          sudo useradd -m -s /bin/bash logreader
+          echo 'logreader:test-password' | sudo chpasswd
+          sudo mkdir -p /home/logreader/logs
+          printf 'M7CURSOR one\nM7CURSOR two\nM7KEEP source-a-old-generation\n' | sudo tee /home/logreader/logs/proxy-a.log >/dev/null
+          printf 'M7KEEP source-b-stable\nM7B source-b-only\n' | sudo tee /home/logreader/logs/proxy-b.log >/dev/null
+          sudo chown -R logreader:logreader /home/logreader/logs
+          sudo chmod 666 /home/logreader/logs/proxy-a.log /home/logreader/logs/proxy-b.log
+
+          sudo ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-m7-generation/ssh_host_ed25519_key
+          sudo tee /tmp/log-query-mcp-m7-generation/sshd_config >/dev/null <<'EOF'
+          Port 2240
+          ListenAddress 127.0.0.1
+          HostKey /tmp/log-query-mcp-m7-generation/ssh_host_ed25519_key
+          PidFile /tmp/log-query-mcp-m7-generation/sshd.pid
+          PasswordAuthentication yes
+          PubkeyAuthentication no
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          StrictModes yes
+          AllowUsers logreader
+          Subsystem sftp internal-sftp
+          LogLevel VERBOSE
+          EOF
+
+          sudo /usr/sbin/sshd -f /tmp/log-query-mcp-m7-generation/sshd_config -E /tmp/log-query-mcp-m7-generation/sshd.log
+          ssh-keyscan -t ed25519 -p 2240 127.0.0.1 > /tmp/log-query-mcp-m7-generation/known_hosts
+
+      - name: Check generation-consistency code
+        run: |
+          cargo fmt --all -- --check
+          cargo check --locked --all-targets --all-features
+
+      - name: Verify ProxyCommand cursor and match_ref generation consistency
+        env:
+          M7_GENERATION_SSH_PORT: "2240"
+          M7_GENERATION_SSH_PASSWORD: test-password
+          M7_GENERATION_KNOWN_HOSTS: /tmp/log-query-mcp-m7-generation/known_hosts
+          M7_GENERATION_REMOTE_DIR: /home/logreader/logs
+          M7_GENERATION_LOCAL_A_FILE: /home/logreader/logs/proxy-a.log
+          M7_GENERATION_LOCAL_B_FILE: /home/logreader/logs/proxy-b.log
+          M7_GENERATION_PROXY_PROGRAM: /usr/bin/nc
+        run: cargo test --locked --test m7_proxy_generation_live -- --ignored --test-threads=1 --nocapture
+
+      - name: Show sshd log on failure
+        if: failure()
+        run: sudo cat /tmp/log-query-mcp-m7-generation/sshd.log || true

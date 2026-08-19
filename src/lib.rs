@@ -1,12 +1,20 @@
 #![forbid(unsafe_code)]
 
+pub mod cache;
 pub mod config;
+pub mod config_document;
+pub mod config_limits_v2;
+pub mod config_v2;
 pub mod response_limit;
 mod scan_executor;
 mod scanner;
+pub mod secret;
 mod time_filter;
 pub mod tool_error;
+pub mod transport;
 
+#[cfg(target_os = "linux")]
+mod backend;
 #[cfg(target_os = "linux")]
 mod context_executor;
 #[cfg(target_os = "linux")]
@@ -32,9 +40,25 @@ mod stateful_context;
 #[cfg(target_os = "linux")]
 mod stateful_query;
 
+pub use cache::{
+    ByteRange, CACHE_CATALOG_VERSION, CACHE_MANIFEST_VERSION, CONTINUITY_FINGERPRINT_WINDOW_BYTES,
+    CacheCoverage, CacheFileId, CacheManifest, CacheSourceId, CacheStore, CacheStoreError,
+    CacheStoreLimits, GcReport, GenerationId, GenerationKey, GenerationMetadata, GenerationPin,
+    GenerationRecord, ManifestValidationError, PinnedGeneration, RecoveryReport, RemoteSyncTarget,
+    StagedAppend, StagedGeneration, SyncAction, SyncEngine, SyncError, SyncGenerationReason,
+    SyncOutcome,
+};
 pub use config::{
     AppConfig, CONFIG_VERSION, ConfigLoadError, ConfigValidationError, DirectoryRule, Encoding,
     LimitsConfig, LogSourceConfig, TimestampRule, ValidationIssue,
+};
+pub use config_document::{ConfigDocument, ConfigDocumentLoadError};
+pub use config_limits_v2::LimitsConfigV2;
+pub use config_v2::{
+    AppConfigV2, BackendType, BootstrapPolicy, BootstrapType, CONFIG_VERSION_V2, CacheConfig,
+    ConfigV2LoadError, ConfigV2ValidationError, ConfigV2ValidationIssue, ConnectionType,
+    FreshnessPolicy, HostKeyConfig, LogSourceConfigV2, ProxyCommandConfig, ProxyCommandType,
+    RemoteSyncPolicy, SourceBackendConfig, SshAuthConfig, SshAuthType, SshConnectionConfig,
 };
 pub use response_limit::serialize_with_limit;
 pub use scan_executor::{MAX_CONCURRENT_SCAN_TASKS, ScanExecutor, ScanTaskError};
@@ -43,12 +67,14 @@ pub use scanner::{
     MAX_SCAN_KEYWORD_CHARS, MAX_SCAN_RESULTS, ScanError, ScanLimits, ScanMatch, ScanOutcome,
     ScanPosition, ScanRequest, ScanStopReason, scan_reader,
 };
+pub use secret::{EnvSecretResolver, SecretResolveError, SecretResolver, SecretValue};
 pub use time_filter::{
     MAX_TIMESTAMP_FORMAT_CHARS, MAX_TIMESTAMP_PREFIX_BYTES, TimeFilterDecision, TimeFilterError,
     TimeRange, TimestampObservation, TimestampParser,
 };
 pub use tool_error::{ToolError, ToolErrorCode};
 
+pub use backend::SnapshotFile;
 #[cfg(target_os = "linux")]
 pub use context_executor::{ContextExecution, ContextExecutor, ContextTaskError};
 #[cfg(target_os = "linux")]

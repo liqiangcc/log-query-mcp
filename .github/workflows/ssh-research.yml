@@ -1,0 +1,274 @@
+name: SSH Transport
+
+# This read-only workflow is the live gate for M2 transport, M4 sync, M5 remote query,
+# M6 remote security boundaries, multi-server acceptance, restart recovery faults,
+# concurrency baselines, and repeated bounded range reads that verify SFTP handles close.
+on:
+  push:
+    branches:
+      - "docs/remote-ssh-cache-design-v2"
+      - "feat/**"
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/secret.rs"
+      - "src/transport/**"
+      - "src/cache/**"
+      - "src/backend/**"
+      - "src/source_registry.rs"
+      - "src/query_state.rs"
+      - "src/stateful_query.rs"
+      - "src/stateful_context.rs"
+      - "src/context_reader.rs"
+      - "src/tool_error.rs"
+      - "tests/ssh_transport_live.rs"
+      - "tests/m4_sync_live.rs"
+      - "tests/m5_remote_query_live.rs"
+      - "tests/m6_remote_security_live.rs"
+      - "tests/m6_multi_server_live.rs"
+      - "tests/m6_concurrency_performance_live.rs"
+      - "tests/m6_server_restart_live.rs"
+      - "research/ssh-sftp-poc/**"
+      - ".github/workflows/ssh-research.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ssh-sftp-transport:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install OpenSSH test server
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server netcat-openbsd
+          sudo mkdir -p /run/sshd /tmp/log-query-mcp-ssh-poc
+          sudo chown "$USER":"$(id -gn)" /tmp/log-query-mcp-ssh-poc
+
+      - name: Prepare SSH users and fixtures
+        run: |
+          sudo useradd -m -s /bin/bash logreader
+          echo 'logreader:test-password' | sudo chpasswd
+          sudo mkdir -p /home/logreader/.ssh /home/logreader/logs /home/logreader/logs/query-dir
+          echo 'hello world from log-query-mcp ssh transport' | sudo tee /home/logreader/logs/application.log >/dev/null
+          printf 'first\n' | sudo tee /home/logreader/logs/sync-live.log >/dev/null
+          printf '2026-08-07T13:00:01Z MATCH one\n2026-08-07T13:00:02Z MATCH two\n2026-08-07T13:00:03Z KEEP old-generation\n' | sudo tee /home/logreader/logs/query-live.log >/dev/null
+          printf 'old-history-that-must-not-be-silently-ignored\nRECENT partial\n' | sudo tee /home/logreader/logs/partial-live.log >/dev/null
+          printf 'DIRMATCH included\nMIXED remote\n' | sudo tee /home/logreader/logs/query-dir/included.log >/dev/null
+          printf 'DIRMATCH ignored\n' | sudo tee /home/logreader/logs/query-dir/ignored.txt >/dev/null
+          printf 'DUAL server-a\nMIXED3 server-a\n' | sudo tee /home/logreader/logs/multi.log >/dev/null
+          printf 'RESTART_BASE before-restart\n' | sudo tee /home/logreader/logs/restart-live.log >/dev/null
+          echo 'denied' | sudo tee /home/logreader/logs/denied.log >/dev/null
+          sudo dd if=/dev/zero of=/home/logreader/logs/large.log bs=1M count=8 status=none
+          sudo mkfifo /home/logreader/logs/blocking.pipe
+          sudo chown -R logreader:logreader /home/logreader/.ssh
+          sudo chown -R logreader:logreader /home/logreader/logs
+          sudo chown root:root /home/logreader/logs/denied.log
+          sudo chmod 700 /home/logreader/.ssh
+          sudo chmod 444 /home/logreader/logs/application.log /home/logreader/logs/large.log /home/logreader/logs/multi.log
+          sudo chmod 666 /home/logreader/logs/sync-live.log /home/logreader/logs/query-live.log /home/logreader/logs/partial-live.log /home/logreader/logs/restart-live.log
+          sudo chmod 444 /home/logreader/logs/query-dir/included.log /home/logreader/logs/query-dir/ignored.txt
+          sudo chmod 000 /home/logreader/logs/denied.log
+          sudo ln -s /etc/passwd /home/logreader/logs/escape.log
+          sudo ln -s /etc/passwd /home/logreader/logs/query-dir/escape.log
+          sudo chown -h logreader:logreader /home/logreader/logs/escape.log /home/logreader/logs/query-dir/escape.log
+
+          sudo useradd -m -s /bin/bash logreader_b
+          echo 'logreader_b:unused-password' | sudo chpasswd
+          sudo mkdir -p /home/logreader_b/.ssh /home/logreader_b/logs
+          printf 'DUAL server-b\nMIXED3 server-b\n' | sudo tee /home/logreader_b/logs/multi.log >/dev/null
+          sudo chown -R logreader_b:logreader_b /home/logreader_b/.ssh /home/logreader_b/logs
+          sudo chmod 700 /home/logreader_b/.ssh
+          sudo chmod 444 /home/logreader_b/logs/multi.log
+
+          ssh-keygen -q -t ed25519 -N 'test-passphrase' -f /tmp/log-query-mcp-ssh-poc/client_key
+          ssh-keygen -q -t ed25519 -N 'test-passphrase' -f /tmp/log-query-mcp-ssh-poc/wrong_client_key
+          sudo cp /tmp/log-query-mcp-ssh-poc/client_key.pub /home/logreader/.ssh/authorized_keys
+          sudo chown logreader:logreader /home/logreader/.ssh/authorized_keys
+          sudo chmod 600 /home/logreader/.ssh/authorized_keys
+          sudo cp /tmp/log-query-mcp-ssh-poc/client_key.pub /home/logreader_b/.ssh/authorized_keys
+          sudo chown logreader_b:logreader_b /home/logreader_b/.ssh/authorized_keys
+          sudo chmod 600 /home/logreader_b/.ssh/authorized_keys
+
+          sudo ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-ssh-poc/ssh_host_ed25519_key
+          sudo tee /tmp/log-query-mcp-ssh-poc/sshd_config >/dev/null <<'EOF'
+          Port 2222
+          ListenAddress 127.0.0.1
+          HostKey /tmp/log-query-mcp-ssh-poc/ssh_host_ed25519_key
+          PidFile /tmp/log-query-mcp-ssh-poc/sshd.pid
+          PasswordAuthentication yes
+          PubkeyAuthentication yes
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          StrictModes yes
+          AllowUsers logreader
+          AuthorizedKeysFile .ssh/authorized_keys
+          Subsystem sftp internal-sftp
+          LogLevel VERBOSE
+          EOF
+
+          sudo /usr/sbin/sshd -f /tmp/log-query-mcp-ssh-poc/sshd_config -E /tmp/log-query-mcp-ssh-poc/sshd.log
+          ssh-keyscan -t ed25519 -p 2222 127.0.0.1 > /tmp/log-query-mcp-ssh-poc/known_hosts
+
+          sudo ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-ssh-poc/ssh_host_b_ed25519_key
+          sudo tee /tmp/log-query-mcp-ssh-poc/sshd_b_config >/dev/null <<'EOF'
+          Port 2225
+          ListenAddress 127.0.0.1
+          HostKey /tmp/log-query-mcp-ssh-poc/ssh_host_b_ed25519_key
+          PidFile /tmp/log-query-mcp-ssh-poc/sshd_b.pid
+          PasswordAuthentication no
+          PubkeyAuthentication yes
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          StrictModes yes
+          AllowUsers logreader_b
+          AuthorizedKeysFile .ssh/authorized_keys
+          Subsystem sftp internal-sftp
+          LogLevel VERBOSE
+          EOF
+
+          sudo /usr/sbin/sshd -f /tmp/log-query-mcp-ssh-poc/sshd_b_config -E /tmp/log-query-mcp-ssh-poc/sshd_b.log
+          ssh-keyscan -t ed25519 -p 2225 127.0.0.1 > /tmp/log-query-mcp-ssh-poc/known_hosts_b
+
+          ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-ssh-poc/wrong_host_key
+          WRONG_KEY=$(cut -d' ' -f1,2 /tmp/log-query-mcp-ssh-poc/wrong_host_key.pub)
+          printf '[127.0.0.1]:2222 %s\n' "$WRONG_KEY" > /tmp/log-query-mcp-ssh-poc/bad_known_hosts
+
+          SERVER_KEY=$(sudo cut -d' ' -f1,2 /tmp/log-query-mcp-ssh-poc/ssh_host_ed25519_key.pub)
+          printf '[127.0.0.1]:2224 %s\n' "$SERVER_KEY" > /tmp/log-query-mcp-ssh-poc/proxy_known_hosts
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check production transport with locked dependencies
+        run: cargo check --locked --all-targets --all-features
+
+      - name: Verify production SSH/SFTP transport
+        env:
+          M2_FIXTURE_DIR: /tmp/log-query-mcp-ssh-poc
+          M2_SSH_PORT: "2222"
+          M2_STALL_PORT: "2223"
+          M2_DROP_PORT: "2224"
+          M2_SSH_PASSWORD: test-password
+          M2_WRONG_PASSWORD: definitely-wrong
+          M2_KEY_PASSPHRASE: test-passphrase
+          M2_SSH_KEY_FILE: /tmp/log-query-mcp-ssh-poc/client_key
+          M2_WRONG_SSH_KEY_FILE: /tmp/log-query-mcp-ssh-poc/wrong_client_key
+          M2_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
+          M2_BAD_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/bad_known_hosts
+          M2_PROXY_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/proxy_known_hosts
+          M2_REMOTE_DIR: /home/logreader/logs
+          M2_REMOTE_FILE: /home/logreader/logs/application.log
+          M2_LARGE_FILE: /home/logreader/logs/large.log
+          M2_DENIED_FILE: /home/logreader/logs/denied.log
+          M2_FIFO_FILE: /home/logreader/logs/blocking.pipe
+        run: |
+          nc -l 127.0.0.1 2223 >/dev/null 2>&1 &
+          NC_PID=$!
+          trap 'kill "$NC_PID" 2>/dev/null || true' EXIT
+          cargo test --test ssh_transport_live -- --ignored --test-threads=1
+
+      - name: Verify M4 remote sync through real SFTP
+        env:
+          M2_SSH_PORT: "2222"
+          M2_SSH_PASSWORD: test-password
+          M2_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
+          M2_REMOTE_DIR: /home/logreader/logs
+          M4_LOCAL_SYNC_FILE: /home/logreader/logs/sync-live.log
+        run: cargo test --test m4_sync_live -- --ignored --test-threads=1
+
+      - name: Verify M5 remote query through real SFTP and cache
+        env:
+          M2_SSH_PORT: "2222"
+          M2_SSH_PASSWORD: test-password
+          M2_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
+          M2_REMOTE_DIR: /home/logreader/logs
+          M5_LOCAL_QUERY_FILE: /home/logreader/logs/query-live.log
+          M5_LOCAL_PARTIAL_FILE: /home/logreader/logs/partial-live.log
+          M5_REMOTE_DIRECTORY_ROOT: /home/logreader/logs/query-dir
+        run: cargo test --test m5_remote_query_live -- --ignored --test-threads=1
+
+      - name: Verify M6 remote symlink security through real SFTP
+        env:
+          M2_SSH_PORT: "2222"
+          M2_SSH_PASSWORD: test-password
+          M2_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
+          M2_REMOTE_DIR: /home/logreader/logs
+          M5_REMOTE_DIRECTORY_ROOT: /home/logreader/logs/query-dir
+        run: cargo test --test m6_remote_security_live -- --ignored --test-threads=1
+
+      - name: Verify M6 multi-server acceptance through two real SSH servers
+        env: &multi_server_env
+          M2_SSH_PORT: "2222"
+          M2_SSH_PASSWORD: test-password
+          M2_KEY_PASSPHRASE: test-passphrase
+          M2_SSH_KEY_FILE: /tmp/log-query-mcp-ssh-poc/client_key
+          M2_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
+          M2_REMOTE_DIR: /home/logreader/logs
+          M6_SSH_B_PORT: "2225"
+          M6_SSH_B_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts_b
+          M6_REMOTE_B_DIR: /home/logreader_b/logs
+          M6_UNUSED_SSH_PORT: "2299"
+        run: cargo test --test m6_multi_server_live -- --ignored --test-threads=1
+
+      - name: Record M6 single and dual server concurrency baselines
+        env: *multi_server_env
+        run: cargo test --test m6_concurrency_performance_live -- --ignored --test-threads=1 --nocapture
+
+      - name: Verify M6 server restart recovery and fail-closed behavior
+        env:
+          M2_SSH_PORT: "2222"
+          M2_SSH_PASSWORD: test-password
+          M2_KNOWN_HOSTS: /tmp/log-query-mcp-ssh-poc/known_hosts
+          M2_REMOTE_DIR: /home/logreader/logs
+          M6_RESTART_CACHE_ROOT: /tmp/log-query-mcp-ssh-poc/m6-restart-cache
+        run: |
+          rm -rf "$M6_RESTART_CACHE_ROOT"
+          cargo test --test m6_server_restart_live bootstrap_cache_before_server_restart -- --ignored --exact --test-threads=1
+
+          SSHD_PID=$(sudo cat /tmp/log-query-mcp-ssh-poc/sshd.pid)
+          sudo kill "$SSHD_PID"
+          for _ in $(seq 1 50); do
+            if ! nc -z 127.0.0.1 2222; then
+              break
+            fi
+            sleep 0.1
+          done
+          if nc -z 127.0.0.1 2222; then
+            echo "Server A did not stop"
+            exit 1
+          fi
+
+          printf 'RESTART_AFTER after-restart\n' | sudo tee -a /home/logreader/logs/restart-live.log >/dev/null
+          cargo test --test m6_server_restart_live server_outage_fails_closed_without_destroying_last_valid_cache -- --ignored --exact --test-threads=1
+
+          sudo /usr/sbin/sshd -f /tmp/log-query-mcp-ssh-poc/sshd_config -E /tmp/log-query-mcp-ssh-poc/sshd.log
+          for _ in $(seq 1 50); do
+            if nc -z 127.0.0.1 2222; then
+              break
+            fi
+            sleep 0.1
+          done
+          if ! nc -z 127.0.0.1 2222; then
+            echo "Server A did not restart"
+            exit 1
+          fi
+
+          cargo test --test m6_server_restart_live query_recovers_after_server_restart_and_incremental_append -- --ignored --exact --test-threads=1
+
+      - name: Check research POC remains compatible
+        run: cargo check --manifest-path research/ssh-sftp-poc/Cargo.toml
+
+      - name: Show sshd logs on failure
+        if: failure()
+        run: |
+          sudo cat /tmp/log-query-mcp-ssh-poc/sshd.log || true
+          sudo cat /tmp/log-query-mcp-ssh-poc/sshd_b.log || true

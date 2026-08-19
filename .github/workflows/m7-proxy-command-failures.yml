@@ -1,0 +1,191 @@
+name: M7 ProxyCommand Failures
+
+on:
+  push:
+    branches:
+      - "feat/**"
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/config_v2.rs"
+      - "src/transport/**"
+      - "tests/m7_proxy_command_failures.rs"
+      - ".github/workflows/m7-proxy-command-failures.yml"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/config_v2.rs"
+      - "src/transport/**"
+      - "tests/m7_proxy_command_failures.rs"
+      - ".github/workflows/m7-proxy-command-failures.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proxy-command-failures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install fixture dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server netcat-openbsd
+          sudo mkdir -p /run/sshd /tmp/log-query-mcp-m7-proxy-failures
+          sudo chown "$USER":"$(id -gn)" /tmp/log-query-mcp-m7-proxy-failures
+          test -x /usr/bin/nc
+          test -x /usr/bin/python3
+          test -x /usr/bin/false
+
+      - name: Prepare read-only OpenSSH fixture
+        run: |
+          sudo useradd -m -s /bin/bash logreader
+          echo 'logreader:test-password' | sudo chpasswd
+          sudo mkdir -p /home/logreader/logs
+          echo 'hello world from log-query-mcp proxy failure transport' | sudo tee /home/logreader/logs/application.log >/dev/null
+          sudo chown -R logreader:logreader /home/logreader/logs
+          sudo chmod 444 /home/logreader/logs/application.log
+
+          sudo ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-m7-proxy-failures/ssh_host_ed25519_key
+          sudo tee /tmp/log-query-mcp-m7-proxy-failures/sshd_config >/dev/null <<'EOF'
+          Port 2240
+          ListenAddress 127.0.0.1
+          HostKey /tmp/log-query-mcp-m7-proxy-failures/ssh_host_ed25519_key
+          PidFile /tmp/log-query-mcp-m7-proxy-failures/sshd.pid
+          PasswordAuthentication yes
+          PubkeyAuthentication no
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          StrictModes yes
+          AllowUsers logreader
+          Subsystem sftp internal-sftp
+          LogLevel VERBOSE
+          EOF
+
+          sudo /usr/sbin/sshd -f /tmp/log-query-mcp-m7-proxy-failures/sshd_config -E /tmp/log-query-mcp-m7-proxy-failures/sshd.log
+          ssh-keyscan -t ed25519 -p 2240 127.0.0.1 > /tmp/log-query-mcp-m7-proxy-failures/known_hosts
+
+      - name: Prepare failure helper programs
+        run: |
+          cat > /tmp/log-query-mcp-m7-proxy-failures/nonexec-helper <<'EOF'
+          #!/usr/bin/env python3
+          raise SystemExit(0)
+          EOF
+          chmod 0644 /tmp/log-query-mcp-m7-proxy-failures/nonexec-helper
+
+          cat > /tmp/log-query-mcp-m7-proxy-failures/stderr-stall-helper <<'EOF'
+          #!/usr/bin/env python3
+          import os
+          import sys
+          import time
+
+          pid_file = sys.argv[1]
+          with open(pid_file, "w", encoding="utf-8") as handle:
+              handle.write(str(os.getpid()))
+              handle.flush()
+          sys.stderr.write("X" * (128 * 1024))
+          sys.stderr.flush()
+          time.sleep(30)
+          EOF
+          chmod 0755 /tmp/log-query-mcp-m7-proxy-failures/stderr-stall-helper
+
+          cat > /tmp/log-query-mcp-m7-proxy-failures/controlled-proxy-helper <<'EOF'
+          #!/usr/bin/env python3
+          import os
+          import select
+          import socket
+          import sys
+
+          host = sys.argv[1]
+          port = int(sys.argv[2])
+          trigger_file = sys.argv[3]
+          pid_file = sys.argv[4]
+
+          with open(pid_file, "w", encoding="utf-8") as handle:
+              handle.write(str(os.getpid()))
+              handle.flush()
+
+          sock = socket.create_connection((host, port), timeout=5)
+          sock.settimeout(None)
+          stdin_fd = sys.stdin.fileno()
+          inputs = [sock, stdin_fd]
+
+          while True:
+              if os.path.exists(trigger_file):
+                  raise SystemExit(97)
+
+              readable, _, _ = select.select(inputs, [], [], 0.05)
+              for source in readable:
+                  if source is sock:
+                      data = sock.recv(65536)
+                      if not data:
+                          raise SystemExit(0)
+                      sys.stdout.buffer.write(data)
+                      sys.stdout.buffer.flush()
+                  else:
+                      data = os.read(stdin_fd, 65536)
+                      if not data:
+                          inputs.remove(stdin_fd)
+                          try:
+                              sock.shutdown(socket.SHUT_WR)
+                          except OSError:
+                              pass
+                          continue
+                      sock.sendall(data)
+          EOF
+          chmod 0755 /tmp/log-query-mcp-m7-proxy-failures/controlled-proxy-helper
+
+      - name: Check M7 failure code and tests
+        run: |
+          cargo fmt --all -- --check
+          cargo check --locked --all-targets --all-features
+
+      - name: Verify ProxyCommand failure matrix
+        env:
+          M2_SSH_PORT: "2240"
+          M2_SSH_PASSWORD: test-password
+          M2_KNOWN_HOSTS: /tmp/log-query-mcp-m7-proxy-failures/known_hosts
+          M2_REMOTE_DIR: /home/logreader/logs
+          M2_REMOTE_FILE: /home/logreader/logs/application.log
+          M7_BAD_SSH_PASSWORD: definitely-wrong-password
+          M7_PROXY_PROGRAM: /usr/bin/nc
+          M7_NONEXEC_PROGRAM: /tmp/log-query-mcp-m7-proxy-failures/nonexec-helper
+          M7_STALL_PROGRAM: /tmp/log-query-mcp-m7-proxy-failures/stderr-stall-helper
+          M7_CONTROLLED_PROXY_PROGRAM: /tmp/log-query-mcp-m7-proxy-failures/controlled-proxy-helper
+          M7_TIMEOUT_PID_FILE: /tmp/log-query-mcp-m7-proxy-failures/timeout.pid
+          M7_CANCEL_PID_FILE: /tmp/log-query-mcp-m7-proxy-failures/cancel.pid
+          M7_AUTH_PID_FILE: /tmp/log-query-mcp-m7-proxy-failures/auth.pid
+          M7_AUTH_TRIGGER_FILE: /tmp/log-query-mcp-m7-proxy-failures/auth.trigger
+          M7_CRASH_PID_FILE: /tmp/log-query-mcp-m7-proxy-failures/crash.pid
+          M7_CRASH_TRIGGER_FILE: /tmp/log-query-mcp-m7-proxy-failures/crash.trigger
+          M7_MIXED_PID_FILE: /tmp/log-query-mcp-m7-proxy-failures/mixed.pid
+        run: cargo test --locked --test m7_proxy_command_failures -- --ignored --test-threads=1 --nocapture
+
+      - name: Assert helper processes are gone
+        if: always()
+        run: |
+          for pid_file in \
+            /tmp/log-query-mcp-m7-proxy-failures/timeout.pid \
+            /tmp/log-query-mcp-m7-proxy-failures/cancel.pid \
+            /tmp/log-query-mcp-m7-proxy-failures/auth.pid \
+            /tmp/log-query-mcp-m7-proxy-failures/crash.pid \
+            /tmp/log-query-mcp-m7-proxy-failures/mixed.pid; do
+            [[ -e "$pid_file" ]] || continue
+            pid="$(cat "$pid_file")"
+            if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+              echo "orphan ProxyCommand helper remains: pid=$pid file=$pid_file" >&2
+              ps -fp "$pid" || true
+              exit 1
+            fi
+          done
+
+      - name: Show sshd log on failure
+        if: failure()
+        run: sudo cat /tmp/log-query-mcp-m7-proxy-failures/sshd.log || true

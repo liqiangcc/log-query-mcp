@@ -1,7 +1,6 @@
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashSet},
-    fs::File,
     io::{ErrorKind, Read, Seek, SeekFrom},
     sync::Arc,
     time::{Duration, Instant},
@@ -12,12 +11,12 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    ConfiguredSource, CumulativeQueryUsage, CursorCandidate, MAX_RETURNED_CONTENT_BYTES,
-    MAX_SCAN_RESULTS, MatchReferenceData, MatchReferenceStore, QueryBinding, QueryMatch,
-    QueryPageStopReason, QueryStateError, QuerySummary, ResultWatermark, ScanExecutor, ScanLimits,
-    ScanMatch, ScanPosition, ScanRequest, ScanStopReason, ScanTaskError, SearchCursorData,
-    SearchCursorStore, SourceRegistry, SourceRegistryError, TimeFilterDecision, TimeFilterError,
-    TimeRange, TimestampObservation, TimestampParser,
+    ConfiguredSource, CumulativeQueryUsage, CursorCandidate, GenerationPin,
+    MAX_RETURNED_CONTENT_BYTES, MAX_SCAN_RESULTS, MatchReferenceData, MatchReferenceStore,
+    QueryBinding, QueryMatch, QueryPageStopReason, QueryStateError, QuerySummary, ResultWatermark,
+    ScanExecutor, ScanLimits, ScanMatch, ScanPosition, ScanRequest, ScanStopReason, ScanTaskError,
+    SearchCursorData, SearchCursorStore, SourceRegistry, SourceRegistryError, TimeFilterDecision,
+    TimeFilterError, TimeRange, TimestampObservation, TimestampParser,
 };
 
 const DEFAULT_READ_BUFFER_BYTES: usize = 64 * 1024;
@@ -205,7 +204,8 @@ impl StatefulQueryService {
                     &self.registry,
                     &binding.source_ids,
                     limits.max_scan_files_per_query,
-                )?,
+                )
+                .await?,
                 None,
                 CumulativeQueryUsage::default(),
             )
@@ -232,9 +232,10 @@ impl StatefulQueryService {
 
         let mut registered = Vec::with_capacity(scanned.results.len());
         for result in &scanned.results {
-            let match_ref = self
-                .match_references
-                .insert(result.match_reference.clone())?;
+            let match_ref = self.match_references.insert_with_pin(
+                result.match_reference.clone(),
+                result.generation_pin.clone(),
+            )?;
             registered.push(RegisteredQueryMatch {
                 match_ref,
                 source_id: result.value.source_id.clone(),
@@ -355,7 +356,7 @@ impl StatefulQueryService {
                 };
 
                 let safe_file = source.open_snapshot_file(&candidate.snapshot)?;
-                let mut file = safe_file.into_file();
+                let mut file = safe_file;
                 seek_to_scan_position(&mut file, position, candidate.snapshot.size_at_snapshot())?;
 
                 let scan_limits = ScanLimits {
@@ -434,6 +435,7 @@ struct RankedRegisteredMatch {
     key: ResultWatermark,
     value: QueryMatch,
     match_reference: MatchReferenceData,
+    generation_pin: Option<GenerationPin>,
 }
 
 impl PartialEq for RankedRegisteredMatch {
@@ -504,7 +506,7 @@ fn query_binding(
     Ok((binding, time_range))
 }
 
-fn build_candidates(
+async fn build_candidates(
     registry: &SourceRegistry,
     source_ids: &[String],
     max_files: usize,
@@ -517,7 +519,13 @@ fn build_candidates(
         if remaining == 0 {
             return Err(StatefulQueryError::FileLimitExceeded);
         }
-        let snapshots = source.snapshot_files(remaining)?;
+        let snapshots = source.query_snapshot_files(remaining).await?;
+        if snapshots
+            .iter()
+            .any(|snapshot| !snapshot.has_complete_coverage())
+        {
+            return Err(StatefulQueryError::CacheScopeExceeded);
+        }
         remaining = remaining
             .checked_sub(snapshots.len())
             .ok_or(StatefulQueryError::ResourceCounterOverflow)?;
@@ -564,7 +572,7 @@ fn process_matches(
     }
 
     let mut prefix_file = if timestamp_parser.is_some() {
-        Some(source.open_snapshot_file(&candidate.snapshot)?.into_file())
+        Some(source.open_snapshot_file(&candidate.snapshot)?)
     } else {
         None
     };
@@ -646,6 +654,7 @@ fn process_matches(
                 match_byte_offset: scan_match.match_byte_offset,
             },
             match_reference,
+            generation_pin: candidate.snapshot.generation_pin().cloned(),
         });
         if earliest.len() > binding.max_results {
             earliest.pop();
@@ -750,8 +759,8 @@ fn check_interrupted(
     Ok(())
 }
 
-fn seek_to_scan_position(
-    file: &mut File,
+fn seek_to_scan_position<R: Read + Seek>(
+    file: &mut R,
     position: ScanPosition,
     snapshot_size: u64,
 ) -> Result<(), StatefulQueryError> {
@@ -782,8 +791,8 @@ fn validated_next_position(
     Ok(next)
 }
 
-fn read_line_prefix(
-    file: &mut File,
+fn read_line_prefix<R: Read + Seek>(
+    file: &mut R,
     line_start_offset: u64,
     snapshot_size: u64,
     maximum_bytes: usize,
@@ -873,6 +882,9 @@ pub enum StatefulQueryError {
 
     #[error("scanner stopped without a safe continuation position")]
     UnsafeContinuation,
+
+    #[error("query cannot prove that the local cache covers the requested remote log scope")]
+    CacheScopeExceeded,
 
     #[error("query resource counter overflowed")]
     ResourceCounterOverflow,

@@ -1,0 +1,88 @@
+name: M7 Mixed Query
+
+on:
+  push:
+    branches:
+      - "feat/**"
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/**"
+      - "tests/m7_mixed_query_live.rs"
+      - ".github/workflows/m7-mixed-query.yml"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/**"
+      - "tests/m7_mixed_query_live.rs"
+      - ".github/workflows/m7-mixed-query.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mixed-query-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install OpenSSH and stdio proxy helper
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server netcat-openbsd
+          sudo mkdir -p /run/sshd /tmp/log-query-mcp-m7-mixed
+          sudo chown "$USER":"$(id -gn)" /tmp/log-query-mcp-m7-mixed
+          test -x /usr/bin/nc
+          test -x /usr/bin/false
+
+      - name: Prepare read-only mixed-query SSH fixture
+        run: |
+          sudo useradd -m -s /bin/bash logreader
+          echo 'logreader:test-password' | sudo chpasswd
+          sudo mkdir -p /home/logreader/logs
+          printf 'M7MIX remote\n' | sudo tee /home/logreader/logs/mixed.log >/dev/null
+          sudo chown -R logreader:logreader /home/logreader/logs
+          sudo chmod 444 /home/logreader/logs/mixed.log
+
+          sudo ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-m7-mixed/ssh_host_ed25519_key
+          sudo tee /tmp/log-query-mcp-m7-mixed/sshd_config >/dev/null <<'EOF'
+          Port 2240
+          ListenAddress 127.0.0.1
+          HostKey /tmp/log-query-mcp-m7-mixed/ssh_host_ed25519_key
+          PidFile /tmp/log-query-mcp-m7-mixed/sshd.pid
+          PasswordAuthentication yes
+          PubkeyAuthentication no
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          StrictModes yes
+          AllowUsers logreader
+          Subsystem sftp internal-sftp
+          LogLevel VERBOSE
+          EOF
+
+          sudo /usr/sbin/sshd -f /tmp/log-query-mcp-m7-mixed/sshd_config -E /tmp/log-query-mcp-m7-mixed/sshd.log
+          ssh-keyscan -t ed25519 -p 2240 127.0.0.1 > /tmp/log-query-mcp-m7-mixed/known_hosts
+
+      - name: Check M7 mixed-query code
+        run: |
+          cargo fmt --all -- --check
+          cargo check --locked --all-targets --all-features
+
+      - name: Verify Local plus Direct plus Proxy query and failure isolation
+        env:
+          M7_MIXED_SSH_PORT: "2240"
+          M7_MIXED_SSH_PASSWORD: test-password
+          M7_MIXED_KNOWN_HOSTS: /tmp/log-query-mcp-m7-mixed/known_hosts
+          M7_MIXED_REMOTE_DIR: /home/logreader/logs
+          M7_MIXED_PROXY_PROGRAM: /usr/bin/nc
+        run: cargo test --locked --test m7_mixed_query_live -- --ignored --test-threads=1 --nocapture
+
+      - name: Show sshd log on failure
+        if: failure()
+        run: sudo cat /tmp/log-query-mcp-m7-mixed/sshd.log || true

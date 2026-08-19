@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
-"""Validate v1 JSON Schemas, examples, and frozen cross-field rules."""
+"""Validate v1/v2 JSON Schemas, fixtures, and frozen cross-field rules."""
 
 from __future__ import annotations
 
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from jsonschema import Draft202012Validator, FormatChecker
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG_SCHEMA_PATH = ROOT / "schemas" / "log-query-mcp-config-v1.schema.json"
+CONFIG_V1_SCHEMA_PATH = ROOT / "schemas" / "log-query-mcp-config-v1.schema.json"
+CONFIG_V2_SCHEMA_PATH = ROOT / "schemas" / "log-query-mcp-config-v2.schema.json"
 MCP_SCHEMA_PATH = ROOT / "schemas" / "mcp-tools-v1.schema.json"
-ERROR_SCHEMA_PATH = ROOT / "schemas" / "tool-error-v1.schema.json"
-CONFIG_EXAMPLE_PATH = ROOT / "examples" / "log-query-mcp.v1.json"
+ERROR_V1_SCHEMA_PATH = ROOT / "schemas" / "tool-error-v1.schema.json"
+ERROR_V2_SCHEMA_PATH = ROOT / "schemas" / "tool-error-v2.schema.json"
+CONFIG_V1_EXAMPLE_PATH = ROOT / "examples" / "log-query-mcp.v1.json"
+V2_VALID_FIXTURE_DIR = ROOT / "tests" / "contracts" / "v2" / "valid"
+V2_INVALID_FIXTURE_DIR = ROOT / "tests" / "contracts" / "v2" / "invalid"
+
+RuleValidator = Callable[[dict[str, Any]], None]
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -40,11 +46,15 @@ def format_errors(errors: list[Any]) -> str:
     return "\n".join(lines)
 
 
+def schema_errors(schema: dict[str, Any], instance: Any) -> list[Any]:
+    validator = Draft202012Validator(schema, format_checker=FormatChecker())
+    return list(validator.iter_errors(instance))
+
+
 def validate_instance(
     schema: dict[str, Any], instance: Any, description: str
 ) -> None:
-    validator = Draft202012Validator(schema, format_checker=FormatChecker())
-    errors = list(validator.iter_errors(instance))
+    errors = schema_errors(schema, instance)
     if errors:
         raise AssertionError(f"{description} is invalid:\n{format_errors(errors)}")
 
@@ -60,12 +70,11 @@ def definition_schema(root_schema: dict[str, Any], name: str) -> dict[str, Any]:
 def assert_invalid(
     schema: dict[str, Any], instance: Any, description: str
 ) -> None:
-    validator = Draft202012Validator(schema, format_checker=FormatChecker())
-    if not list(validator.iter_errors(instance)):
+    if not schema_errors(schema, instance):
         raise AssertionError(f"{description} unexpectedly passed validation")
 
 
-def validate_config_rules(config: dict[str, Any]) -> None:
+def validate_common_config_rules(config: dict[str, Any]) -> None:
     sources = config["sources"]
     source_ids = [source["source_id"] for source in sources]
     if len(source_ids) != len(set(source_ids)):
@@ -90,6 +99,71 @@ def validate_config_rules(config: dict[str, Any]) -> None:
         raise AssertionError(
             "max_returned_content_bytes must be smaller than max_response_bytes"
         )
+
+
+def validate_v1_config_rules(config: dict[str, Any]) -> None:
+    validate_common_config_rules(config)
+
+
+def validate_v2_config_rules(config: dict[str, Any]) -> None:
+    validate_common_config_rules(config)
+
+    connections = config.get("connections", [])
+    connection_ids = [connection["connection_id"] for connection in connections]
+    if len(connection_ids) != len(set(connection_ids)):
+        raise AssertionError("connection_id values must be globally unique")
+    known_connections = set(connection_ids)
+
+    ssh_sources = []
+    for source in config["sources"]:
+        backend = source.get("backend", {})
+        if backend.get("type") != "ssh":
+            continue
+        ssh_sources.append(source)
+        connection_id = backend.get("connection_id")
+        if connection_id not in known_connections:
+            raise AssertionError(
+                f"source_id={source['source_id']} references unknown connection_id"
+            )
+
+    if ssh_sources and not connections:
+        raise AssertionError("SSH sources require at least one SSH connection")
+    if ssh_sources and "cache" not in config:
+        raise AssertionError("SSH sources require cache configuration")
+
+    cache = config.get("cache")
+    if cache is not None:
+        max_bytes = cache["max_bytes"]
+        max_bytes_per_source = cache["max_bytes_per_source"]
+        if max_bytes_per_source > max_bytes:
+            raise AssertionError(
+                "cache.max_bytes_per_source must not exceed cache.max_bytes"
+            )
+
+
+def validate_v2_fixtures(schema: dict[str, Any]) -> None:
+    valid_paths = sorted(V2_VALID_FIXTURE_DIR.glob("*.json"))
+    invalid_paths = sorted(V2_INVALID_FIXTURE_DIR.glob("*.json"))
+    if not valid_paths:
+        raise AssertionError("no v2 valid fixtures found")
+    if not invalid_paths:
+        raise AssertionError("no v2 invalid fixtures found")
+
+    for path in valid_paths:
+        instance = load_json(path)
+        validate_instance(schema, instance, f"valid v2 fixture {path.name}")
+        validate_v2_config_rules(instance)
+
+    for path in invalid_paths:
+        instance = load_json(path)
+        errors = schema_errors(schema, instance)
+        if errors:
+            continue
+        try:
+            validate_v2_config_rules(instance)
+        except AssertionError:
+            continue
+        raise AssertionError(f"invalid v2 fixture {path.name} unexpectedly passed")
 
 
 def validate_mcp_contracts(schema: dict[str, Any]) -> None:
@@ -179,21 +253,19 @@ def validate_mcp_contracts(schema: dict[str, Any]) -> None:
     )
 
 
-def validate_error_contract(schema: dict[str, Any]) -> None:
-    valid_errors = [
-        {
-            "code": "UNKNOWN_SOURCE",
-            "message": "one or more requested log sources are unavailable",
-            "retryable": False,
-        },
-        {
-            "code": "FILE_CHANGED",
-            "message": "the referenced log file changed; run the search again",
-            "retryable": True,
-        },
-    ]
-    for instance in valid_errors:
-        validate_instance(schema, instance, f"valid {instance['code']} error")
+def validate_error_contract(
+    schema: dict[str, Any], valid_codes: list[tuple[str, bool]], version: str
+) -> None:
+    for code, retryable in valid_codes:
+        validate_instance(
+            schema,
+            {
+                "code": code,
+                "message": f"representative {version} {code.lower()} error",
+                "retryable": retryable,
+            },
+            f"valid {version} {code} error",
+        )
 
     assert_invalid(
         schema,
@@ -202,7 +274,7 @@ def validate_error_contract(schema: dict[str, Any]) -> None:
             "message": "/var/log/private/application.log",
             "retryable": False,
         },
-        "unknown tool error code",
+        f"unknown {version} tool error code",
     )
     assert_invalid(
         schema,
@@ -212,25 +284,56 @@ def validate_error_contract(schema: dict[str, Any]) -> None:
             "retryable": True,
             "details": {"path": "/var/log/private/application.log"},
         },
-        "tool error containing an unapproved details field",
+        f"{version} tool error containing an unapproved details field",
     )
 
 
 def main() -> int:
-    config_schema = load_json(CONFIG_SCHEMA_PATH)
+    config_v1_schema = load_json(CONFIG_V1_SCHEMA_PATH)
+    config_v2_schema = load_json(CONFIG_V2_SCHEMA_PATH)
     mcp_schema = load_json(MCP_SCHEMA_PATH)
-    error_schema = load_json(ERROR_SCHEMA_PATH)
-    config_example = load_json(CONFIG_EXAMPLE_PATH)
+    error_v1_schema = load_json(ERROR_V1_SCHEMA_PATH)
+    error_v2_schema = load_json(ERROR_V2_SCHEMA_PATH)
+    config_v1_example = load_json(CONFIG_V1_EXAMPLE_PATH)
 
-    check_schema(config_schema, CONFIG_SCHEMA_PATH)
-    check_schema(mcp_schema, MCP_SCHEMA_PATH)
-    check_schema(error_schema, ERROR_SCHEMA_PATH)
-    validate_instance(config_schema, config_example, "v1 configuration example")
-    validate_config_rules(config_example)
+    for schema, path in [
+        (config_v1_schema, CONFIG_V1_SCHEMA_PATH),
+        (config_v2_schema, CONFIG_V2_SCHEMA_PATH),
+        (mcp_schema, MCP_SCHEMA_PATH),
+        (error_v1_schema, ERROR_V1_SCHEMA_PATH),
+        (error_v2_schema, ERROR_V2_SCHEMA_PATH),
+    ]:
+        check_schema(schema, path)
+
+    validate_instance(
+        config_v1_schema, config_v1_example, "v1 configuration example"
+    )
+    validate_v1_config_rules(config_v1_example)
+    validate_v2_fixtures(config_v2_schema)
     validate_mcp_contracts(mcp_schema)
-    validate_error_contract(error_schema)
 
-    print("v1 schemas, examples, error model, and frozen rules are valid")
+    validate_error_contract(
+        error_v1_schema,
+        [("UNKNOWN_SOURCE", False), ("FILE_CHANGED", True)],
+        "v1",
+    )
+    validate_error_contract(
+        error_v2_schema,
+        [
+            ("REMOTE_UNAVAILABLE", True),
+            ("REMOTE_AUTH_FAILED", False),
+            ("HOST_KEY_VERIFICATION_FAILED", False),
+            ("SYNC_FAILED", True),
+            ("CACHE_SCOPE_EXCEEDED", False),
+            ("CACHE_LIMIT_EXCEEDED", False),
+            ("CACHE_CORRUPTED", False),
+        ],
+        "v2",
+    )
+
+    print(
+        "v1/v2 schemas, fixtures, MCP API, error models, and frozen rules are valid"
+    )
     return 0
 
 

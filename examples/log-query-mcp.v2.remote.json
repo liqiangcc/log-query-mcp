@@ -1,0 +1,152 @@
+{
+  "version": 2,
+  "connections": [
+    {
+      "connection_id": "order-test-ssh",
+      "type": "ssh",
+      "host": "order-test.internal",
+      "port": 22,
+      "username": "log-reader",
+      "auth": {
+        "type": "password",
+        "secret_ref": "LOG_QUERY_MCP_ORDER_PASSWORD"
+      },
+      "host_key": {
+        "known_hosts_file": "/etc/log-query-mcp/known_hosts"
+      },
+      "connect_timeout_millis": 5000,
+      "operation_timeout_millis": 30000,
+      "keepalive_seconds": 30
+    },
+    {
+      "connection_id": "analytics-prod-ssh",
+      "type": "ssh",
+      "host": "analytics-prod.internal",
+      "port": 22,
+      "username": "log-reader",
+      "auth": {
+        "type": "private_key",
+        "key_file": "/etc/log-query-mcp/keys/analytics_ed25519",
+        "passphrase_secret_ref": "LOG_QUERY_MCP_ANALYTICS_KEY_PASSPHRASE"
+      },
+      "host_key": {
+        "known_hosts_file": "/etc/log-query-mcp/known_hosts"
+      },
+      "connect_timeout_millis": 5000,
+      "operation_timeout_millis": 30000,
+      "keepalive_seconds": 30
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "payment-local",
+      "name": "支付服务本地日志",
+      "description": "Local source keeps the v1 openat2 security model",
+      "service": "payment-service",
+      "environment": "test",
+      "tags": ["payment", "local"],
+      "enabled": true,
+      "encoding": "utf-8",
+      "backend": {
+        "type": "local"
+      },
+      "root": "/var/log/payment-service",
+      "files": [
+        "application.log",
+        "application.log.1"
+      ],
+      "timestamp_rule": {
+        "type": "rfc3339",
+        "prefix_bytes": 64
+      }
+    },
+    {
+      "source_id": "order-remote",
+      "name": "订单服务远程日志",
+      "description": "Password-authenticated direct SSH/SFTP source",
+      "service": "order-service",
+      "environment": "test",
+      "tags": ["order", "remote", "direct"],
+      "enabled": true,
+      "encoding": "utf-8",
+      "backend": {
+        "type": "ssh",
+        "connection_id": "order-test-ssh"
+      },
+      "root": "/srv/log/order-service",
+      "directories": [
+        {
+          "path": ".",
+          "recursive": false,
+          "include_suffixes": [".log", ".log.1"]
+        }
+      ],
+      "timestamp_rule": {
+        "type": "custom",
+        "prefix_bytes": 23,
+        "format": "%Y-%m-%d %H:%M:%S%.3f",
+        "default_offset_seconds": 28800
+      },
+      "sync": {
+        "freshness": "on_query",
+        "bootstrap": {
+          "type": "full"
+        },
+        "allow_stale_on_error": false
+      }
+    },
+    {
+      "source_id": "analytics-remote-tail",
+      "name": "分析服务远程近期日志",
+      "description": "Encrypted private-key direct SFTP source with bounded initial tail bootstrap",
+      "service": "analytics-service",
+      "environment": "production",
+      "tags": ["analytics", "remote", "direct", "tail-bootstrap"],
+      "enabled": true,
+      "encoding": "utf-8",
+      "backend": {
+        "type": "ssh",
+        "connection_id": "analytics-prod-ssh"
+      },
+      "root": "/srv/log/analytics-service",
+      "files": [
+        "application.log"
+      ],
+      "sync": {
+        "freshness": "on_query",
+        "bootstrap": {
+          "type": "tail",
+          "bytes": 67108864
+        },
+        "allow_stale_on_error": false
+      }
+    }
+  ],
+  "cache": {
+    "root": "/var/lib/log-query-mcp/cache",
+    "max_bytes": 21474836480,
+    "max_bytes_per_source": 8589934592,
+    "retention_hours": 72,
+    "max_generations_per_file": 4
+  },
+  "limits": {
+    "max_sources_per_query": 10,
+    "max_scan_files_per_query": 500,
+    "max_scan_bytes_per_page": 536870912,
+    "query_timeout_millis": 30000,
+    "default_results_per_page": 50,
+    "max_results_per_page": 200,
+    "max_line_bytes": 16384,
+    "max_returned_content_bytes": 524288,
+    "max_response_bytes": 1048576,
+    "max_context_lines_per_side": 50,
+    "max_concurrent_scans": 4,
+    "match_reference_capacity": 10000,
+    "match_reference_ttl_seconds": 600,
+    "cursor_capacity": 1000,
+    "cursor_ttl_seconds": 300,
+    "max_concurrent_ssh_connections": 4,
+    "max_sync_bytes_per_query": 536870912,
+    "max_remote_files_per_source": 500
+  }
+}

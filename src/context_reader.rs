@@ -118,16 +118,22 @@ pub fn read_referenced_context(
     if source.descriptor().source_id != reference.source_id {
         return Err(ContextReadError::FileChanged);
     }
-    let safe_file = source.open_configured_file(&reference.relative_path)?;
-    if safe_file.identity() != reference.file_identity
-        || safe_file.size() < reference.file_size_at_match
-        || safe_file.size() < reference.match_end_offset()
-    {
+    let mut file = source
+        .open_referenced_file(
+            &reference.relative_path,
+            reference.file_identity,
+            reference.file_size_at_match,
+            &reference.file_id,
+        )
+        .map_err(|error| match error {
+            SourceRegistryError::FileChanged { .. } => ContextReadError::FileChanged,
+            other => ContextReadError::SourceRegistry(other),
+        })?;
+    if file.size() < reference.file_size_at_match || file.size() < reference.match_end_offset() {
         return Err(ContextReadError::FileChanged);
     }
 
-    let current_size = safe_file.size();
-    let mut file = safe_file.into_file();
+    let current_size = file.size();
     read_context(
         &mut file,
         current_size,

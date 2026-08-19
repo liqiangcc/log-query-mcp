@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "sources": [
+    {
+      "source_id": "local-payment",
+      "name": "Local payment logs",
+      "service": "payment-service",
+      "environment": "test",
+      "backend": { "type": "local" },
+      "root": "/var/log/payment-service",
+      "files": ["application.log"]
+    }
+  ]
+}

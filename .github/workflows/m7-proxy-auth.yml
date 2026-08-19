@@ -1,0 +1,102 @@
+name: M7 Proxy Auth
+
+on:
+  push:
+    branches:
+      - "feat/**"
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/config_v2.rs"
+      - "src/secret.rs"
+      - "src/transport/**"
+      - "tests/m7_proxy_auth_live.rs"
+      - ".github/workflows/m7-proxy-auth.yml"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "src/config_v2.rs"
+      - "src/secret.rs"
+      - "src/transport/**"
+      - "tests/m7_proxy_auth_live.rs"
+      - ".github/workflows/m7-proxy-auth.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proxy-auth-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install OpenSSH and stdio proxy helper
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server netcat-openbsd
+          sudo mkdir -p /run/sshd /tmp/log-query-mcp-m7-auth
+          sudo chown "$USER":"$(id -gn)" /tmp/log-query-mcp-m7-auth
+          test -x /usr/bin/nc
+
+      - name: Prepare ProxyCommand key-auth fixture
+        run: |
+          sudo useradd -m -s /bin/bash logreader
+          echo 'logreader:unused-password' | sudo chpasswd
+          sudo mkdir -p /home/logreader/.ssh /home/logreader/logs
+          printf 'hello world from m7 proxy key auth\n' | sudo tee /home/logreader/logs/application.log >/dev/null
+          sudo chown -R logreader:logreader /home/logreader/logs
+          sudo chmod 444 /home/logreader/logs/application.log
+
+          ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-m7-auth/client_key_plain
+          ssh-keygen -q -t ed25519 -N 'm7-test-passphrase' -f /tmp/log-query-mcp-m7-auth/client_key_encrypted
+          cat /tmp/log-query-mcp-m7-auth/client_key_plain.pub /tmp/log-query-mcp-m7-auth/client_key_encrypted.pub | sudo tee /home/logreader/.ssh/authorized_keys >/dev/null
+          sudo chown -R logreader:logreader /home/logreader/.ssh
+          sudo chmod 700 /home/logreader/.ssh
+          sudo chmod 600 /home/logreader/.ssh/authorized_keys
+
+          sudo ssh-keygen -q -t ed25519 -N '' -f /tmp/log-query-mcp-m7-auth/ssh_host_ed25519_key
+          sudo tee /tmp/log-query-mcp-m7-auth/sshd_config >/dev/null <<'EOF'
+          Port 2240
+          ListenAddress 127.0.0.1
+          HostKey /tmp/log-query-mcp-m7-auth/ssh_host_ed25519_key
+          PidFile /tmp/log-query-mcp-m7-auth/sshd.pid
+          PasswordAuthentication no
+          PubkeyAuthentication yes
+          KbdInteractiveAuthentication no
+          ChallengeResponseAuthentication no
+          UsePAM no
+          PermitRootLogin no
+          StrictModes yes
+          AllowUsers logreader
+          AuthorizedKeysFile .ssh/authorized_keys
+          Subsystem sftp internal-sftp
+          LogLevel VERBOSE
+          EOF
+
+          sudo /usr/sbin/sshd -f /tmp/log-query-mcp-m7-auth/sshd_config -E /tmp/log-query-mcp-m7-auth/sshd.log
+          ssh-keyscan -t ed25519 -p 2240 127.0.0.1 > /tmp/log-query-mcp-m7-auth/known_hosts
+
+      - name: Check M7 Proxy auth code
+        run: |
+          cargo fmt --all -- --check
+          cargo check --locked --all-targets --all-features
+
+      - name: Verify unencrypted and encrypted private keys through ProxyCommand
+        env:
+          M7_AUTH_SSH_PORT: "2240"
+          M7_AUTH_KNOWN_HOSTS: /tmp/log-query-mcp-m7-auth/known_hosts
+          M7_AUTH_PROXY_PROGRAM: /usr/bin/nc
+          M7_AUTH_UNENCRYPTED_KEY_FILE: /tmp/log-query-mcp-m7-auth/client_key_plain
+          M7_AUTH_ENCRYPTED_KEY_FILE: /tmp/log-query-mcp-m7-auth/client_key_encrypted
+          M7_AUTH_KEY_PASSPHRASE: m7-test-passphrase
+          M7_AUTH_REMOTE_DIR: /home/logreader/logs
+          M7_AUTH_REMOTE_FILE: /home/logreader/logs/application.log
+        run: cargo test --locked --test m7_proxy_auth_live -- --ignored --test-threads=1 --nocapture
+
+      - name: Show sshd log on failure
+        if: failure()
+        run: sudo cat /tmp/log-query-mcp-m7-auth/sshd.log || true

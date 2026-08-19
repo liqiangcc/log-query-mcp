@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "sources": [
+    {
+      "source_id": "local-test",
+      "name": "Local test",
+      "service": "service-a",
+      "environment": "test",
+      "backend": { "type": "local" },
+      "root": "/var/log/service-a",
+      "files": ["application.log"],
+      "sync": {
+        "freshness": "on_query",
+        "bootstrap": { "type": "full" }
+      }
+    }
+  ]
+}
