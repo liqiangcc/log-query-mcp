@@ -4,7 +4,7 @@
 >
 > 最近核对：2026-08-19
 >
-> 当前结论：v2.0 发布范围已正式限定为 Local + Direct SSH/SFTP；本地 A～D、H 门禁、Direct/TUN 真实候选链路和 required Contracts/Rust/Release Actions 已通过。ProxyCommand 实现与测试保留为 post-v2 延后项；目标 Linux 生产验收、合并和正式发布仍未完成。
+> 当前结论：v2.0 发布范围已正式限定为 Local + Direct SSH/SFTP；本地 A～D、H 门禁、Direct/TUN 真实候选链路和 required Contracts/Rust/Release Actions 已通过。ProxyCommand 实现与测试保留为 post-v2 延后项；阶段 I 由 owner 明确豁免但未执行生产验收，合并和正式发布仍未完成。
 
 ### 本轮接手核对（2026-08-19）
 
@@ -507,9 +507,9 @@ TARGET=x86_64-unknown-linux-gnu bash scripts/rc_check.sh
 
 ### 阶段 I 实际状态（2026-08-19）
 
-- 状态：`待验收 / BLOCKED-ENV`；只读复核确认当前 WSL systemd service bus 正常，`log-query-mcp.service` 为 `active/running`、User=`log-query-mcp`、MainPID=`42188`，监听 `127.0.0.1:8000`，`bash scripts/healthcheck.sh` 返回 PASS；但没有可供本轮使用的目标 Linux 预生产/生产环境和操作者批准的生产安装、升级、重启或回滚入口。
-- 已保留本地 RC、Direct live 和性能证据；这些证据不能代签目标内核/glibc、systemd、权限、轮转、中断恢复、实际 AI 客户端、升级/回滚等生产项目。ProxyCommand 历史证据不属于 v2.0 release gate。
-- 在获得目标环境和明确授权前，不执行安装、重启、升级、回滚或真实配置修改。
+- 状态：`WAIVED / NOT EXECUTED`；owner 已明确本 RC 可以跳过阶段 I。只读复核仍确认当前 WSL systemd service bus 正常，`log-query-mcp.service` 为 `active/running`、User=`log-query-mcp`、MainPID=`42188`，监听 `127.0.0.1:8000`，`bash scripts/healthcheck.sh` 返回 PASS。
+- 本次豁免不等于生产 PASS：没有执行目标 Linux 预生产/生产环境的安装、升级、重启、回滚、轮转、中断恢复或实际生产 AI 客户端验收；WSL/Direct 证据不能代签这些项目。ProxyCommand 历史证据不属于 v2.0 release gate。
+- 阶段记录：owner 豁免决定（2026-08-19）；本手册不将阶段 I 标记为 PASS，发布说明必须明确“未完成生产验收”。
 
 ## 15. 阶段 J：PR Ready、合并和发布
 
@@ -539,7 +539,7 @@ reviewer
 
 ### 阶段 J 实际状态（2026-08-19）
 
-- 状态：`BLOCKED / 未进入发布操作`；阶段 A、G 已完成，阶段 I 的目标 Linux 生产验收、最终 RC review、PR Ready/merge 和独立 tag/release 授权仍未完成，不能直接创建 tag/release 或部署。Issue #27 的 protection fallback 已按 owner 决策接受，不再作为阻塞；ProxyCommand helper/Issue #26 不再是 v2.0 硬门禁，已转为 post-v2 跟踪。
+- 状态：`BLOCKED / 未进入发布操作`；阶段 A、G 已完成，阶段 I 已由 owner 豁免但未执行，最终 RC review、PR Ready/merge 和独立 tag/release 授权仍未完成，不能直接创建 tag/release 或部署。Issue #27 的 protection fallback 已按 owner 决策接受，不再作为阻塞；ProxyCommand helper/Issue #26 不再是 v2.0 硬门禁，已转为 post-v2 跟踪。
 - 独立 `release/v2-rc` 已推送并创建 Draft PR #30，当前 head=`5392d71`、base=`feat/v2-m1-backend-config`；不修改 `main` 或远端候选分支，不执行合并/tag/release/deploy。
 
 ### 15.3 Tag 和 Release
