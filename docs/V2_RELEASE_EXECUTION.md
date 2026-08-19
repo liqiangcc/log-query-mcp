@@ -4,21 +4,21 @@
 >
 > 最近核对：2026-08-19
 >
-> 当前结论：v2.0 发布范围已正式限定为 Local + Direct SSH/SFTP；本地 A～D、H 门禁、Direct/TUN 真实候选链路和 required Contracts/Rust/Release Actions 已通过。ProxyCommand 实现与测试保留为 post-v2 延后项；阶段 I 由 owner 明确豁免但未执行生产验收，合并和正式发布仍未完成。
+> 当前结论：v2.0 发布范围已正式限定为 Local + Direct SSH/SFTP；本地 A～D、H 门禁、Direct/TUN 真实候选链路和 required Contracts/Rust/Release Actions 已通过。ProxyCommand 实现与测试保留为 post-v2 延后项；阶段 I 由 owner 明确豁免但未执行生产验收，PR #30 已按授权标记为 Ready，但合并和正式发布仍未完成。
 
 ### 本轮接手核对（2026-08-19）
 
-- 本地/远端独立工作分支：`release/v2-rc`，从 `origin/feat/v2-m1-backend-config` 创建；当前已发布 head 为 `6ee2cd55e3fb30b229c02204d582b84dd1572401`（短 SHA：`6ee2cd5`）。冻结候选仍为 `848ae2d04a4f78d1acbe7d4708dbd48e4b183e1b`。
+- 本地/远端独立工作分支：`release/v2-rc`，从 `origin/feat/v2-m1-backend-config` 创建；当前已验证产品 head 为 `faa2842369f9fa5c30fb68c6bb0d7ceaacacb838`（短 SHA：`faa2842`），后续仅有本次状态记录文档提交。冻结候选仍为 `848ae2d04a4f78d1acbe7d4708dbd48e4b183e1b`。
 - `origin/main` 仍为 `ce2abf108da6c7e8e709ddbaa3992066807f83c3`；候选远端引用同步后无变化。
 - 工作区原有用户修改已保留：`README.md` 的文档索引变更和本手册文件；未覆盖或丢弃。
 - PR #25：open、Draft、未合并，head/base 与上述候选和 `main` 一致。
-- 独立 scope PR #30：open、Draft、未合并，head=`release/v2-rc`/`6ee2cd5`，base=`feat/v2-m1-backend-config`/`848ae2d`；仅用于在不改动候选分支的前提下运行本轮 v2.0 scope 变更的远端检查。
+- 独立 scope PR #30：open、Ready、未合并，head=`release/v2-rc`/`faa2842`（随后仅追加本手册状态记录），base=`feat/v2-m1-backend-config`/`848ae2d`；仅用于在不改动候选分支的前提下运行本轮 v2.0 scope 变更的远端检查。
 - Issue #23：open；Billing/Spending Limit 阻塞已解除，但按手册保持打开，直到目标验收和最终发布门禁完成。
-- Issue #26：已由本轮 scope decision 关闭，state reason=`not_planned`；原因是 ProxyCommand 已移出 v2.0 范围，不代表功能 PASS。Issue #27：open；owner 已明确本 RC 不需要 `main` branch protection，并接受手册定义的 procedural fallback，但这不等于 Ready/merge/tag/release 授权。
+- Issue #26：已由本轮 scope decision 关闭，state reason=`not_planned`；原因是 ProxyCommand 已移出 v2.0 范围，不代表功能 PASS。Issue #27：open；owner 已明确本 RC 不需要 `main` branch protection，并接受手册定义的 procedural fallback；PR #30 Ready 已单独获得授权，但这不等于 merge/tag/release 授权。
 - 本轮 scope decision 已落地在本地独立分支 commit `b680f73`：v2.0 package/example/required gates 改为 Direct-only；ProxyCommand 实现、测试和历史设计文档保留为 post-v2。
 - v2.0 RC 入口移除 post-v2 WSL evidence/manifest synthetic self-test 的清理提交为 `a02bc63`；RC 仍保留 contracts、Rust、package/lifecycle 等 v2.0 检查。
 - 候选 `848ae2d` 的最新 Actions runs（Contracts `31455716785`、Rust `31455716801`、Release `31455716807`、M7 ProxyCommand `31455716797`、Proxy Auth `31455716800`、Proxy Sync `31455716795`、ProxyCommand Failures `31455716794`、Mixed Query `31455716806`、Proxy Generation `31455716792`、Proxy Restart `31455716812`）均为 `completed/failure`，对应 job 的 `steps=null`；未执行 checkout/build/test/package，按外部 runner/Billing 阻塞处理，不能视为代码失败或 PASS。
-- 独立 PR #30 的 required Actions 已在 public 仓库标准 `ubuntu-latest` runner 上真实执行并通过：Contracts `32221530366`、Rust `32221530412`、Release `32221530335`；对应 checkout、fmt/Clippy、Rust tests/build、transport smoke、healthcheck、upgrade/rollback、package/checksum 步骤均有成功记录。Release 的 tag-only publish job 按预期 skipped。ProxyCommand/M7 旧 workflow 不属于 v2.0 required gate。
+- 独立 PR #30 的 required Actions 已在 public 仓库标准 `ubuntu-latest` runner 上真实执行并通过：Contracts `32224992356`、Rust `32224992337`、Release `32224992311`；对应 checkout、fmt/Clippy、Rust tests/build、transport smoke、healthcheck、upgrade/rollback、package/checksum 步骤均有成功记录。Release 的 tag-only publish job 按预期 skipped。ProxyCommand/M7 旧 workflow 不属于 v2.0 required gate。
 - 本机 `gh` CLI 当前已登录 `liqiangcc`，Git 操作使用 HTTPS；仓库当前 visibility=`public`。候选 SHA、PR/Issue 状态以最新远端事实为准；独立 scope PR #30 已记录为新的远端验证入口。
 
 ## 1. 最终目标
@@ -45,7 +45,7 @@
 main                              ce2abf108da6c7e8e709ddbaa3992066807f83c3
 origin/feat/v2-m1-backend-config  848ae2d04a4f78d1acbe7d4708dbd48e4b183e1b
 Draft PR                          #25
-独立 scope Draft PR               #30 (`release/v2-rc` -> `feat/v2-m1-backend-config`)
+独立 scope Ready PR               #30 (`release/v2-rc` -> `feat/v2-m1-backend-config`)
 外部阻塞 Issue                    #23
 ```
 
@@ -542,8 +542,8 @@ reviewer
 
 ### 阶段 J 实际状态（2026-08-19）
 
-- 状态：`BLOCKED / 未进入发布操作`；阶段 A、G 已完成，阶段 I 已由 owner 豁免但未执行，最终 RC review、PR Ready/merge 和独立 tag/release 授权仍未完成，不能直接创建 tag/release 或部署。Issue #27 的 protection fallback 已按 owner 决策接受，不再作为阻塞；ProxyCommand helper/Issue #26 不再是 v2.0 硬门禁，已转为 post-v2 跟踪。
-- 独立 `release/v2-rc` 已推送并创建 Draft PR #30，当前 head=`5392d71`、base=`feat/v2-m1-backend-config`；不修改 `main` 或远端候选分支，不执行合并/tag/release/deploy。
+- 状态：`BLOCKED / 未进入合并与发布操作`；阶段 A、G 已完成，阶段 I 已由 owner 豁免但未执行，PR #30 已按明确授权标记为 Ready；但 review/merge、独立 tag/release 授权仍未完成，不能直接创建 tag/release 或部署。Issue #27 的 protection fallback 已按 owner 决策接受，不再作为阻塞；ProxyCommand helper/Issue #26 不再是 v2.0 硬门禁，已转为 post-v2 跟踪。
+- 独立 `release/v2-rc` 已推送并创建 Ready PR #30，产品验证 head=`faa2842`、base=`feat/v2-m1-backend-config`；本次文档提交只记录 Ready 状态，不修改 `main` 或远端候选分支，不执行合并/tag/release/deploy。
 
 ### 15.3 Tag 和 Release
 
