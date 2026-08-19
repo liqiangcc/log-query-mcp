@@ -2,11 +2,11 @@
 
 > 用途：供后续 AI 或维护者从当前状态继续完成 Remote SSH/SFTP v2 的验证、合并与发布。
 >
-> 最近核对：2026-08-18
+> 最近核对：2026-08-19
 >
-> 当前结论：实现和测试工具基本齐备，但候选版本尚未完成最终门禁、真实 WSL/目标机验收、合并和正式发布。
+> 当前结论：本地 A～F、H 门禁和 Direct/TUN 真实 SSH/SFTP 候选链路已通过；ProxyCommand、目标 Linux 生产验收、合并和正式发布仍未完成。
 
-### 本轮接手核对（2026-08-18）
+### 本轮接手核对（2026-08-19）
 
 - 本地工作分支：`release/v2-rc`，从 `origin/feat/v2-m1-backend-config` 创建；验证候选仍为 `848ae2d04a4f78d1acbe7d4708dbd48e4b183e1b`。
 - `origin/main` 仍为 `ce2abf108da6c7e8e709ddbaa3992066807f83c3`；候选远端引用同步后无变化。
@@ -441,14 +441,16 @@ scripts/verify_m7_evidence.py
 
 完成标准：真实 stdio 与 systemd HTTP 两套验收均 PASS，manifest 完整且 evidence verifier PASS。
 
-### 阶段 G 实际状态（2026-08-18）
+### 阶段 G 实际状态（2026-08-19）
 
-- 状态：`BLOCKED-ENV / 未执行真实目标验收`；不能把本地 OpenSSH fixture、synthetic self-test 或静态预检记作 G PASS。
+- 状态：`部分 PASS / ProxyCommand BLOCKED-ENV`；Direct/TUN 真实目标候选链路已通过，但不能把它代替要求中的 Windows ProxyCommand systemd HTTP gate，也不能把本地 fixture、synthetic self-test 或静态预检记作完整 G PASS。
 - WSL 更新和重启后，当前 kernel 为 `6.18.33.2-microsoft-standard-WSL2`，PID 1 为 `systemd`，`systemctl` bus 为 `249.11`；既有 `log-query-mcp.service` 已以 `log-query-mcp` 用户运行（MainPID `162`，`ActiveState=active`，监听 `127.0.0.1:8000/mcp`），证明 systemd/service identity 这一部分前置已生效。操作者在同一 Ubuntu-22.04 交互式 root shell 和 `log-query-mcp` 用户下均成功执行 Windows `tasklist.exe`，因此 WSL interop 已确认；但 Windows `PATH` 中 `where ncat.exe` 和 `where nc.exe` 均未找到文件，当前没有可用于 ProxyCommand 的批准 TCP helper。
 - Windows 主机 `wsl --update` 已成功；`wsl --version` 报告 WSL `2.7.11.0`、kernel `6.18.33.2-2`、WSLg `1.0.73.2`、Windows `10.0.19045.6456`。当前安装的 `/opt/log-query-mcp/BUILDINFO` 仍是旧的 `v0.1.0` / `ce2abf108da6c7e8e709ddbaa3992066807f83c3`，不是本候选 `d608e946ddd3f6456ce7d7507567c8be0641cde7`；`/etc/log-query-mcp/config.json` 只有本地目录 source，未提供本次 M7 真实 Windows/VPN/SSH 目标配置。未手工替换或修改该服务，WSL 重启后由既有 unit 自动启动。
 - 当前 WSL 确有 `wsl-v2ray` TUN（`172.19.0.1/30`）；策略表 `2022` 通过 `172.19.0.2` 承接 `fwmark 0x2023`，而未带 mark 的普通目标路由仍经 `eth0` 默认网关。对用户提供的 Direct SSH 目标执行 TCP/SSH host-key 只读预检成功，但应用连接是否实际带 TUN mark 仍需在真实服务请求中确认。
 - 已在 `/etc/log-query-mcp/config-v2-direct.json` 准备未提交到仓库的 v2 Direct 配置：密码仅引用 `QAXCICD_SDWXB_PASSWORD`，远程文件为用户提供的单文件 source，无 `proxy` 字段；`/etc/log-query-mcp/known_hosts-v2-direct` 复用本机已有受信任 host key。配置 JSON Schema PASS，候选二进制以 `log-query-mcp` 用户在隔离 loopback 端口启动 PASS。
 - `/etc/log-query-mcp/secrets-v2-direct.env` 已配置 `QAXCICD_SDWXB_PASSWORD`，权限已修正为 `root:log-query-mcp 0640`。候选 v2 隔离进程以 `log-query-mcp` 用户完成 `initialize`、`tools/list`、`list_log_sources`、真实 SSH/SFTP 远程同步、`search_logs` 和 `get_log_context`：`Direct/TUN candidate MCP chain: PASS`（结果 1 条、上下文 5 行；未保存日志正文或 match_ref）。首次请求使用了不支持的 `newest_first`，按服务协议修正为 `oldest_first` 后通过，分类为测试请求错误而非产品失败。
+- 在 WSL 重启确认 systemd 后，使用与现有 unit 相同的 `NoNewPrivileges`、`PrivateTmp`、`ProtectSystem=strict`、`ProtectHome`、地址族和可写 cache 限制，以临时 unit `log-query-mcp-v2-direct-check.service` 启动候选二进制；MainPID `40383`、User `log-query-mcp`、`ActiveState=active`。该 systemd 身份下 Direct/TUN MCP 链路再次 PASS：`initialize`、`tools/list`、`list_log_sources`、真实 `search_logs`（结果 1 条）和 `get_log_context`（上下文 3 行）；临时 unit 随后已停止，旧服务仍为 PID `162`。首次 503 的根因是 `PrivateTmp` 隔离导致测试二进制放在 `/tmp` 后对 unit 不可见（退出码 127），不是远端连接、密码或产品错误。
+- 本次 Direct/TUN systemd 验证基于产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`；未保存 Secret、密码、完整日志正文或 `match_ref`。当前结果证明候选服务身份和 Direct SSH/SFTP 查询链路可用，但不证明应用层连接一定携带 TUN mark，也不替代 ProxyCommand helper gate。
 - `/etc/log-query-mcp/config.json` 及备份仍为旧 v1 本地 source；未覆盖、替换或重启旧 `v0.1.0` 服务。上述是 service identity 下的隔离候选进程验证，不是 production systemd MainPID 验收；原 M7 ProxyCommand 和完整真实目标 systemd HTTP gate 仍保持未执行。
 - 阻塞解除条件：在真实目标 WSL 上安装并以 `log-query-mcp` service identity 启动本候选包，提供已批准的 Windows helper、VPN/目标 SSH、strict known_hosts 和脱敏 marker，然后按 Runbook 生成同一次 run 的 stdio/HTTP evidence、manifest 并执行 verifier。
 
@@ -509,9 +511,9 @@ TARGET=x86_64-unknown-linux-gnu bash scripts/rc_check.sh
 
 完成标准：发布必需项有操作者、时间和证据；未执行项保持“待验收”，不得由 CI 代签。
 
-### 阶段 I 实际状态（2026-08-18）
+### 阶段 I 实际状态（2026-08-19）
 
-- 状态：`待验收 / BLOCKED-ENV`；当前 WSL 没有运行中的 systemd service bus，且没有可供本轮使用的目标 Linux 预生产/生产环境和操作者批准的 SSH/VPN 验收入口。
+- 状态：`待验收 / BLOCKED-ENV`；当前 WSL 的 systemd service bus 已在重启后确认正常，但没有可供本轮使用的目标 Linux 预生产/生产环境和操作者批准的生产安装、升级、重启或回滚入口。
 - 已保留本地 RC、Direct/ProxyCommand live 和性能证据；这些证据不能代签目标内核/glibc、systemd、权限、轮转、中断恢复、实际 AI 客户端、升级/回滚等生产项目。
 - 在获得目标环境和明确授权前，不执行安装、重启、升级、回滚或真实配置修改。
 
