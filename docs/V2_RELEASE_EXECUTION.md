@@ -8,16 +8,17 @@
 
 ### 本轮接手核对（2026-08-19）
 
-- 本地工作分支：`release/v2-rc`，从 `origin/feat/v2-m1-backend-config` 创建；验证候选仍为 `848ae2d04a4f78d1acbe7d4708dbd48e4b183e1b`。
+- 本地/远端独立工作分支：`release/v2-rc`，从 `origin/feat/v2-m1-backend-config` 创建；当前 head 为 `eab4ab29afe81c890f2398f2aef24ed85a454bb8`（短 SHA：`eab4ab2`）。冻结候选仍为 `848ae2d04a4f78d1acbe7d4708dbd48e4b183e1b`。
 - `origin/main` 仍为 `ce2abf108da6c7e8e709ddbaa3992066807f83c3`；候选远端引用同步后无变化。
 - 工作区原有用户修改已保留：`README.md` 的文档索引变更和本手册文件；未覆盖或丢弃。
 - PR #25：open、Draft、未合并，head/base 与上述候选和 `main` 一致。
+- 独立 scope PR #30：open、Draft、未合并，head=`release/v2-rc`/`eab4ab2`，base=`feat/v2-m1-backend-config`/`848ae2d`；仅用于在不改动候选分支的前提下运行本轮 v2.0 scope 变更的远端检查。
 - Issue #23：open，仍跟踪 GitHub Actions Billing/Spending Limit 与最终 CI/Performance/Release 门禁恢复。
 - Issue #26：已由本轮 scope decision 关闭，state reason=`not_planned`；原因是 ProxyCommand 已移出 v2.0 范围，不代表功能 PASS。Issue #27：open，`main` 发布保护/程序化 fallback 尚未完成。
 - 本轮 scope decision 已落地在本地独立分支 commit `b680f73`：v2.0 package/example/required gates 改为 Direct-only；ProxyCommand 实现、测试和历史设计文档保留为 post-v2。
 - v2.0 RC 入口移除 post-v2 WSL evidence/manifest synthetic self-test 的清理提交为 `a02bc63`；RC 仍保留 contracts、Rust、package/lifecycle 等 v2.0 检查。
 - 候选 `848ae2d` 的最新 Actions runs（Contracts `31455716785`、Rust `31455716801`、Release `31455716807`、M7 ProxyCommand `31455716797`、Proxy Auth `31455716800`、Proxy Sync `31455716795`、ProxyCommand Failures `31455716794`、Mixed Query `31455716806`、Proxy Generation `31455716792`、Proxy Restart `31455716812`）均为 `completed/failure`，对应 job 的 `steps=null`；未执行 checkout/build/test/package，按外部 runner/Billing 阻塞处理，不能视为代码失败或 PASS。
-- 本机 `gh` token 已失效且无法访问 GitHub API；上述 PR、Issue 和 Actions 事实已通过连接器重新核对。发布手册中的候选 SHA、PR/Issue 阻塞状态没有过期，无需改写为其他远端事实。
+- 本机 `gh` CLI 当前已登录 `liqiangcc`，Git 操作使用 HTTPS；PR、Issue 和 Actions 事实已重新核对。候选 SHA、PR/Issue 阻塞状态以冻结候选为准；独立 scope PR #30 已记录为新的远端验证入口。
 
 ## 1. 最终目标
 
@@ -43,6 +44,7 @@
 main                              ce2abf108da6c7e8e709ddbaa3992066807f83c3
 origin/feat/v2-m1-backend-config  848ae2d04a4f78d1acbe7d4708dbd48e4b183e1b
 Draft PR                          #25
+独立 scope Draft PR               #30 (`release/v2-rc` -> `feat/v2-m1-backend-config`)
 外部阻塞 Issue                    #23
 ```
 
@@ -350,7 +352,7 @@ post-v2 完成标准：上述工作流真实执行并全部 PASS，没有孤儿 
 ### 阶段 E 实际状态（2026-08-18）
 
 - 状态：`POST-V2 DEFERRED`；下列结果是历史本地 live 证据，不是 v2.0 required gate，也不改变本次正式 scope decision。验证基于产品代码 commit `d608e946ddd3f6456ce7d7507567c8be0641cde7`。
-- scope decision 记录 commit：`b680f73`（本地独立工作分支，尚未推送到远端候选分支）；v2.0 RC 入口不再执行 post-v2 WSL evidence/manifest self-test。
+- scope decision 记录 commit：`b680f73`（已包含在独立 `release/v2-rc` 分支，不写入远端候选分支）；v2.0 RC 入口不再执行 post-v2 WSL evidence/manifest self-test。
 - RC 入口最终清理 commit：`a02bc63`；本轮最终本地 RC 日志：`/tmp/log-query-mcp-v2-scope-rc-final.log`，末行明确为 `rc_check: PASS`。
 - 通过：ProxyCommand success/strict host key 2/2；Proxy auth 2/2；Proxy sync 5/5；failure matrix 8/8；mixed query 2/2；restart 3/3；generation 1/1；helper orphan 检查 PASS。
 - 失败处理：首次 mixed query 复用 Direct fixture 时缺少 `/home/logreader/logs/mixed.log`，导致两个测试出现 `SftpProtocol`；按 workflow 补充只读 `M7MIX remote` fixture 后复测 2/2 PASS。分类：测试夹具配置，不是产品代码失败。
@@ -538,7 +540,7 @@ reviewer
 ### 阶段 J 实际状态（2026-08-19）
 
 - 状态：`BLOCKED / 未进入发布操作`；阶段 A、G、I 尚未完成，GitHub runner/Billing、Issue #27 发布保护以及目标 Linux 生产验收仍是硬门禁，不能直接创建 tag/release 或部署。ProxyCommand helper/Issue #26 不再是 v2.0 硬门禁，已转为 post-v2 跟踪。
-- 本地工作分支 `release/v2-rc` 仅基于 `origin/feat/v2-m1-backend-config` 做候选验证；不修改 `main`，不推送候选远端分支，不执行合并/tag/release/deploy。
+- 独立 `release/v2-rc` 已推送并创建 Draft PR #30，head=`eab4ab2`、base=`feat/v2-m1-backend-config`；不修改 `main` 或远端候选分支，不执行合并/tag/release/deploy。
 
 ### 15.3 Tag 和 Release
 
